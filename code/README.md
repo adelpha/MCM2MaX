@@ -809,10 +809,9 @@ WalkLog=0
 ; they are. Default 0.
 FarTreeLog=0
 
-; TerrainLog: terrain statistics every 5 seconds and a check every frame for
-; spots where no terrain is drawn. Also turns on debug keys: Ctrl+F9 and
-; Ctrl+F10 turn the game's terrain culling off and on, Ctrl+F11 writes the
-; terrain and camera to the log. Default 0.
+; TerrainLog: terrain statistics every 5 seconds. Also turns on debug keys:
+; Ctrl+F9 turns the one-colour far terrain off and on, Ctrl+F10 the far
+; plane, Ctrl+F11 writes the terrain and camera to the log. Default 0.
 TerrainLog=0
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by

@@ -27,9 +27,11 @@
 // frame and logs what it finds, with statistics every 5 seconds.
 //
 // Debug keys (TerrainLog=1, game window in front):
-//   Ctrl+F9   sub-block culling off/on (0x482990 always "visible")
-//   Ctrl+F10  node culling off/on (0x482d50 sees every node fully inside)
+//   Ctrl+F9   one-colour far terrain off/on (threshold terrain+0xca4 held at 0)
+//   Ctrl+F10  far plane off/on (scene projection only, dd/device.cpp)
 //   Ctrl+F11  write the terrain tree (visible nodes) and the camera to the log
+// (terr-1 had culling switches on F9/F10: turning culling off did not fill
+// the gaps StOo sees, so they are gone.)
 #include <windows.h>
 
 #include <cstdint>
@@ -38,13 +40,14 @@
 #include "config.h"
 #include "patch.h"
 
+namespace dd {
+extern bool g_debug_no_far_plane;
+}
+
 namespace {
 
 constexpr uintptr_t kRenderCall = 0x50D090;  // call 4820e0 (terrain render step), ecx = root node
 constexpr uintptr_t kRender = 0x4820E0;
-constexpr uintptr_t kCullNodeCall = 0x482DAD;  // call 534be0 in 0x482d50 (node box)
-constexpr uintptr_t kCullSubCall = 0x482A62;   // call 534be0 in 0x482990 (sub-block box)
-constexpr uintptr_t kCull = 0x534BE0;
 constexpr uintptr_t kMeshCount = 0x690444;     // blocks meshed this frame
 constexpr uintptr_t kVbCount = 0x69043C;
 constexpr uintptr_t kVbBytes = 0x690440;
@@ -57,8 +60,6 @@ constexpr int kSubChild[16] = {0x00, 0x04, 0x40, 0x44, 0x08, 0x0C, 0x48, 0x4C,
                                0x80, 0x84, 0xC0, 0xC4, 0x88, 0x8C, 0xC8, 0xCC};
 
 using ThisVoid = int(__fastcall*)(void* self, void* edx);
-using CullFn = int(__fastcall*)(void* self, void* edx, void* a1, void* a2, void* a3, void* a4, int* a5,
-                                int* a6, void* a7);
 
 template <typename T>
 T At(const void* p, size_t off) {
@@ -67,6 +68,8 @@ T At(const void* p, size_t off) {
   return v;
 }
 
+bool g_far_colour_off = false;
+int g_saved_ca4 = -1;
 bool g_cull_sub_off = false;
 bool g_cull_node_off = false;
 
@@ -81,7 +84,7 @@ struct Stats {
 } g_st;
 
 unsigned g_hole_logs = 0;  // detailed hole lines written (capped)
-constexpr unsigned kMaxHoleLogs = 200;
+constexpr unsigned kMaxHoleLogs = 0;  // the hole check misreads leaf nodes; counts only
 
 // Vertex count of row-major sub-block e of a node's mesh.
 int SubVerts(const uint8_t* data, int e) {
@@ -231,20 +234,31 @@ bool OurWindowInFront() {
   return pid == GetCurrentProcessId();
 }
 
+// Ctrl+F9: the terrain's far branch (0x481c00 draws a block untextured in
+// one colour, terrain+0xc9c, once its texture detail falls under the detail
+// row's threshold terrain+0xca4) off, by holding that threshold at 0.
+
 void Keys(const uint8_t* root) {
   static bool f9 = false, f10 = false, f11 = false;
   const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && OurWindowInFront();
   const bool k9 = KeyPressed(VK_F9, f9), k10 = KeyPressed(VK_F10, f10), k11 = KeyPressed(VK_F11, f11);
-  if (!ctrl) return;
-  if (k9) {
-    g_cull_sub_off = !g_cull_sub_off;
-    patch::Log("terrain: sub-block culling %s (Ctrl+F9)", g_cull_sub_off ? "OFF" : "on");
+  uint8_t* terrain = At<uint8_t*>(root, 0x34);
+  if (ctrl && k9) {
+    g_far_colour_off = !g_far_colour_off;
+    patch::Log("terrain: one-colour far terrain %s (Ctrl+F9), threshold was %d", g_far_colour_off ? "OFF" : "on",
+               terrain ? At<int>(terrain, 0xCA4) : -1);
+    if (!g_far_colour_off && terrain && g_saved_ca4 >= 0) *reinterpret_cast<int*>(terrain + 0xCA4) = g_saved_ca4;
   }
-  if (k10) {
-    g_cull_node_off = !g_cull_node_off;
-    patch::Log("terrain: node culling %s (Ctrl+F10)", g_cull_node_off ? "OFF" : "on");
+  if (g_far_colour_off && terrain) {
+    const int v = At<int>(terrain, 0xCA4);
+    if (v) g_saved_ca4 = v;
+    *reinterpret_cast<int*>(terrain + 0xCA4) = 0;
   }
-  if (k11) Dump(root);
+  if (ctrl && k10) {
+    dd::g_debug_no_far_plane = !dd::g_debug_no_far_plane;
+    patch::Log("terrain: far plane %s (Ctrl+F10)", dd::g_debug_no_far_plane ? "OFF" : "on");
+  }
+  if (ctrl && k11) Dump(root);
 }
 
 void Report() {
@@ -255,12 +269,11 @@ void Report() {
   patch::Log(
       "terrain 5s: %u frames; per frame: nodes %.0f visible %.0f (max %u) collapsed %.0f, sub-blocks drawn %.0f "
       "culled %.0f, children %.0f, meshed %.1f (max %u); render step %.3f ms (max %.2f); vertex buffers %d "
-      "(%d KB); holes: collapsed %u, sub-block %u, child %u; culling sub %s node %s",
+      "(%d KB); far colour %s, far plane %s",
       g_st.frames, g_st.nodes / f, g_st.visible / f, g_st.max_visible, g_st.collapsed / f, g_st.subs_drawn / f,
       g_st.subs_culled / f, g_st.children_drawn / f, g_st.meshes / f, g_st.max_meshes, g_st.render_ms / f,
       g_st.max_render_ms, *reinterpret_cast<int*>(kVbCount), *reinterpret_cast<int*>(kVbBytes) / 1024,
-      g_st.holes_collapsed, g_st.holes_sub, g_st.holes_child, g_cull_sub_off ? "OFF" : "on",
-      g_cull_node_off ? "OFF" : "on");
+      g_far_colour_off ? "OFF" : "on", dd::g_debug_no_far_plane ? "OFF" : "on");
   g_st = Stats();
   g_st.start = now;
 }
@@ -289,37 +302,16 @@ int __fastcall RenderHook(void* root, void*) {
   return r;
 }
 
-int __fastcall CullNode(void* self, void* edx, void* a1, void* a2, void* a3, void* a4, int* a5, int* a6, void* a7) {
-  if (g_cull_node_off) {
-    if (a6) *a6 = 8;  // all eight box corners inside
-    return 1;
-  }
-  return reinterpret_cast<CullFn>(kCull)(self, edx, a1, a2, a3, a4, a5, a6, a7);
-}
-
-int __fastcall CullSub(void* self, void* edx, void* a1, void* a2, void* a3, void* a4, int* a5, int* a6, void* a7) {
-  if (g_cull_sub_off) {
-    if (a6) *a6 = 8;
-    return 1;
-  }
-  return reinterpret_cast<CullFn>(kCull)(self, edx, a1, a2, a3, a4, a5, a6, a7);
-}
-
 }  // namespace
 
 void ApplyTerrainFixes() {
   const Config& c = GetConfig();
   if (!c.terrain_log) return;
   const uint8_t call_render[] = {0xE8, 0x4B, 0x50, 0xF7, 0xFF};  // call 4820e0
-  const uint8_t call_cull_node[] = {0xE8, 0x2E, 0x1E, 0x0B, 0x00};  // call 534be0
-  const uint8_t call_cull_sub[] = {0xE8, 0x79, 0x21, 0x0B, 0x00};   // call 534be0
-  if (!patch::Matches(kRenderCall, call_render, 5) || !patch::Matches(kCullNodeCall, call_cull_node, 5) ||
-      !patch::Matches(kCullSubCall, call_cull_sub, 5)) {
+  if (!patch::Matches(kRenderCall, call_render, 5)) {
     patch::Log("terrain log: code differs, not applied");
     return;
   }
   patch::Call(kRenderCall, reinterpret_cast<const void*>(&RenderHook), 5);
-  patch::Call(kCullNodeCall, reinterpret_cast<const void*>(&CullNode), 5);
-  patch::Call(kCullSubCall, reinterpret_cast<const void*>(&CullSub), 5);
-  patch::Log("terrain log: on (Ctrl+F9 sub-block culling, Ctrl+F10 node culling, Ctrl+F11 dump)");
+  patch::Log("terrain log: on (Ctrl+F9 one-colour far terrain, Ctrl+F10 far plane, Ctrl+F11 dump)");
 }

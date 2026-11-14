@@ -1277,6 +1277,8 @@ HRESULT Device::SetTransform(DWORD type, D3DMATRIX* m) {
   return SetTransformNow(type, m);
 }
 
+bool g_debug_no_far_plane = false;
+
 HRESULT Device::SetTransformNow(DWORD type, D3DMATRIX* m) {
   switch (type) {
     case D3DTRANSFORMSTATE_WORLD:
@@ -1300,6 +1302,12 @@ HRESULT Device::SetTransformNow(DWORD type, D3DMATRIX* m) {
       if (m->m[2][3] != 0.0f && m->m[2][2] != 1.0f && m->m[2][2] != 0.0f) {
         const float zn = -m->m[3][2] / m->m[2][2], zf = m->m[3][2] / (1.0f - m->m[2][2]);
         LogOnce("projection near %.2f far %.0f", zn, zf);
+        // TerrainLog debug key (fixes_terrain.cpp): no far plane for scenes
+        // that have one under 50000 (the sky's own is ~100000).
+        if (g_debug_no_far_plane && zf < 50000.0f) {
+          proj_.m[2][2] = 1.0f;
+          proj_.m[3][2] = -zn;
+        }
       }
       break;
     }
