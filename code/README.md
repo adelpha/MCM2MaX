@@ -164,6 +164,13 @@ MipBias=0
 ; 2 = twice as far. Higher values cost frame rate.
 ViewDistance=1
 
+; TerrainLodFix: 1 = fixes a game bug that leaves gaps in distant hills
+; (sky showing through a ridge, trees standing on nothing) with a long
+; ViewDistance: the terrain's detail number for far blocks overflowed and
+; wrapped round instead of stopping at its top value (default). 0 = the
+; game's own behaviour.
+TerrainLodFix=1
+
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
 ; (default 1). 2 = fog starts twice as far away. Above 1, the edge of the
 ; drawn world may show through the fog unless ViewDistance is raised too.
@@ -809,10 +816,10 @@ WalkLog=0
 ; they are. Default 0.
 FarTreeLog=0
 
-; TerrainLog: terrain statistics every 5 seconds. Also turns on debug keys:
-; Ctrl+F9 gives the terrain caches 64 times the room, Ctrl+F10 meshes empty
-; terrain blocks again, Ctrl+F11 writes the terrain and camera to the log.
-; Default 0.
+; TerrainLog: terrain statistics every 5 seconds, including how often the
+; terrain detail number overflowed (see TerrainLodFix). Also turns on debug
+; keys: Ctrl+F9 switches TerrainLodFix on and off, Ctrl+F11 writes the
+; terrain and camera to the log. Default 0.
 TerrainLog=0
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by

@@ -32,6 +32,7 @@ struct Config {
   bool far_trees = true;      // FarTrees: far tree billboards drawn on the GPU (fartrees.cpp)
   bool far_tree_cells = true;  // FarTreeCells: grid cells holding only far trees are left out of the walk
   float far_tree_distance = 0;  // FarTreeDistance: from how far (0 = automatic)
+  bool terrain_lod_fix = true;  // TerrainLodFix: clamp the far-block detail number (fixes_terrain.cpp)
   int terrain_log = 0;  // TerrainLog: terrain statistics, hole checks and debug keys (fixes_terrain.cpp)
   int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)

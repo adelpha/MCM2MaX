@@ -1,6 +1,19 @@
-// Terrain diagnostics (TerrainLog): statistics, hole checks and debug keys
-// for finding why pieces of distant terrain go missing at long view
-// distances.
+// Terrain: TerrainLodFix (a game bug behind gaps in distant terrain at long
+// view distances) and TerrainLog diagnostics.
+//
+// TerrainLodFix: per node and frame, 0x482550 works out two detail numbers
+// from the camera's distance to the node's box (data+0x122 and +0x124,
+// 16 bits each; last frame's copies at +0x126 / +0x128). Eval (0x4836e0)
+// turns them into vertex counts through the byte table 0x66b3ec and
+// switches the vertices in between on or off. Most paths clamp the number
+// at 65535 (compare with 65535.0 at 0x556148), but one (0x4827f8, used when
+// the camera is level with or inside the box on one axis) converts with
+// 0x53a0f8 and stores the low 16 bits; its clamp (0x482820, cmp word,0xffff
+// / jbe) can never fire. With the game's 768-unit view the number stays
+// small; with ViewDistance=10 far blocks pass 65535, wrap round to a small
+// number and get the wrong vertices, which shows up as missing pieces of
+// distant hills. The fix replaces that conversion call (0x48280f) with one
+// that stops at 65535, as the other paths do.
 //
 // The game's terrain (object at the terrain manager, per-frame update
 // 0x50cdc0) is a tree of nodes. Each node is a 16x16-cell block with up to
@@ -8,32 +21,23 @@
 // file on demand by 0x483440). Per frame:
 //
 //  - Setup (0x482d20 -> 0x482d50): frustum test of each node's box
-//    (+0x44 min, +0x50 max) through 0x534be0; node+0x40 holds the visible
-//    parts: bit 0 the node, bits 1-4 its quadrants, bits 5-20 its 4x4
-//    sub-blocks (Z order). 0x483440 picks the level of detail: when the node
-//    is fine enough for its distance it is "collapsed" (data+0x121 bit 0)
-//    and drawn whole from its own mesh, otherwise its children are used.
+//    (+0x44 centre, +0x50 half size) through 0x534be0; node+0x40 holds the
+//    visible parts: bit 0 the node, bits 1-4 its quadrants, bits 5-20 its
+//    4x4 sub-blocks (Z order). Collapsed nodes (data+0x121 bit 0) are drawn
+//    whole from their own mesh, otherwise their children are used.
 //  - Eval (0x4836e0) and Mesh (0x47fec0): vertex activation and mesh builds
 //    for changed blocks (data+0x121 bit 1).
 //  - Render (0x4820e0): per visible sub-block a second frustum test
 //    (0x482990, box from the sub-block table at data+0x17c) sets the bit in
 //    data+0x178 the draw pass (0x4818b0 / 0x481a40 / 0x481c00) reads.
 //
-// A non-collapsed node draws the sub-blocks that still have triangles in
-// its own mesh; the others are covered by its children. A collapsed node
-// draws its whole mesh. So a visible spot is a hole when nothing there has
-// triangles: a collapsed node with an empty mesh, or a sub-block with no
-// triangles and no children to cover it. TerrainLog=1 checks that every
-// frame and logs what it finds, with statistics every 5 seconds.
-//
 // Debug keys (TerrainLog=1, game window in front):
-//   Ctrl+F9   terrain cache trim limits x64 / original
-//   Ctrl+F10  re-mesh visible collapsed blocks with an empty mesh, every frame
-// (terr-2 had one-colour far terrain and far plane switches: neither filled
-// the gaps.)
+//   Ctrl+F9   TerrainLodFix on / off
 //   Ctrl+F11  write the terrain tree (visible nodes) and the camera to the log
-// (terr-1 had culling switches on F9/F10: turning culling off did not fill
-// the gaps StOo sees, so they are gone.)
+// Ruled out on the way (terr-1..3, StOo's tests): culling, the far plane, the
+// one-colour far terrain, the terrain caches' trim limits, re-meshing empty
+// collapsed blocks (75% of collapsed blocks are empty normally), mcm2fix's
+// renderer (the gaps showed on Direct3D 9 with batching off too).
 #include <windows.h>
 
 #include <cstdint>
@@ -42,6 +46,104 @@
 #include "config.h"
 #include "patch.h"
 
+// TerrainLodFix state, shared with the stub below (C names for the asm).
+extern "C" {
+unsigned g_lod_fix = 0;        // clamp at 65535 (Ctrl+F9 flips it with TerrainLog=1)
+unsigned g_lod_calls = 0;      // conversions on the unclamped path
+unsigned g_lod_over = 0;       // ... of which over 65535
+unsigned g_lod_max = 0;        // largest value seen
+unsigned g_lod_ring_i = 0;     // last 16 overflows: node grid x/y and level, and the value
+unsigned g_lod_ring_node[16];
+unsigned g_lod_ring_value[16];
+long long g_lod_tmp = 0;
+float g_lod_limit = 65535.0f;
+void TerrainLodFtol();
+}
+
+#ifdef _MSC_VER
+// Replaces "call 53a0f8" at 0x48280f: st0 = the detail number (popped),
+// result in eax (edx high half, as 53a0f8 gives). esi = the node.
+__declspec(naked) void TerrainLodFtol() {
+  __asm {
+    inc g_lod_calls
+    fcom g_lod_limit
+    fnstsw ax
+    test ah, 41h
+    jnz original
+    fld st(0)
+    fistp g_lod_tmp
+    inc g_lod_over
+    mov eax, dword ptr g_lod_tmp
+    cmp eax, g_lod_max
+    jbe ring
+    mov g_lod_max, eax
+  ring:
+    mov ecx, g_lod_ring_i
+    and ecx, 15
+    mov g_lod_ring_value[ecx*4], eax
+    movzx edx, word ptr [esi+24h]
+    and edx, 0FFFh
+    movzx eax, word ptr [esi+26h]
+    and eax, 0FFFh
+    shl eax, 12
+    or edx, eax
+    movzx eax, byte ptr [esi+20h]
+    shl eax, 24
+    or edx, eax
+    mov g_lod_ring_node[ecx*4], edx
+    inc g_lod_ring_i
+    cmp g_lod_fix, 0
+    je original
+    fstp st(0)
+    mov eax, 0FFFFh
+    xor edx, edx
+    ret
+  original:
+    mov eax, 53A0F8h
+    jmp eax
+  }
+}
+#else
+asm(".text\n"
+    ".globl _TerrainLodFtol\n"
+    "_TerrainLodFtol:\n"
+    "  incl _g_lod_calls\n"
+    "  fcoms _g_lod_limit\n"
+    "  fnstsw %ax\n"
+    "  testb $0x41, %ah\n"
+    "  jnz 2f\n"
+    "  fld %st(0)\n"
+    "  fistpll _g_lod_tmp\n"
+    "  incl _g_lod_over\n"
+    "  movl _g_lod_tmp, %eax\n"
+    "  cmpl _g_lod_max, %eax\n"
+    "  jbe 1f\n"
+    "  movl %eax, _g_lod_max\n"
+    "1:\n"
+    "  movl _g_lod_ring_i, %ecx\n"
+    "  andl $15, %ecx\n"
+    "  movl %eax, _g_lod_ring_value(,%ecx,4)\n"
+    "  movzwl 0x24(%esi), %edx\n"
+    "  andl $0xFFF, %edx\n"
+    "  movzwl 0x26(%esi), %eax\n"
+    "  andl $0xFFF, %eax\n"
+    "  shll $12, %eax\n"
+    "  orl %eax, %edx\n"
+    "  movzbl 0x20(%esi), %eax\n"
+    "  shll $24, %eax\n"
+    "  orl %eax, %edx\n"
+    "  movl %edx, _g_lod_ring_node(,%ecx,4)\n"
+    "  incl _g_lod_ring_i\n"
+    "  cmpl $0, _g_lod_fix\n"
+    "  je 2f\n"
+    "  fstp %st(0)\n"
+    "  movl $0xFFFF, %eax\n"
+    "  xorl %edx, %edx\n"
+    "  ret\n"
+    "2:\n"
+    "  movl $0x53A0F8, %eax\n"
+    "  jmp *%eax\n");
+#endif
 
 namespace {
 
@@ -67,8 +169,6 @@ T At(const void* p, size_t off) {
   return v;
 }
 
-bool g_force_remesh = false;
-bool g_big_cache = false;
 bool g_cull_sub_off = false;
 bool g_cull_node_off = false;
 
@@ -82,7 +182,26 @@ struct Stats {
   DWORD start = 0;
 } g_st;
 
-unsigned g_hole_logs = 0;  // detailed hole lines written (capped)
+bool g_lod_hooked = false;
+
+// The last overflows (up to 16) since the previous report.
+void ReportOverNodes() {
+  const unsigned n = g_lod_ring_i < 16 ? g_lod_ring_i : 16;
+  if (!n) return;
+  char buf[16 * 32 + 1] = {};
+  char* p = buf;
+  for (unsigned i = 0; i < n; ++i) {
+    const unsigned v = g_lod_ring_node[i];
+    p += wsprintfA(p, " L%u@%u,%u=%u", v >> 24, v & 0xFFF, (v >> 12) & 0xFFF, g_lod_ring_value[i]);
+  }
+  patch::Log("terrain: detail number overflows (level@x,z=value):%s", buf);
+  g_lod_ring_i = 0;
+}
+
+unsigned g_hole_logs = 0;
+
+constexpr uintptr_t kLodCall = 0x48280F;  // call 53a0f8 (float to int), result stored as a word at 0x482814
+constexpr uintptr_t kFtol = 0x53A0F8;  // detailed hole lines written (capped)
 constexpr unsigned kMaxHoleLogs = 0;  // the hole check misreads leaf nodes; counts only
 
 // Vertex count of row-major sub-block e of a node's mesh.
@@ -121,7 +240,6 @@ void Walk(const uint8_t* n, int depth) {
   if ((flags & 1) && !(flags & 8)) {  // collapsed: whole mesh
     ++g_st.collapsed;
     if (At<int16_t>(d, 0x13C) == 0) {
-      if (g_force_remesh) const_cast<uint8_t*>(d)[0x121] |= 2;  // Ctrl+F10: mesh it again
       ++g_st.holes_collapsed;
       if (g_hole_logs < kMaxHoleLogs) {
         ++g_hole_logs;
@@ -234,34 +352,17 @@ bool OurWindowInFront() {
   return pid == GetCurrentProcessId();
 }
 
-// Ctrl+F9: the terrain's far branch (0x481c00 draws a block untextured in
-// one colour, terrain+0xc9c, once its texture detail falls under the detail
-// row's threshold terrain+0xca4) off, by holding that threshold at 0.
-
-// Ctrl+F9: the terrain update's cache trims (0x50cdc0: cache +0xc84 trimmed
-// when its unused part passes 1 MB, cache +0xc88 likewise down to 512 KB)
-// with 64 times the room.
-void SetCacheLimits(bool big) {
-  const uint32_t k = big ? 64 : 1;
-  const uint32_t a = 0x100000 * k, b = 0x80000 * k;
-  patch::Write(0x50CE30, &a, 4);
-  patch::Write(0x50CE4B, &a, 4);
-  patch::Write(0x50CE88, &a, 4);
-  patch::Write(0x50CE97, &b, 4);
-}
-
 void Keys(const uint8_t* root) {
-  static bool f9 = false, f10 = false, f11 = false;
+  static bool f9 = false, f11 = false;
   const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && OurWindowInFront();
-  const bool k9 = KeyPressed(VK_F9, f9), k10 = KeyPressed(VK_F10, f10), k11 = KeyPressed(VK_F11, f11);
+  const bool k9 = KeyPressed(VK_F9, f9), k11 = KeyPressed(VK_F11, f11);
   if (ctrl && k9) {
-    g_big_cache = !g_big_cache;
-    SetCacheLimits(g_big_cache);
-    patch::Log("terrain: cache trim limits %s (Ctrl+F9)", g_big_cache ? "x64" : "original");
-  }
-  if (ctrl && k10) {
-    g_force_remesh = !g_force_remesh;
-    patch::Log("terrain: re-mesh empty collapsed blocks %s (Ctrl+F10)", g_force_remesh ? "ON" : "off");
+    if (!g_lod_hooked) {
+      patch::Log("terrain: TerrainLodFix hook not installed (code differs); Ctrl+F9 does nothing");
+    } else {
+      g_lod_fix = !g_lod_fix;
+      patch::Log("terrain: TerrainLodFix %s (Ctrl+F9)", g_lod_fix ? "ON" : "off");
+    }
   }
   if (ctrl && k11) Dump(root);
 }
@@ -274,11 +375,14 @@ void Report() {
   patch::Log(
       "terrain 5s: %u frames; per frame: nodes %.0f visible %.0f (max %u) collapsed %.0f, sub-blocks drawn %.0f "
       "culled %.0f, children %.0f, meshed %.1f (max %u); render step %.3f ms (max %.2f); vertex buffers %d "
-      "(%d KB); empty collapsed blocks %.0f; cache x64 %s, re-mesh %s",
+      "(%d KB); empty collapsed blocks %.0f; detail number: %u conversions on the unclamped path, %u over 65535 "
+      "(largest %u), TerrainLodFix %s",
       g_st.frames, g_st.nodes / f, g_st.visible / f, g_st.max_visible, g_st.collapsed / f, g_st.subs_drawn / f,
       g_st.subs_culled / f, g_st.children_drawn / f, g_st.meshes / f, g_st.max_meshes, g_st.render_ms / f,
       g_st.max_render_ms, *reinterpret_cast<int*>(kVbCount), *reinterpret_cast<int*>(kVbBytes) / 1024,
-      g_st.holes_collapsed / f, g_big_cache ? "on" : "off", g_force_remesh ? "on" : "off");
+      g_st.holes_collapsed / f, g_lod_calls, g_lod_over, g_lod_max, !g_lod_hooked ? "not installed" : g_lod_fix ? "on" : "off");
+  ReportOverNodes();
+  g_lod_calls = g_lod_over = g_lod_max = 0;
   g_st = Stats();
   g_st.start = now;
 }
@@ -311,6 +415,18 @@ int __fastcall RenderHook(void* root, void*) {
 
 void ApplyTerrainFixes() {
   const Config& c = GetConfig();
+  if (c.terrain_lod_fix || c.terrain_log) {
+    const uint8_t call_ftol[] = {0xE8, 0xE4, 0x78, 0x0B, 0x00};  // call 53a0f8
+    const uint8_t store[] = {0x66, 0x89, 0x87, 0x22, 0x01, 0x00, 0x00};  // mov [edi+122h],ax
+    if (patch::Matches(kLodCall, call_ftol, 5) && patch::Matches(kLodCall + 5, store, sizeof(store))) {
+      g_lod_fix = c.terrain_lod_fix ? 1 : 0;
+      patch::Call(kLodCall, reinterpret_cast<const void*>(&TerrainLodFtol), 5);
+      g_lod_hooked = true;
+      patch::Log("terrain: TerrainLodFix %s (far-block detail number clamped at 65535)", g_lod_fix ? "on" : "off (counting only)");
+    } else {
+      patch::Log("terrain: TerrainLodFix: code differs, not applied");
+    }
+  }
   if (!c.terrain_log) return;
   const uint8_t call_render[] = {0xE8, 0x4B, 0x50, 0xF7, 0xFF};  // call 4820e0
   if (!patch::Matches(kRenderCall, call_render, 5)) {
@@ -318,5 +434,5 @@ void ApplyTerrainFixes() {
     return;
   }
   patch::Call(kRenderCall, reinterpret_cast<const void*>(&RenderHook), 5);
-  patch::Log("terrain log: on (Ctrl+F9 cache limits x64, Ctrl+F10 re-mesh empty blocks, Ctrl+F11 dump)");
+  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F11 dump)");
 }
