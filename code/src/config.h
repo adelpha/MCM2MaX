@@ -31,7 +31,7 @@ struct Config {
   bool walk_log = false;      // WalkLog: FastObjectWalk statistics every 5 s
   bool far_trees = true;      // FarTrees: far tree billboards drawn on the GPU (fartrees.cpp)
   float far_tree_distance = 0;  // FarTreeDistance: from how far (0 = automatic)
-  bool far_tree_log = false;  // FarTreeLog: statistics every 5 s and a check against the game's billboards
+  int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)
   bool batch_log = false;     // BatchLog: log draw batching every 5 s
   bool draw_log = false;      // DrawLog: measure which draw calls could be merged (dd/drawlog.cpp)

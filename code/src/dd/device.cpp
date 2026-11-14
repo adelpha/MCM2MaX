@@ -162,7 +162,7 @@ cbuffer TreeParams : register(b3) {
 VSOut vs_tree(uint id : SV_VertexID) {
   VSOut o;
   uint t = id / 6, c = id % 6;
-  uint corner = c < 3 ? c : (c == 3 ? 0 : c - 1);  // (0 1 2) (0 2 3)
+  uint corner = c < 3 ? c : (c == 3 ? 0 : c - 2);  // (0 1 2) (0 2 3)
   float4 a = ftrees.Load(t * 3);      // x, z, bottom y, top y
   float4 b = ftrees.Load(t * 3 + 1);  // left, right, H, -
   float4 u = ftrees.Load(t * 3 + 2);  // u right, u left, v top, v bottom

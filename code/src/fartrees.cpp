@@ -223,7 +223,7 @@ struct Stats {
   double draw_ms = 0;
   // FarTreeLog check against the game's billboards
   unsigned chk_frames = 0, chk_quads = 0, chk_matched = 0, chk_unmatched = 0, chk_bad = 0, chk_six = 0,
-           chk_pred_emit = 0, chk_pred_culled_but_drawn = 0, chk_overlap = 0;
+           chk_pred_emit = 0, chk_pred_culled_but_drawn = 0, chk_overlap = 0, chk_six_matched = 0;
   float chk_max_pos = 0, chk_max_uv = 0;
   unsigned chk_col_bad = 0;
 } g_st;
@@ -364,6 +364,7 @@ extern "C" void FarTreesStateDone(void* mgr, const uint8_t* base) {
   f.six_a8 = g_pass.six_a8;
   f.six_84 = g_pass.six_84;
   f.diffuse = 0xFF000000u | (At<uint32_t>(base, 0x20) & 0xFFFFFF);
+  if (GetConfig().far_tree_log >= 2) f.diffuse = 0xFFFF4040u;  // FarTreeLog=2: tinted, to tell them apart
   const uint8_t* vb = At<const uint8_t*>(mgr, 0x50);
   f.specular = vb ? At<uint32_t>(vb, 0x14) : 0;
   f.trees = g_reg.nums.data();
@@ -438,59 +439,62 @@ void FarTreesCheckDraw(const void* verts, unsigned nverts, const uint16_t* idx, 
   }
   ++g_st.chk_frames;
   // The draw's quads: 4-vertex billboards (b, b+1, b+2, b, b+2, b+3) and
-  // bent ones (6 vertices, 12 indices).
+  // bent ones (6 vertices, 12 indices: (b b+4 b+5) ...), whose outer four
+  // vertices are the same quad (the bend only adds a lit centre line).
   for (unsigned i = 0; i + 6 <= nidx;) {
     const uint16_t b = idx[i];
+    bool bent = false;
     if (idx[i + 1] == b + 1 && idx[i + 2] == b + 2 && idx[i + 3] == b && idx[i + 4] == b + 2 && idx[i + 5] == b + 3) {
       i += 6;
-      if (b + 3u >= nverts) break;
-      ++g_st.chk_quads;
-      float a[4][5];
-      uint32_t col[4];
-      for (int k = 0; k < 4; ++k) {
-        const uint8_t* p = v + (b + k) * 32u;
-        std::memcpy(a[k], p, 12);
-        std::memcpy(&a[k][3], p + 0x18, 8);
-        std::memcpy(&col[k], p + 0x10, 4);
-      }
-      // The prediction with the nearest first vertex.
-      const Pred* best = nullptr;
-      float bd = 1e30f;
-      for (const Pred& p : preds) {
-        const float dx = p.v[0][0] - a[0][0], dz = p.v[0][2] - a[0][2];
-        const float d = dx * dx + dz * dz;
-        if (d < bd) bd = d, best = &p;
-      }
-      if (!best || bd > 1.0f) {
-        ++g_st.chk_unmatched;
-        if (g_st.chk_unmatched <= 3)
-          patch::Log("far trees: check: billboard at (%.2f %.2f %.2f) matches no tree of the list (nearest %.2f away)",
-                     a[0][0], a[0][1], a[0][2], std::sqrt(bd));
-        continue;
-      }
-      ++g_st.chk_matched;
-      if (!best->emit4) ++g_st.chk_pred_culled_but_drawn;
-      float ep = 0, eu = 0;
-      for (int k = 0; k < 4; ++k) {
-        for (int c = 0; c < 3; ++c) ep = std::max(ep, std::fabs(best->v[k][c] - a[k][c]));
-        for (int c = 3; c < 5; ++c) eu = std::max(eu, std::fabs(best->v[k][c] - a[k][c]));
-        if (col[k] != best->col) ++g_st.chk_col_bad;
-      }
-      g_st.chk_max_pos = std::max(g_st.chk_max_pos, ep);
-      g_st.chk_max_uv = std::max(g_st.chk_max_uv, eu);
-      if ((ep > 0.05f || eu > 0.001f || col[0] != best->col) && ++g_st.chk_bad <= 3)
-        patch::Log("far trees: check: billboard differs (pos %.3f, uv %.4f): game v0 (%.3f %.3f %.3f | %.4f %.4f) "
-                   "v2 (%.3f %.3f %.3f | %.4f %.4f) colour %08x; ours v0 (%.3f %.3f %.3f | %.4f %.4f) "
-                   "v2 (%.3f %.3f %.3f | %.4f %.4f) colour %08x",
-                   ep, eu, a[0][0], a[0][1], a[0][2], a[0][3], a[0][4], a[2][0], a[2][1], a[2][2], a[2][3], a[2][4],
-                   col[0], best->v[0][0], best->v[0][1], best->v[0][2], best->v[0][3], best->v[0][4], best->v[2][0],
-                   best->v[2][1], best->v[2][2], best->v[2][3], best->v[2][4], best->col);
     } else if (i + 12 <= nidx && idx[i + 1] == b + 4 && idx[i + 2] == b + 5) {
-      ++g_st.chk_six;
+      bent = true;
       i += 12;
     } else {
       ++i;
+      continue;
     }
+    if (b + (bent ? 5u : 3u) >= nverts) break;
+    ++(bent ? g_st.chk_six : g_st.chk_quads);
+    float a[4][5];
+    uint32_t col[4];
+    for (int k = 0; k < 4; ++k) {
+      const uint8_t* p = v + (b + k) * 32u;
+      std::memcpy(a[k], p, 12);
+      std::memcpy(&a[k][3], p + 0x18, 8);
+      std::memcpy(&col[k], p + 0x10, 4);
+    }
+    // The prediction with the nearest first vertex.
+    const Pred* best = nullptr;
+    float bd = 1e30f;
+    for (const Pred& p : preds) {
+      const float dx = p.v[0][0] - a[0][0], dz = p.v[0][2] - a[0][2];
+      const float d = dx * dx + dz * dz;
+      if (d < bd) bd = d, best = &p;
+    }
+    if (!best || bd > 1.0f) {
+      ++g_st.chk_unmatched;
+      if (g_st.chk_unmatched <= 3)
+        patch::Log("far trees: check: %s billboard at (%.2f %.2f %.2f) matches no tree of the list (nearest %.2f away)",
+                   bent ? "bent" : "flat", a[0][0], a[0][1], a[0][2], std::sqrt(bd));
+      continue;
+    }
+    ++(bent ? g_st.chk_six_matched : g_st.chk_matched);
+    if (!bent && !best->emit4) ++g_st.chk_pred_culled_but_drawn;
+    float ep = 0, eu = 0;
+    for (int k = 0; k < 4; ++k) {
+      for (int c = 0; c < 3; ++c) ep = std::max(ep, std::fabs(best->v[k][c] - a[k][c]));
+      for (int c = 3; c < 5; ++c) eu = std::max(eu, std::fabs(best->v[k][c] - a[k][c]));
+      if (!bent && GetConfig().far_tree_log < 2 && col[k] != best->col) ++g_st.chk_col_bad;
+    }
+    g_st.chk_max_pos = std::max(g_st.chk_max_pos, ep);
+    g_st.chk_max_uv = std::max(g_st.chk_max_uv, eu);
+    if ((ep > 0.05f || eu > 0.001f || (!bent && GetConfig().far_tree_log < 2 && col[0] != best->col)) && ++g_st.chk_bad <= 3)
+      patch::Log("far trees: check: %s billboard differs (pos %.3f, uv %.4f): game v0 (%.3f %.3f %.3f | %.4f %.4f) "
+                 "v2 (%.3f %.3f %.3f | %.4f %.4f) colour %08x; ours v0 (%.3f %.3f %.3f | %.4f %.4f) "
+                 "v2 (%.3f %.3f %.3f | %.4f %.4f) colour %08x",
+                 bent ? "bent" : "flat", ep, eu, a[0][0], a[0][1], a[0][2], a[0][3], a[0][4], a[2][0], a[2][1],
+                 a[2][2], a[2][3], a[2][4], col[0], best->v[0][0], best->v[0][1], best->v[0][2], best->v[0][3],
+                 best->v[0][4], best->v[2][0], best->v[2][1], best->v[2][2], best->v[2][3], best->v[2][4], best->col);
   }
 }
 
@@ -509,11 +513,11 @@ void MaybeLog() {
                g_st.other_tex / p, g_st.draws, g_st.draws ? g_st.draw_ms / g_st.draws : 0.0, g_st.missed,
                g_st.empty_runs, g_st.resets, g_st.draw_fail);
     if (g_st.chk_frames)
-      patch::Log("far trees 5s check: %u frames, %u game billboards: %u matched (%u differ: max pos %.4f uv %.5f, "
-                 "%u vertex colours), %u unmatched, %u bent; list trees the builder should draw %u, matched ones "
+      patch::Log("far trees 5s check: %u frames, game billboards %u flat (%u matched) + %u bent (%u matched); "
+                 "%u differ (max pos %.4f uv %.5f, %u vertex colours), %u unmatched; list trees the builder should draw %u, matched ones "
                  "we would have culled %u; near trees we would also draw (overlap) %u",
-                 g_st.chk_frames, g_st.chk_quads, g_st.chk_matched, g_st.chk_bad, g_st.chk_max_pos, g_st.chk_max_uv,
-                 g_st.chk_col_bad, g_st.chk_unmatched, g_st.chk_six, g_st.chk_pred_emit, g_st.chk_pred_culled_but_drawn,
+                 g_st.chk_frames, g_st.chk_quads, g_st.chk_matched, g_st.chk_six, g_st.chk_six_matched, g_st.chk_bad,
+                 g_st.chk_max_pos, g_st.chk_max_uv, g_st.chk_col_bad, g_st.chk_unmatched, g_st.chk_pred_emit, g_st.chk_pred_culled_but_drawn,
                  g_st.chk_overlap);
   }
   g_st = Stats{};

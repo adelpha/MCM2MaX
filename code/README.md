@@ -799,7 +799,8 @@ WalkLog=0
 ; FarTreeLog: with FarTrees, every 5 seconds how many trees are drawn by the
 ; graphics card and how many are left to the game, and now and then a check
 ; of the game's own billboards against the numbers far trees are drawn
-; from. Default 0.
+; from. 2 also tints the trees drawn by the graphics card red, to see which
+; they are. Default 0.
 FarTreeLog=0
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by

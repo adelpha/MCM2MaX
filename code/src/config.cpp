@@ -145,7 +145,7 @@ void LoadConfig() {
   g_config.far_trees = GetPrivateProfileIntA("mcm2fix", "FarTrees", 1, ini) != 0;
   g_config.far_tree_distance = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "FarTreeDistance", 0, ini));
   if (g_config.far_tree_distance < 0) g_config.far_tree_distance = 0;
-  g_config.far_tree_log = GetPrivateProfileIntA("mcm2fix", "FarTreeLog", 0, ini) != 0;
+  g_config.far_tree_log = GetPrivateProfileIntA("mcm2fix", "FarTreeLog", 0, ini);
   g_config.batch_log = GetPrivateProfileIntA("mcm2fix", "BatchLog", 0, ini) != 0;
   g_config.draw_log = GetPrivateProfileIntA("mcm2fix", "DrawLog", 0, ini) != 0;
   {
