@@ -13,5 +13,8 @@ void InstallRaceTitleHooks();
 void RaceTitleNewFrame();
 // The game ended a scene on `rt`: draw the title over it (once per frame).
 void RaceTitleDraw(Surface* rt);
+// A short debug message (debug keys), shown at the top of the screen for
+// three seconds (GPU text only). Any thread.
+void DebugNotice(const char* text);
 
 }  // namespace dd

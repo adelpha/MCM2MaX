@@ -170,9 +170,9 @@ ViewDistance=1
 ; number has not been seen to reach the top so far, even with ViewDistance=10.)
 TerrainLodFix=1
 
-; TerrainDetail: how finely distant terrain is built, 1 to 64 (default 1, the
-; game's own). The game simplifies far hills more than near ones; higher
-; values keep more of their shape, at some cost in frame rate.
+; TerrainDetail: how finely the terrain is built, 0.25 to 8 (default 1, the
+; game's own). Above 1, hills keep more of their shape further away, at some
+; cost in frame rate; below 1, less.
 TerrainDetail=1
 
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
@@ -823,7 +823,8 @@ FarTreeLog=0
 ; TerrainLog: terrain statistics every 5 seconds, including how often the
 ; terrain detail number overflowed (see TerrainLodFix). Also turns on debug
 ; keys: Ctrl+F9 switches TerrainLodFix on and off, Ctrl+F10 steps
-; TerrainDetail through 4, 16 and 64 times its value and back, Ctrl+F11 writes the
+; TerrainDetail through 2, 4, 0.5 and 0.25 times its value and back (shown
+; on screen), Ctrl+F11 writes the
 ; terrain and camera to the log and probes the point under the mouse cursor
 ; (every draw and terrain block there; Direct3D 11 only). 2 also looks for
 ; holes in the terrain every 2 seconds and logs the ones it finds. Default 0.
