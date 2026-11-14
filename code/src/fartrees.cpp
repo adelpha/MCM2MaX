@@ -49,7 +49,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <unordered_map>
 #include <vector>
 
 #include "config.h"
@@ -244,7 +243,50 @@ struct CellInfo {
   bool pure = false;
   float x0 = 0, x1 = 0, z0 = 0, z1 = 0, hmax = 0;
 };
-std::unordered_map<const void*, CellInfo> g_cells;
+// Open addressing on the cell record's address: one cache line per cell
+// looked up (a node-based map cost a second miss per cell per frame).
+struct CellTable {
+  struct Slot {
+    const void* rec = nullptr;
+    CellInfo info;
+  };
+  std::vector<Slot> slots;
+  size_t used = 0;
+  size_t size() const { return used; }
+  void clear() {
+    slots.assign(slots.empty() ? 1 << 14 : slots.size(), Slot{});
+    used = 0;
+  }
+  static size_t Hash(const void* p) {
+    uint32_t v = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p)) >> 3;
+    v ^= v >> 15;
+    v *= 0x2C1B3C6Du;
+    v ^= v >> 12;
+    return v;
+  }
+  CellInfo& operator[](const void* rec) {
+    if (slots.empty()) slots.assign(1 << 14, Slot{});
+    if ((used + 1) * 2 > slots.size()) {
+      std::vector<Slot> old(slots.size() * 2);
+      old.swap(slots);
+      for (const Slot& o : old)
+        if (o.rec) {
+          size_t h = Hash(o.rec) & (slots.size() - 1);
+          while (slots[h].rec) h = (h + 1) & (slots.size() - 1);
+          slots[h] = o;
+        }
+    }
+    const size_t mask = slots.size() - 1;
+    size_t h = Hash(rec) & mask;
+    while (slots[h].rec && slots[h].rec != rec) h = (h + 1) & mask;
+    if (!slots[h].rec) {
+      slots[h].rec = rec;
+      slots[h].info = CellInfo{};
+      ++used;
+    }
+    return slots[h].info;
+  }
+} g_cells;
 
 // This pass's rule (FarTreesPassStart).
 struct Pass {
