@@ -9,6 +9,7 @@
 #include "gputext.h"
 #include "hudtext.h"
 #include "racetitle.h"
+#include "probe.h"
 #include "reflect.h"
 #include "../fartrees.h"
 
@@ -1134,6 +1135,7 @@ HRESULT Device::BeginScene() {
 }
 HRESULT Device::EndScene() {
   FlushBatch(kBreakScene);
+  ProbeEndScene();
   WalkSceneEnd();  // FastObjectWalk: the scene's object list is done
   if (ReflectMode() && !IsD3D9()) {
     PROF_ZONE(kReflect);
@@ -1426,6 +1428,11 @@ HRESULT Device::DrawPrimitive(DWORD prim, DWORD fvf, void* v, DWORD n, DWORD) {
   d.layout = FvfLayout::From(fvf);
   d.count = n;
   d.game_verts = d.verts;
+  if (ProbeStage())
+    ProbeDraw(0, prim, fvf, d.layout.tl, static_cast<const uint8_t*>(v), d.layout.stride, n, nullptr, 0,
+              &world_.m[0][0], &view_.m[0][0], &proj_.m[0][0], Wvp(), static_cast<float>(viewport_.dwX),
+              static_cast<float>(viewport_.dwY), static_cast<float>(viewport_.dwWidth),
+              static_cast<float>(viewport_.dwHeight), rs_[RS_ZENABLE] != 0);
   SmoothNoteDraw("draw", d.layout.tl, n);
   if (!d.layout.tl) {
     PROF_ZONE(kSmoothVerts);
@@ -1473,6 +1480,11 @@ HRESULT Device::DrawIndexedPrimitive(DWORD prim, DWORD fvf, void* v, DWORD nv, W
   d.idx = idx;
   d.nidx = ni;
   d.game_verts = d.verts;
+  if (ProbeStage())
+    ProbeDraw(site, prim, fvf, d.layout.tl, static_cast<const uint8_t*>(v), d.layout.stride, nv, idx, ni,
+              &world_.m[0][0], &view_.m[0][0], &proj_.m[0][0], Wvp(), static_cast<float>(viewport_.dwX),
+              static_cast<float>(viewport_.dwY), static_cast<float>(viewport_.dwWidth),
+              static_cast<float>(viewport_.dwHeight), rs_[RS_ZENABLE] != 0);
   SmoothNoteDraw("drawidx", d.layout.tl, d.count);
   if (!d.layout.tl) {
     PROF_ZONE(kSmoothVerts);

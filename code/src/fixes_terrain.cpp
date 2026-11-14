@@ -33,7 +33,10 @@
 //
 // Debug keys (TerrainLog=1, game window in front):
 //   Ctrl+F9   TerrainLodFix on / off
-//   Ctrl+F11  write the terrain tree (visible nodes) and the camera to the log
+//   Ctrl+F11  write the terrain tree (visible nodes) and the camera to the log,
+//             and probe the point under the mouse cursor: the next frames
+//             log every draw with a triangle over it (dd/probe.cpp) and
+//             every node whose box covers it
 // Ruled out on the way (terr-1..3, StOo's tests): culling, the far plane, the
 // one-colour far terrain, the terrain caches' trim limits, re-meshing empty
 // collapsed blocks (75% of collapsed blocks are empty normally), mcm2fix's
@@ -44,6 +47,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "dd/probe.h"
 #include "patch.h"
 
 // TerrainLodFix state, shared with the stub below (C names for the asm).
@@ -339,6 +343,112 @@ void Dump(const uint8_t* root) {
   patch::Log("tdump end: %u nodes", lines);
 }
 
+
+// Ctrl+F11 probe: every node (visible or not, at any depth) whose box covers
+// the probed point, with which of its sub-blocks do.
+struct ProbeCtx {
+  float m[16];
+  float nx, ny;
+  unsigned lines;
+};
+
+// Does the box (centre c, half size h) cover the point on screen?
+// 2 = yes, with a corner behind the camera (so not certain), 1 = yes, 0 = no.
+int BoxCovers(const ProbeCtx& p, const float* c, const float* h, float* depth) {
+  float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f, wmin = 1e30f;
+  bool behind = false;
+  for (int i = 0; i < 8; ++i) {
+    const float q[3] = {c[0] + (i & 1 ? h[0] : -h[0]), c[1] + (i & 2 ? h[1] : -h[1]), c[2] + (i & 4 ? h[2] : -h[2])};
+    const float* m = p.m;
+    const float x = q[0] * m[0] + q[1] * m[4] + q[2] * m[8] + m[12];
+    const float y = q[0] * m[1] + q[1] * m[5] + q[2] * m[9] + m[13];
+    const float w = q[0] * m[3] + q[1] * m[7] + q[2] * m[11] + m[15];
+    if (w <= 1e-3f) {
+      behind = true;
+      continue;
+    }
+    if (w < wmin) wmin = w;
+    const float sx = x / w, sy = y / w;
+    if (sx < x0) x0 = sx;
+    if (sx > x1) x1 = sx;
+    if (sy < y0) y0 = sy;
+    if (sy > y1) y1 = sy;
+  }
+  *depth = wmin;
+  if (behind) return 2;
+  return (p.nx >= x0 && p.nx <= x1 && p.ny >= y0 && p.ny <= y1) ? 1 : 0;
+}
+
+void ProbeNode(ProbeCtx& p, const uint8_t* n, int depth) {
+  if (!n || depth > 12 || p.lines >= 400) return;
+  const float* c = reinterpret_cast<const float*>(n + 0x44);
+  const float* h = reinterpret_cast<const float*>(n + 0x50);
+  float dist = 0;
+  const int cov = BoxCovers(p, c, h, &dist);
+  if (!cov) return;
+  const uint8_t* d = At<const uint8_t*>(n, 0x38);
+  // Sub-blocks over the point (row-major e = row * 4 + col; col along x,
+  // row along z; y from the sub-block table).
+  char subs[16 * 16 + 1] = {};
+  char* sp = subs;
+  const uint8_t* t = d ? At<const uint8_t*>(d, 0x17C) : nullptr;
+  if (t && cov == 1) {
+    for (int e = 0; e < 16; ++e) {
+      const float sc[3] = {c[0] - h[0] + (e % 4 + 0.5f) * h[0] / 2, At<float>(t, e * 12 + 4),
+                           c[2] - h[2] + (e / 4 + 0.5f) * h[2] / 2};
+      const float sh[3] = {h[0] / 4, At<float>(t, e * 12 + 8), h[2] / 4};
+      float sd = 0;
+      if (BoxCovers(p, sc, sh, &sd)) sp += wsprintfA(sp, "%d:%d ", e, SubVerts(d, e));
+    }
+  }
+  ++p.lines;
+  patch::Log("probe node %*s%p L%u @%u,%u %s dist %.0f vis %06x fl %02x v %d dr %04x kids %d tex %d box %.0f %.0f %.0f "
+             "+- %.0f %.0f %.0f; subs over point (e:verts) %s",
+             depth, "", n, At<uint16_t>(n, 0x20), At<uint16_t>(n, 0x24), At<uint16_t>(n, 0x26),
+             cov == 2 ? "PARTLY-BEHIND" : "covers", dist, At<uint32_t>(n, 0x40), d ? At<uint8_t>(d, 0x121) : 0xFF,
+             d ? At<int16_t>(d, 0x13C) : -1, d ? At<uint16_t>(d, 0x178) : 0, At<void*>(n, 4) ? 1 : 0,
+             (At<void*>(n, 0x3C) && At<void*>(At<uint8_t*>(n, 0x3C), 8)) ? 1 : 0, c[0], c[1], c[2], h[0], h[1], h[2],
+             subs);
+  if (cov == 2) {
+    // Too near the camera to say: only follow it when it holds the camera's
+    // own block, which is never the far gap; skip.
+    return;
+  }
+  const uint8_t* const* kids = At<const uint8_t* const*>(n, 4);
+  if (!kids) return;
+  for (int i = 0; i < 256; ++i)
+    if (kids[i]) ProbeNode(p, kids[i], depth + 1);
+}
+
+bool g_probe_walked = false;
+
+void ProbeTerrain(const uint8_t* root) {
+  if (dd::ProbeStage() != 2) {
+    g_probe_walked = false;
+    return;
+  }
+  if (g_probe_walked) return;
+  g_probe_walked = true;
+  ProbeCtx p{};
+  if (!dd::ProbeTerrainView(p.m, &p.nx, &p.ny)) return;
+  patch::Log("probe: terrain nodes over the point (any state):");
+  ProbeNode(p, root, 0);
+  patch::Log("probe: %u node lines%s", p.lines, p.lines >= 400 ? " (cut at 400)" : "");
+}
+
+void ArmProbe() {
+  POINT pt;
+  HWND w = GetForegroundWindow();
+  RECT rc;
+  if (!GetCursorPos(&pt) || !ScreenToClient(w, &pt) || !GetClientRect(w, &rc) || rc.right <= 0 || rc.bottom <= 0) {
+    patch::Log("probe: no cursor position");
+    return;
+  }
+  patch::Log("probe: cursor at %ld,%ld of %ldx%ld", static_cast<long>(pt.x), static_cast<long>(pt.y),
+             static_cast<long>(rc.right), static_cast<long>(rc.bottom));
+  dd::ProbeArm(2.0f * (pt.x + 0.5f) / rc.right - 1.0f, 1.0f - 2.0f * (pt.y + 0.5f) / rc.bottom);
+}
+
 bool KeyPressed(int vk, bool& was) {
   const bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
   const bool hit = down && !was;
@@ -364,7 +474,10 @@ void Keys(const uint8_t* root) {
       patch::Log("terrain: TerrainLodFix %s (Ctrl+F9)", g_lod_fix ? "ON" : "off");
     }
   }
-  if (ctrl && k11) Dump(root);
+  if (ctrl && k11) {
+    Dump(root);
+    ArmProbe();
+  }
 }
 
 void Report() {
@@ -406,6 +519,7 @@ int __fastcall RenderHook(void* root, void*) {
   const unsigned vis = static_cast<unsigned>(g_st.visible - before);
   if (vis > g_st.max_visible) g_st.max_visible = vis;
   Keys(n);
+  ProbeTerrain(n);
   Report();
   (void)r;
   return r;
@@ -434,5 +548,5 @@ void ApplyTerrainFixes() {
     return;
   }
   patch::Call(kRenderCall, reinterpret_cast<const void*>(&RenderHook), 5);
-  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F11 dump)");
+  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F11 dump + probe under the mouse cursor)");
 }
