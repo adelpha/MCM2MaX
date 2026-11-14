@@ -142,6 +142,7 @@ void ProbeArm(float nx, float ny, bool log_point) {
 }
 
 int ProbeStage() { return g_stage; }
+bool ProbeLogsPoint() { return g_log_point; }
 
 bool ProbeTerrainView(float m[16], float* nx, float* ny) {
   if (!g_have_view) return false;

@@ -13,6 +13,8 @@ void ProbeArm(float nx, float ny, bool log_point = true);
 // 0 = idle, 1 = capturing matrices, 2 = logging draws and finding holes,
 // 3 = (a hole was found) walking the terrain nodes at the biggest hole.
 int ProbeStage();
+// Whether this probe logs a point (Ctrl+F11) or only looks for holes.
+bool ProbeLogsPoint();
 // The view x projection matrix terrain was last drawn with (row vectors,
 // D3D order) and the point; false if none captured yet.
 bool ProbeTerrainView(float m[16], float* nx, float* ny);

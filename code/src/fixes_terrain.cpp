@@ -405,6 +405,9 @@ void ProbeNode(ProbeCtx& p, const uint8_t* n, int depth) {
       if (BoxCovers(p, sc, sh, &sd)) sp += wsprintfA(sp, "%d:%d ", e, SubVerts(d, e));
     }
   }
+  // Nodes holding the camera (partly behind it) are followed but only
+  // logged near the top of the tree.
+  if (cov == 2 && depth > 1) goto children;
   ++p.lines;
   patch::Log("probe node %*s%p L%u @%u,%u %s dist %.0f vis %06x fl %02x v %d dr %04x kids %d tex %d box %.0f %.0f %.0f "
              "+- %.0f %.0f %.0f; subs over point (e:verts) %s",
@@ -413,11 +416,7 @@ void ProbeNode(ProbeCtx& p, const uint8_t* n, int depth) {
              d ? At<int16_t>(d, 0x13C) : -1, d ? At<uint16_t>(d, 0x178) : 0, At<void*>(n, 4) ? 1 : 0,
              (At<void*>(n, 0x3C) && At<void*>(At<uint8_t*>(n, 0x3C), 8)) ? 1 : 0, c[0], c[1], c[2], h[0], h[1], h[2],
              subs);
-  if (cov == 2) {
-    // Too near the camera to say: only follow it when it holds the camera's
-    // own block, which is never the far gap; skip.
-    return;
-  }
+children:
   const uint8_t* const* kids = At<const uint8_t* const*>(n, 4);
   if (!kids) return;
   for (int i = 0; i < 256; ++i)
@@ -436,6 +435,7 @@ void ProbeTerrain(const uint8_t* root) {
   }
   if (g_probe_walked_stage == st) return;
   g_probe_walked_stage = st;
+  if (st == 2 && !dd::ProbeLogsPoint()) return;  // automatic search: only the hole's nodes
   ProbeCtx p{};
   if (!dd::ProbeTerrainView(p.m, &p.nx, &p.ny)) return;
   patch::Log("probe: terrain nodes over the %s (any state):", st == 3 ? "biggest hole" : "point");
