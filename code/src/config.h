@@ -30,6 +30,7 @@ struct Config {
   bool fast_object_walk = true;  // FastObjectWalk: the scene's object passes walk a flat list (fixes_walk.cpp)
   bool walk_log = false;      // WalkLog: FastObjectWalk statistics every 5 s
   bool far_trees = true;      // FarTrees: far tree billboards drawn on the GPU (fartrees.cpp)
+  bool far_tree_cells = true;  // FarTreeCells: grid cells holding only far trees are left out of the walk
   float far_tree_distance = 0;  // FarTreeDistance: from how far (0 = automatic)
   int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)

@@ -37,5 +37,8 @@ void ApplyFarTreeFixes();
 void FarTreesFrameEnd();
 void FarTreesPassStart();
 bool FarTreeSkip(void* obj);
+// FarTreeCells: the grid cell record `rec` (the cell list node's [1]) holds
+// only far trees this frame: the walk can leave the whole cell out.
+bool FarCellSkip(const void* rec);
 // From the device: the game's billboard draws (FVF 0x1e2 from the builder).
 void FarTreesCheckDraw(const void* verts, unsigned nverts, const uint16_t* idx, unsigned nidx);

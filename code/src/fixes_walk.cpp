@@ -127,6 +127,11 @@ void Collect(void* grid, std::vector<Entry>& ents, std::vector<uint32_t>& cell_e
   for (void** cell = At<void**>(grid, 0x70); cell; cell = static_cast<void**>(cell[0])) {
     ++*ncells;
     void* rec = cell[1];
+    // FarTreeCells: a cell of far trees only is left out (fartrees.cpp).
+    if (FarCellSkip(rec)) {
+      cell_end.push_back(static_cast<uint32_t>(ents.size()));
+      continue;
+    }
     for (void** bucket = rec ? At<void**>(rec, 8) : nullptr; bucket; bucket = static_cast<void**>(bucket[0])) {
       ++*nbuckets;
       for (int s = 1; s <= 4; ++s) {

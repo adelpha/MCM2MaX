@@ -143,6 +143,7 @@ void LoadConfig() {
   g_config.fast_object_walk = GetPrivateProfileIntA("mcm2fix", "FastObjectWalk", 1, ini) != 0;
   g_config.walk_log = GetPrivateProfileIntA("mcm2fix", "WalkLog", 0, ini) != 0;
   g_config.far_trees = GetPrivateProfileIntA("mcm2fix", "FarTrees", 1, ini) != 0;
+  g_config.far_tree_cells = GetPrivateProfileIntA("mcm2fix", "FarTreeCells", 1, ini) != 0;
   g_config.far_tree_distance = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "FarTreeDistance", 0, ini));
   if (g_config.far_tree_distance < 0) g_config.far_tree_distance = 0;
   g_config.far_tree_log = GetPrivateProfileIntA("mcm2fix", "FarTreeLog", 0, ini);

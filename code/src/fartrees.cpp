@@ -49,6 +49,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 #include "config.h"
@@ -230,6 +231,21 @@ struct Sequence {
   }
 } g_seq;
 
+// FarTreeCells: grid cells holding nothing but far-tree candidates (trees
+// of the vegetation layer and the billboard texture), noted the first time
+// they are walked: a signature of their bucket chain (to notice anything
+// moving in or out), the box their trees stand in and their largest H. A
+// cell whose nearest corner is past the far distance (with a margin) and
+// too far for any of its trees to be a bent billboard is left out of the
+// walk altogether: its trees are all drawn here anyway, and are already
+// written down.
+struct CellInfo {
+  uint32_t sig = 0, objs = 0;
+  bool pure = false;
+  float x0 = 0, x1 = 0, z0 = 0, z1 = 0, hmax = 0;
+};
+std::unordered_map<const void*, CellInfo> g_cells;
+
 // This pass's rule (FarTreesPassStart).
 struct Pass {
   bool ok = false;
@@ -252,6 +268,7 @@ bool g_logged_setup = false;
 
 struct Stats {
   unsigned seq_hits = 0, seq_misses = 0, seq_resyncs = 0;
+  uint64_t cells_seen = 0, cells_pure = 0, cells_skipped = 0, cell_trees_skipped = 0, cells_built = 0;
   unsigned frames = 0, passes = 0, skipped = 0, handed = 0, near_trees = 0, six = 0, other_tex = 0, draws = 0,
            missed = 0, resets = 0, added = 0, draw_fail = 0, empty_runs = 0;
   double draw_ms = 0;
@@ -306,6 +323,7 @@ void FarTreesPassStart() {
     if (g_reg.Count()) ++g_st.resets;
     g_reg.Clear();
     g_seq.Clear();
+    g_cells.clear();
     g_seen_mgr = mgr;
     g_seen_types = types0;
     g_seen_grid = grid;
@@ -379,6 +397,71 @@ bool FarTreeSkip(void* obj) {
   }
   ++g_st.skipped;
   g_skipped_this_frame = true;
+  return true;
+}
+
+bool FarCellSkip(const void* rec) {
+  if (!g_pass.ok || !GetConfig().far_tree_cells || g_disabled) return false;
+  const float* m = Mem<const float*>(kCamMatrix);
+  if (!m || !rec) return false;
+  ++g_st.cells_seen;
+  // The bucket chain's signature: bucket and slot pointers only (the
+  // objects themselves are not touched: that is what this saves).
+  uint32_t sig = 2166136261u, n = 0;
+  void* const* first = At<void* const*>(rec, 8);
+  for (void* const* b = first; b; b = static_cast<void* const*>(b[0])) {
+    sig = (sig ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(b))) * 16777619u;
+    for (int k = 1; k <= 4; ++k) {
+      if (!b[k]) continue;
+      ++n;
+      sig = (sig ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(b[k]))) * 16777619u;
+    }
+  }
+  CellInfo& c = g_cells[rec];
+  if (c.sig != sig || c.objs != n) {
+    // New or changed: look at every object once, and write the trees down.
+    ++g_st.cells_built;
+    c = CellInfo{};
+    c.sig = sig;
+    c.objs = n;
+    c.pure = n > 0;
+    c.x0 = c.z0 = 1e30f;
+    c.x1 = c.z1 = -1e30f;
+    const float s = At<float>(g_pass.mgr, 0x5A8);
+    for (void* const* b = first; b && c.pure; b = static_cast<void* const*>(b[0])) {
+      for (int k = 1; k <= 4 && c.pure; ++k) {
+        void* obj = b[k];
+        if (!obj) continue;
+        const void* type = nullptr;
+        if (Mem<uintptr_t>(reinterpret_cast<uintptr_t>(obj)) != kTreeVtable || At<uint8_t>(obj, 8) != g_pass.layer ||
+            !(type = TypeOf(g_pass.mgr, obj)) || At<const void*>(type, 0x1E0) != g_pass.tex) {
+          c.pure = false;
+          break;
+        }
+        bool added = false;
+        const size_t i = g_reg.Find(g_pass.mgr, obj, type, &added);
+        if (added) ++g_st.added;
+        const float x = static_cast<float>(At<uint16_t>(obj, 0xC)) * s;
+        const float z = static_cast<float>(At<uint16_t>(obj, 0x10)) * s;
+        c.x0 = std::min(c.x0, x);
+        c.x1 = std::max(c.x1, x);
+        c.z0 = std::min(c.z0, z);
+        c.z1 = std::max(c.z1, z);
+        c.hmax = std::max(c.hmax, g_reg.nums[i * 12 + 6]);
+      }
+    }
+  }
+  if (!c.pure) return false;
+  ++g_st.cells_pure;
+  // Depth is linear in x and z (0x457450): its smallest value over the box
+  // is at a corner.
+  const float dx = m[2], dz = m[10], d0 = m[14];
+  const float near_d = std::min(c.x0 * dx, c.x1 * dx) + std::min(c.z0 * dz, c.z1 * dz) + d0;
+  const float margin = 4.0f;
+  if (!(near_d > g_pass.far_d + margin)) return false;
+  if (g_pass.six_a8 && (near_d - margin) * g_pass.six_ac < c.hmax * 1.01f) return false;
+  ++g_st.cells_skipped;
+  g_st.cell_trees_skipped += c.objs;
   return true;
 }
 
@@ -567,6 +650,11 @@ void MaybeLog() {
                g_st.seq_hits + g_st.seq_misses ? 100.0 * g_st.seq_hits / (g_st.seq_hits + g_st.seq_misses) : 0.0,
                g_st.seq_misses, g_st.seq_resyncs, g_st.draws, g_st.draws ? g_st.draw_ms / g_st.draws : 0.0, g_st.missed,
                g_st.empty_runs, g_st.resets, g_st.draw_fail);
+    if (GetConfig().far_tree_cells)
+      patch::Log("far trees 5s cells: per pass %.0f cells looked at, %.0f only far-tree candidates, %.0f left out of "
+                 "the walk (%.0f trees); %llu cells noted afresh, %zu known",
+                 g_st.cells_seen / p, g_st.cells_pure / p, g_st.cells_skipped / p, g_st.cell_trees_skipped / p,
+                 static_cast<unsigned long long>(g_st.cells_built), g_cells.size());
     if (g_st.chk_frames)
       patch::Log("far trees 5s check: %u frames, game billboards %u flat (%u matched) + %u bent (%u matched); "
                  "%u differ (max pos %.4f uv %.5f, %u vertex colours), %u unmatched; list trees the builder should draw %u, matched ones "
@@ -676,6 +764,6 @@ void ApplyFarTreeFixes() {
   }
   patch::Jump(kCountCheck, reinterpret_cast<uintptr_t>(&FarCountStub), sizeof(count_orig));
   patch::Call(kStateCall, reinterpret_cast<const void*>(&FarStateStub), sizeof(call_orig));
-  patch::Log("far trees: FarTrees=1 (FarTreeDistance %.0f, 0 = automatic; FarTreeLog=%d)", c.far_tree_distance,
-             c.far_tree_log ? 1 : 0);
+  patch::Log("far trees: FarTrees=1 (FarTreeDistance %.0f, 0 = automatic; FarTreeCells=%d; FarTreeLog=%d)",
+             c.far_tree_distance, c.far_tree_cells ? 1 : 0, c.far_tree_log);
 }

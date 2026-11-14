@@ -717,6 +717,12 @@ FastObjectWalk=1
 FarTrees=1
 FarTreeDistance=0
 
+; FarTreeCells: with FarTrees, parts of the map that hold nothing but far
+; trees are left out of the game's per-frame walk over the objects in view
+; (their trees are drawn by the graphics card anyway). 0 = every tree is
+; still walked each frame. Default 1.
+FarTreeCells=1
+
 ; =============================================================================
 ; 3. LOGGING
 ;
