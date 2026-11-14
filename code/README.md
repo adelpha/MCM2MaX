@@ -817,7 +817,8 @@ FarTreeLog=0
 
 ; TerrainLog: terrain statistics every 5 seconds, including how often the
 ; terrain detail number overflowed (see TerrainLodFix). Also turns on debug
-; keys: Ctrl+F9 switches TerrainLodFix on and off, Ctrl+F11 writes the
+; keys: Ctrl+F9 switches TerrainLodFix on and off, Ctrl+F10 turns the
+; culling of single terrain pieces off and on, Ctrl+F11 writes the
 ; terrain and camera to the log and probes the point under the mouse cursor
 ; (every draw and terrain block there; Direct3D 11 only). 2 also looks for
 ; holes in the terrain every 2 seconds and logs the ones it finds. Default 0.

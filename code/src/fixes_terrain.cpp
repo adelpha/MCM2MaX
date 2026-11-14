@@ -33,6 +33,7 @@
 //
 // Debug keys (TerrainLog=1, game window in front):
 //   Ctrl+F9   TerrainLodFix on / off
+//   Ctrl+F10  leaf culling (0x483281) off / on
 // TerrainLog=2 also looks for holes every 2 seconds on its own: the terrain
 // draws of one frame are rasterised at quarter size, and any pixel below the
 // highest terrain pixel of its column that no terrain triangle covers is a
@@ -189,6 +190,29 @@ struct Stats {
   double render_ms = 0, max_render_ms = 0;
   DWORD start = 0;
 } g_st;
+
+// Leaf culling (Setup 0x482d50, call at 0x483281): a node with no children
+// of its own is frustum-tested on its own box when its parent's region is
+// only partly in view. Ctrl+F10 (TerrainLog=1) treats every leaf as visible,
+// to see whether this test is what drops pieces of distant terrain.
+constexpr uintptr_t kLeafCullCall = 0x483281;
+constexpr uintptr_t kFrustumTest = 0x534BE0;
+using FrustumFn = int(__fastcall*)(void* self, void* edx, void* m, void* cam, const float* c, const float* h, int a5,
+                                   int a6, int* inside);
+bool g_leaf_cull_off = false;
+unsigned g_leaf_tests = 0, g_leaf_culled = 0;
+
+int __fastcall LeafCull(void* self, void* edx, void* m, void* cam, const float* c, const float* h, int a5, int a6,
+                        int* inside) {
+  const int r = reinterpret_cast<FrustumFn>(kFrustumTest)(self, edx, m, cam, c, h, a5, a6, inside);
+  ++g_leaf_tests;
+  if (!r) ++g_leaf_culled;
+  if (g_leaf_cull_off && !r) {
+    if (inside) *inside = 0;
+    return 1;
+  }
+  return r;
+}
 
 bool g_lod_hooked = false;
 
@@ -379,6 +403,7 @@ int BoxCovers(const ProbeCtx& p, const float* c, const float* h, float* depth) {
     if (sy > y1) y1 = sy;
   }
   *depth = wmin;
+  if (wmin > 1e29f) return 0;  // all behind the camera
   if (behind) return 2;
   return (p.nx >= x0 && p.nx <= x1 && p.ny >= y0 && p.ny <= y1) ? 1 : 0;
 }
@@ -497,6 +522,11 @@ void Keys(const uint8_t* root) {
   static bool f9 = false;
   const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && OurWindowInFront();
   const bool k9 = KeyPressed(VK_F9, f9);
+  static bool f10 = false;
+  if (KeyPressed(VK_F10, f10) && ctrl) {
+    g_leaf_cull_off = !g_leaf_cull_off;
+    patch::Log("terrain: leaf culling %s (Ctrl+F10)", g_leaf_cull_off ? "OFF (every leaf drawn)" : "on");
+  }
   if (ctrl && k9) {
     if (!g_lod_hooked) {
       patch::Log("terrain: TerrainLodFix hook not installed (code differs); Ctrl+F9 does nothing");
@@ -520,11 +550,13 @@ void Report() {
       "terrain 5s: %u frames; per frame: nodes %.0f visible %.0f (max %u) collapsed %.0f, sub-blocks drawn %.0f "
       "culled %.0f, children %.0f, meshed %.1f (max %u); render step %.3f ms (max %.2f); vertex buffers %d "
       "(%d KB); empty collapsed blocks %.0f; detail number: %u conversions on the unclamped path, %u over 65535 "
-      "(largest %u), TerrainLodFix %s",
+      "(largest %u), TerrainLodFix %s; leaf tests %.0f culled %.0f, leaf culling %s",
       g_st.frames, g_st.nodes / f, g_st.visible / f, g_st.max_visible, g_st.collapsed / f, g_st.subs_drawn / f,
       g_st.subs_culled / f, g_st.children_drawn / f, g_st.meshes / f, g_st.max_meshes, g_st.render_ms / f,
       g_st.max_render_ms, *reinterpret_cast<int*>(kVbCount), *reinterpret_cast<int*>(kVbBytes) / 1024,
-      g_st.holes_collapsed / f, g_lod_calls, g_lod_over, g_lod_max, !g_lod_hooked ? "not installed" : g_lod_fix ? "on" : "off");
+      g_st.holes_collapsed / f, g_lod_calls, g_lod_over, g_lod_max, !g_lod_hooked ? "not installed" : g_lod_fix ? "on" : "off", g_leaf_tests / f, g_leaf_culled / f,
+      g_leaf_cull_off ? "OFF" : "on");
+  g_leaf_tests = g_leaf_culled = 0;
   ReportOverNodes();
   g_lod_calls = g_lod_over = g_lod_max = 0;
   g_st = Stats();
@@ -579,6 +611,11 @@ void ApplyTerrainFixes() {
     return;
   }
   patch::Call(kRenderCall, reinterpret_cast<const void*>(&RenderHook), 5);
+  const uint8_t call_leaf[] = {0xE8, 0x5A, 0x19, 0x0B, 0x00};  // call 534be0
+  if (patch::Matches(kLeafCullCall, call_leaf, 5))
+    patch::Call(kLeafCullCall, reinterpret_cast<const void*>(&LeafCull), 5);
+  else
+    patch::Log("terrain log: leaf cull call differs, Ctrl+F10 does nothing");
   if (HANDLE t = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr)) CloseHandle(t);
-  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F11 dump + probe under the mouse cursor)");
+  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F10 leaf culling off/on, Ctrl+F11 dump + probe)");
 }
