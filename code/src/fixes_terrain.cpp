@@ -33,6 +33,10 @@
 //
 // Debug keys (TerrainLog=1, game window in front):
 //   Ctrl+F9   TerrainLodFix on / off
+// TerrainLog=2 also looks for holes every 2 seconds on its own: the terrain
+// draws of one frame are rasterised at quarter size, and any pixel below the
+// highest terrain pixel of its column that no terrain triangle covers is a
+// hole (terrain is a height field); the nodes at the biggest hole are logged.
 //   Ctrl+F11  write the terrain tree (visible nodes) and the camera to the log,
 //             and probe the point under the mouse cursor: the next frames
 //             log every draw with a triangle over it (dd/probe.cpp) and
@@ -420,19 +424,21 @@ void ProbeNode(ProbeCtx& p, const uint8_t* n, int depth) {
     if (kids[i]) ProbeNode(p, kids[i], depth + 1);
 }
 
-bool g_probe_walked = false;
 volatile bool g_dump_pending = false;
 
+int g_probe_walked_stage = 0;
+
 void ProbeTerrain(const uint8_t* root) {
-  if (dd::ProbeStage() != 2) {
-    g_probe_walked = false;
+  const int st = dd::ProbeStage();
+  if (st != 2 && st != 3) {
+    g_probe_walked_stage = 0;
     return;
   }
-  if (g_probe_walked) return;
-  g_probe_walked = true;
+  if (g_probe_walked_stage == st) return;
+  g_probe_walked_stage = st;
   ProbeCtx p{};
   if (!dd::ProbeTerrainView(p.m, &p.nx, &p.ny)) return;
-  patch::Log("probe: terrain nodes over the point (any state):");
+  patch::Log("probe: terrain nodes over the %s (any state):", st == 3 ? "biggest hole" : "point");
   ProbeNode(p, root, 0);
   patch::Log("probe: %u node lines%s", p.lines, p.lines >= 400 ? " (cut at 400)" : "");
 }
@@ -457,8 +463,15 @@ bool OurWindowInFront();
 // game is paused, and pausing is how the mouse cursor gets over a gap.
 DWORD WINAPI KeyThread(void*) {
   bool f11 = false;
+  DWORD last_auto = GetTickCount();
+  const bool automatic = GetConfig().terrain_log >= 2;
   for (;;) {
     Sleep(15);
+    // TerrainLog=2: look for holes every 2 seconds (logged only when found).
+    if (automatic && GetTickCount() - last_auto >= 2000) {
+      last_auto = GetTickCount();
+      if (dd::ProbeStage() == 0 && OurWindowInFront()) dd::ProbeArm(0, 0, false);
+    }
     const bool hit = KeyPressed(VK_F11, f11);
     if (hit && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && OurWindowInFront()) {
       ArmProbe();

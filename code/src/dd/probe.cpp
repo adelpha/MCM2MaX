@@ -17,6 +17,87 @@ float g_view_proj[16];
 bool g_have_view = false;
 unsigned g_scenes = 0, g_draws = 0, g_hit_draws = 0, g_terrain_draws = 0, g_lines = 0;
 
+// Hole finder: terrain coverage of the frame at a quarter of the viewport's
+// size. Terrain is a height field, so below the highest terrain pixel of a
+// column every pixel should be terrain; one that is not is a hole.
+constexpr int kCovW = 480, kCovH = 270;
+unsigned char g_cov[kCovW * kCovH];
+float g_hole_nx = 0, g_hole_ny = 0;
+bool g_hole_found = false;
+bool g_log_point = true;
+unsigned g_auto_frames = 0;
+
+void Cover(const float* a, const float* b, const float* c) {
+  // NDC -> coverage pixels.
+  float p[3][2];
+  const float* v[3] = {a, b, c};
+  for (int j = 0; j < 3; ++j) {
+    p[j][0] = (v[j][0] + 1) * 0.5f * kCovW;
+    p[j][1] = (1 - v[j][1]) * 0.5f * kCovH;
+  }
+  float x0 = std::fmin(p[0][0], std::fmin(p[1][0], p[2][0])), x1 = std::fmax(p[0][0], std::fmax(p[1][0], p[2][0]));
+  float y0 = std::fmin(p[0][1], std::fmin(p[1][1], p[2][1])), y1 = std::fmax(p[0][1], std::fmax(p[1][1], p[2][1]));
+  int ix0 = static_cast<int>(std::floor(x0)), ix1 = static_cast<int>(std::ceil(x1));
+  int iy0 = static_cast<int>(std::floor(y0)), iy1 = static_cast<int>(std::ceil(y1));
+  if (ix1 < 0 || iy1 < 0 || ix0 >= kCovW || iy0 >= kCovH) return;
+  if (ix0 < 0) ix0 = 0;
+  if (iy0 < 0) iy0 = 0;
+  if (ix1 > kCovW - 1) ix1 = kCovW - 1;
+  if (iy1 > kCovH - 1) iy1 = kCovH - 1;
+  const float area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+  if (area == 0) return;
+  for (int y = iy0; y <= iy1; ++y)
+    for (int x = ix0; x <= ix1; ++x) {
+      const float px = x + 0.5f, py = y + 0.5f;
+      const float e0 = (p[1][0] - p[0][0]) * (py - p[0][1]) - (p[1][1] - p[0][1]) * (px - p[0][0]);
+      const float e1 = (p[2][0] - p[1][0]) * (py - p[1][1]) - (p[2][1] - p[1][1]) * (px - p[1][0]);
+      const float e2 = (p[0][0] - p[2][0]) * (py - p[2][1]) - (p[0][1] - p[2][1]) * (px - p[2][0]);
+      if ((e0 >= 0 && e1 >= 0 && e2 >= 0) || (e0 <= 0 && e1 <= 0 && e2 <= 0)) g_cov[y * kCovW + x] = 1;
+    }
+}
+
+// After a frame's coverage: log the holes, keep the biggest run's middle.
+void FindHoles() {
+  unsigned holes = 0, runs = 0, best = 0;
+  int bx = 0, by = 0;
+  char buf[1024];
+  int len = 0;
+  buf[0] = 0;
+  const int max_y = kCovH * 6 / 10;  // near the camera the near plane cuts terrain off
+  for (int x = 0; x < kCovW; ++x) {
+    int top = -1;
+    for (int y = 0; y < kCovH; ++y)
+      if (g_cov[y * kCovW + x]) {
+        top = y;
+        break;
+      }
+    if (top < 0) continue;
+    for (int y = top + 1; y < max_y; ++y) {
+      if (g_cov[y * kCovW + x]) continue;
+      int e = y;
+      while (e < max_y && !g_cov[e * kCovW + x]) ++e;
+      const unsigned n = static_cast<unsigned>(e - y);
+      holes += n;
+      ++runs;
+      if (n > best) best = n, bx = x, by = (y + e) / 2;
+      if (len < 900) len += wsprintfA(buf + len, " x%d y%d-%d", x * 4, y * 4, e * 4);
+      y = e;
+    }
+  }
+  if (!holes) {
+    if (g_log_point) patch::Log("probe: holes: none (terrain covers everything below its skyline)");
+    g_hole_found = false;
+    return;
+  }
+  g_hole_found = true;
+  g_hole_nx = (bx + 0.5f) / kCovW * 2 - 1;
+  g_hole_ny = 1 - (by + 0.5f) / kCovH * 2;
+  patch::Log("probe: holes: %u quarter-pixels in %u column runs (full-size pixels):%s%s", holes, runs, buf,
+             len >= 900 ? " ..." : "");
+  patch::Log("probe: biggest hole at %d,%d (normalised %.4f %.4f); terrain nodes there follow next frame", bx * 4,
+             by * 4, g_hole_nx, g_hole_ny);
+}
+
 void Mul(const float* a, const float* b, float* out) {
   for (int r = 0; r < 4; ++r)
     for (int c = 0; c < 4; ++c) {
@@ -47,14 +128,17 @@ bool Inside(float px, float py, const float* a, const float* b, const float* c, 
 
 }  // namespace
 
-void ProbeArm(float nx, float ny) {
+void ProbeArm(float nx, float ny, bool log_point) {
+  g_log_point = log_point;
   g_nx = nx;
   g_ny = ny;
   g_scenes = g_draws = g_hit_draws = g_terrain_draws = g_lines = 0;
   g_have_view = false;
+  std::memset(g_cov, 0, sizeof(g_cov));
   g_stage = 1;
-  patch::Log("probe: armed at %.4f %.4f (normalised); next frame captures the terrain view, the one after logs draws",
-             nx, ny);
+  if (log_point)
+    patch::Log("probe: armed at %.4f %.4f (normalised); next frame captures the terrain view, the one after logs draws",
+               nx, ny);
 }
 
 int ProbeStage() { return g_stage; }
@@ -62,8 +146,8 @@ int ProbeStage() { return g_stage; }
 bool ProbeTerrainView(float m[16], float* nx, float* ny) {
   if (!g_have_view) return false;
   std::memcpy(m, g_view_proj, sizeof(g_view_proj));
-  *nx = g_nx;
-  *ny = g_ny;
+  *nx = g_stage == 3 ? g_hole_nx : g_nx;
+  *ny = g_stage == 3 ? g_hole_ny : g_ny;
   return true;
 }
 
@@ -122,8 +206,9 @@ void ProbeDraw(uint32_t site, uint32_t prim, uint32_t fvf, bool tl, const uint8_
       }
     }
     if (behind) continue;
+    if (terrain) Cover(s[0], s[1], s[2]);
     bool front = false;
-    if (!Inside(px, py, s[0], s[1], s[2], &front)) continue;
+    if (!g_log_point || !Inside(px, py, s[0], s[1], s[2], &front)) continue;
     ++hits;
     if (g_lines < 300) {
       ++g_lines;
@@ -144,8 +229,12 @@ void ProbeEndScene() {
     g_stage = 2;
     g_scenes = g_draws = g_terrain_draws = 0;
   } else if (g_stage == 2) {
-    patch::Log("probe: done: %u draws (%u terrain), %u with a triangle over the point", g_draws, g_terrain_draws,
-               g_hit_draws);
+    if (g_log_point)
+      patch::Log("probe: done: %u draws (%u terrain), %u with a triangle over the point", g_draws, g_terrain_draws,
+                 g_hit_draws);
+    FindHoles();
+    g_stage = g_hole_found ? 3 : 0;
+  } else if (g_stage == 3) {
     g_stage = 0;
   }
 }

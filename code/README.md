@@ -819,7 +819,8 @@ FarTreeLog=0
 ; terrain detail number overflowed (see TerrainLodFix). Also turns on debug
 ; keys: Ctrl+F9 switches TerrainLodFix on and off, Ctrl+F11 writes the
 ; terrain and camera to the log and probes the point under the mouse cursor
-; (every draw and terrain block there; Direct3D 11 only). Default 0.
+; (every draw and terrain block there; Direct3D 11 only). 2 also looks for
+; holes in the terrain every 2 seconds and logs the ones it finds. Default 0.
 TerrainLog=0
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by

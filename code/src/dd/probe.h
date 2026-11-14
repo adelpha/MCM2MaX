@@ -9,8 +9,9 @@ namespace dd {
 // Arms the probe for the point at normalised device coordinates (nx, ny):
 // the next frame captures the matrices terrain is drawn with, the frame
 // after logs every draw with a triangle over the point.
-void ProbeArm(float nx, float ny);
-// 0 = idle, 1 = capturing matrices, 2 = logging draws.
+void ProbeArm(float nx, float ny, bool log_point = true);
+// 0 = idle, 1 = capturing matrices, 2 = logging draws and finding holes,
+// 3 = (a hole was found) walking the terrain nodes at the biggest hole.
 int ProbeStage();
 // The view x projection matrix terrain was last drawn with (row vectors,
 // D3D order) and the point; false if none captured yet.
