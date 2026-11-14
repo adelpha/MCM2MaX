@@ -216,6 +216,8 @@ void LoadConfig() {
   g_config.fog_scale = fog >= 0.1f && fog <= 20.0f ? fog : 1.0f;
   float view = ReadFloat("ViewDistance", 1.0f, ini);
   g_config.view_distance = view >= 0.25f && view <= 10.0f ? view : 1.0f;
+  float tdet = ReadFloat("TerrainDetail", 1.0f, ini);
+  g_config.terrain_detail = tdet >= 1.0f && tdet <= 64.0f ? tdet : 1.0f;
   g_config.tree_always_near = ReadFloat("TreeDetailDistance", 1.0f, ini) == 0.0f;
   float lod = ReadFloat("ModelLod", 1.0f, ini);
   g_config.model_lod = lod >= 0.25f && lod <= 10.0f ? lod : 1.0f;

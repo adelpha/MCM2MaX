@@ -33,7 +33,8 @@
 //
 // Debug keys (TerrainLog=1, game window in front):
 //   Ctrl+F9   TerrainLodFix on / off
-//   Ctrl+F10  leaf culling (0x483281) off / on
+//   Ctrl+F10  TerrainDetail: ini value, x4, x16, x64 of it, back (leaf culling
+//             at 0x483281 is still counted; turning it off did not help)
 // TerrainLog=2 also looks for holes every 2 seconds on its own: the terrain
 // draws of one frame are rasterised at quarter size, and any pixel below the
 // highest terrain pixel of its column that no terrain triangle covers is a
@@ -176,6 +177,35 @@ T At(const void* p, size_t off) {
   T v;
   std::memcpy(&v, static_cast<const uint8_t*>(p) + off, sizeof(T));
   return v;
+}
+
+// Terrain detail (TerrainDetail): the terrain picks how finely to mesh each
+// block from a screen-space error. 0x50d350 (called every frame at 0x50cff3)
+// turns the detail level's tolerance (terrain+0x6c, pixels: 1 at the best
+// level, from the table at 0x69046c) and the focal length (+0x70) into
+// factors: +0x74 = +0x7c = focal^2/tol^2, +0x78 = +0x80 = tol^2/focal^2.
+// TerrainDetail multiplies the first pair and divides the second, as if the
+// tolerance were TerrainDetail^-1/2 times smaller.
+constexpr uintptr_t kParamsCall = 0x50CFF3;
+constexpr uintptr_t kParams = 0x50D350;
+float g_detail = 1.0f;
+float g_detail_ini = 1.0f;
+bool g_params_hooked = false;
+int g_last_tol = 0, g_last_focal = 0;
+float g_last_k = 0;
+
+void __fastcall ParamsHook(uint8_t* t, void*) {
+  reinterpret_cast<ThisVoid>(kParams)(t, nullptr);
+  g_last_tol = At<int>(t, 0x6C);
+  g_last_focal = At<int>(t, 0x70);
+  const float d = g_detail;
+  if (d != 1.0f) {
+    *reinterpret_cast<float*>(t + 0x74) *= d;
+    *reinterpret_cast<float*>(t + 0x7C) *= d;
+    *reinterpret_cast<float*>(t + 0x78) /= d;
+    *reinterpret_cast<float*>(t + 0x80) /= d;
+  }
+  g_last_k = At<float>(t, 0x74);
 }
 
 bool g_cull_sub_off = false;
@@ -524,8 +554,18 @@ void Keys(const uint8_t* root) {
   const bool k9 = KeyPressed(VK_F9, f9);
   static bool f10 = false;
   if (KeyPressed(VK_F10, f10) && ctrl) {
-    g_leaf_cull_off = !g_leaf_cull_off;
-    patch::Log("terrain: leaf culling %s (Ctrl+F10)", g_leaf_cull_off ? "OFF (every leaf drawn)" : "on");
+    if (!g_params_hooked) {
+      patch::Log("terrain: detail hook not installed (code differs); Ctrl+F10 does nothing");
+    } else {
+      // ini value, then x4, x16, x64 of it (capped at 256), then back.
+      static int step = 0;
+      step = (step + 1) % 4;
+      float d = g_detail_ini;
+      for (int i = 0; i < step; ++i) d *= 4.0f;
+      if (d > 256.0f) d = 256.0f;
+      g_detail = d;
+      patch::Log("terrain: TerrainDetail now %.0f (Ctrl+F10; ini %.2f)", g_detail, g_detail_ini);
+    }
   }
   if (ctrl && k9) {
     if (!g_lod_hooked) {
@@ -550,12 +590,13 @@ void Report() {
       "terrain 5s: %u frames; per frame: nodes %.0f visible %.0f (max %u) collapsed %.0f, sub-blocks drawn %.0f "
       "culled %.0f, children %.0f, meshed %.1f (max %u); render step %.3f ms (max %.2f); vertex buffers %d "
       "(%d KB); empty collapsed blocks %.0f; detail number: %u conversions on the unclamped path, %u over 65535 "
-      "(largest %u), TerrainLodFix %s; leaf tests %.0f culled %.0f, leaf culling %s",
+      "(largest %u), TerrainLodFix %s; leaf tests %.0f culled %.0f, leaf culling %s; tolerance %d focal %d "
+      "detail x%.2f (factor %.1f)",
       g_st.frames, g_st.nodes / f, g_st.visible / f, g_st.max_visible, g_st.collapsed / f, g_st.subs_drawn / f,
       g_st.subs_culled / f, g_st.children_drawn / f, g_st.meshes / f, g_st.max_meshes, g_st.render_ms / f,
       g_st.max_render_ms, *reinterpret_cast<int*>(kVbCount), *reinterpret_cast<int*>(kVbBytes) / 1024,
       g_st.holes_collapsed / f, g_lod_calls, g_lod_over, g_lod_max, !g_lod_hooked ? "not installed" : g_lod_fix ? "on" : "off", g_leaf_tests / f, g_leaf_culled / f,
-      g_leaf_cull_off ? "OFF" : "on");
+      g_leaf_cull_off ? "OFF" : "on", g_last_tol, g_last_focal, g_detail, g_last_k);
   g_leaf_tests = g_leaf_culled = 0;
   ReportOverNodes();
   g_lod_calls = g_lod_over = g_lod_max = 0;
@@ -604,6 +645,17 @@ void ApplyTerrainFixes() {
       patch::Log("terrain: TerrainLodFix: code differs, not applied");
     }
   }
+  g_detail = g_detail_ini = c.terrain_detail;
+  if (c.terrain_detail != 1.0f || c.terrain_log) {
+    const uint8_t call_params[] = {0xE8, 0x58, 0x03, 0x00, 0x00};  // call 50d350
+    if (patch::Matches(kParamsCall, call_params, 5)) {
+      patch::Call(kParamsCall, reinterpret_cast<const void*>(&ParamsHook), 5);
+      g_params_hooked = true;
+      patch::Log("terrain: TerrainDetail x%.2f", g_detail);
+    } else {
+      patch::Log("terrain: TerrainDetail: code differs, not applied");
+    }
+  }
   if (!c.terrain_log) return;
   const uint8_t call_render[] = {0xE8, 0x4B, 0x50, 0xF7, 0xFF};  // call 4820e0
   if (!patch::Matches(kRenderCall, call_render, 5)) {
@@ -617,5 +669,5 @@ void ApplyTerrainFixes() {
   else
     patch::Log("terrain log: leaf cull call differs, Ctrl+F10 does nothing");
   if (HANDLE t = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr)) CloseHandle(t);
-  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F10 leaf culling off/on, Ctrl+F11 dump + probe)");
+  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F10 TerrainDetail x1/x4/x16/x64, Ctrl+F11 dump + probe)");
 }
