@@ -26,6 +26,9 @@ struct Config {
   bool sound_log = false;     // SoundLog: log 3D sound buffers, mutes and unmutes
   bool sound_pause_log = false;  // SoundPauseLog: trace DirectSound calls and buffer states around race pause/unpause
   bool state_cache = true;    // StateCache: skip D3D11 state the device already has bound (device.cpp)       // FastCrt: QPC game clock and table-driven _stricmp (fixes_perf.cpp)
+  bool still_scenery = true;  // StillScenery: terrain and tree draws skip the SimSmooth vertex checks (device.cpp)
+  bool fast_object_walk = true;  // FastObjectWalk: the scene's object passes walk a flat list (fixes_walk.cpp)
+  bool walk_log = false;      // WalkLog: FastObjectWalk statistics every 5 s
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)
   bool batch_log = false;     // BatchLog: log draw batching every 5 s
   bool draw_log = false;      // DrawLog: measure which draw calls could be merged (dd/drawlog.cpp)

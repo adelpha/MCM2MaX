@@ -57,7 +57,7 @@ def report_csv(path):
         print("   zone                 ms/frame   p99     max   calls/frame")
         for z in zones:
             v = [float(r[z + "_ms"]) for r in rs]
-            n = [int(r[z + "_n"]) for r in rs]
+            n = [int(r[z + "_n"]) for r in rs] if z + "_n" in r else [0]
             if max(v) <= 0:
                 continue
             print(f"   {z:18s} {statistics.mean(v):8.3f} {pct(v, .99):7.3f} {max(v):7.2f}   {statistics.mean(n):8.1f}")

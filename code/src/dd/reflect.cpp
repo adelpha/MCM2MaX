@@ -98,6 +98,10 @@ struct RCfg {
   int cache_mb = 32;
   float cache_secs = 20.0f;
   float cache_radius = 0.0f;  // 0: the game's fog end
+  // ReflectMaxRange: world draws further than this from the bike are left out
+  // of the live cube (drawn, cached and recorded), whatever the view distance
+  // (0: no limit, the fog end).
+  float max_range = 1024.0f;
   std::vector<Pattern> textures;  // texture name -> strength (bikes, plus ReflectTextures)
   std::vector<Pattern> frames;    // frame name -> strength (helmet, plus ReflectFrames)
   std::vector<Pattern> skip_objects;  // ReflectSkipObjects: objects with any of these frames get no reflections
@@ -187,6 +191,7 @@ const RCfg& Cfg() {
   g_cfg.cache_mb = std::clamp(static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectCacheMB", 32, ini)), 4, 512);
   g_cfg.cache_secs = std::clamp(ReadF("ReflectCacheSecs", 20.0f, ini), 0.5f, 600.0f);
   g_cfg.cache_radius = std::clamp(ReadF("ReflectCacheRadius", 0.0f, ini), 0.0f, 1e6f);
+  g_cfg.max_range = std::clamp(ReadF("ReflectMaxRange", 1024.0f, ini), 0.0f, 1e6f);
   int size = static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectSize", 128, ini));
   int p = 16;
   while (p < size && p < 1024) p <<= 1;
@@ -228,8 +233,10 @@ const RCfg& Cfg() {
         g_cfg.mats[1].f0, g_cfg.mats[1].blur, g_cfg.mats[2].f0, g_cfg.mats[2].blur, g_cfg.size, g_cfg.live_faces,
         g_cfg.ground, t.c_str(), f.c_str());
     if (g_cfg.mode == 2)
-      Log("reflections: draw cache %s, %d MB, kept %.1f s, radius %s", g_cfg.cache ? "on" : "off", g_cfg.cache_mb,
-          g_cfg.cache_secs, g_cfg.cache_radius > 0 ? std::to_string(g_cfg.cache_radius).c_str() : "fog end");
+      Log("reflections: draw cache %s, %d MB, kept %.1f s, radius %s; world draws used up to %s from the bike",
+          g_cfg.cache ? "on" : "off", g_cfg.cache_mb, g_cfg.cache_secs,
+          g_cfg.cache_radius > 0 ? std::to_string(g_cfg.cache_radius).c_str() : "fog end",
+          g_cfg.max_range > 0 ? std::to_string(g_cfg.max_range).c_str() : "fog end");
     Log("reflections: sun highlight x%.2f, brightness/sharpness bike %.2f/%.0f helmet %.2f/%.0f rider %.2f/%.0f",
         g_cfg.sun, g_cfg.mats[0].sun, g_cfg.mats[0].shine, g_cfg.mats[1].sun, g_cfg.mats[1].shine, g_cfg.mats[2].sun,
         g_cfg.mats[2].shine);
@@ -628,9 +635,16 @@ std::deque<std::pair<uint64_t, unsigned>> g_cache_order;
 unsigned g_cache_serial = 0;
 std::vector<const CacheEntry*> g_cache_draw;  // this cube update's
 float g_cache_radius_used = 0;
+// ReflectMaxRange: where the cube was last drawn from and how far it looks
+// (for the next frame's draws; range 0 = not known yet, take everything).
+float g_range_eye[3] = {};
+float g_range = 0;
+struct RangeStats {
+  unsigned in = 0, out = 0, unbounded = 0;
+} g_rs;
 unsigned g_cache_frame = 1;  // frames recorded (the cache's own count)
 struct CStats {
-  unsigned hits = 0, inserts = 0, evicted = 0, aged = 0, too_big = 0, drawn = 0, culled_view = 0, culled_far = 0,
+  unsigned far_skipped = 0, hits = 0, inserts = 0, evicted = 0, aged = 0, too_big = 0, drawn = 0, culled_view = 0, culled_far = 0,
            culled_old = 0;
   double copied = 0;  // bytes
 } g_cs;
@@ -929,7 +943,7 @@ uint64_t WeldKey(const void* verts, DWORD count, const void* idx, DWORD nidx, DW
 
 // RStats (ReflectLog).
 struct RStats {
-  unsigned faces_skipped = 0, frames = 0, passes = 0, tris = 0, skipped_no_tris = 0, faces = 0, replays = 0, replay_stale = 0,
+  unsigned faces_skipped = 0, frames = 0, passes = 0, tris = 0, skipped_no_tris = 0, faces = 0, replays = 0, replay_stale = 0, replay_far = 0,
            sky_tiles_drawn = 0, cube_builds = 0, records = 0, sun_draws = 0;
   double pass_s = 0, cube_s = 0, record_s = 0;
   unsigned capture_bike = 0, capture_cam = 0;
@@ -1354,6 +1368,52 @@ void Device::ReflectPass(const Draw& d) {
   g_st.pass_s += Now() - t0;
 }
 
+bool ReflectInRange(ReflectReplay& r, const uint8_t* pos, unsigned stride, const unsigned* starts,
+                    const unsigned* counts, size_t n) {
+  r.bounded = false;
+  if (!pos || !n || g_range <= 0) {
+    ++g_rs.unbounded;
+    return true;
+  }
+  float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+  const float* w = r.world;
+  auto take = [&](const uint8_t* v) {
+    float p[3];
+    std::memcpy(p, v, 12);
+    for (int k = 0; k < 3; ++k) {
+      const float q = p[0] * w[k] + p[1] * w[4 + k] + p[2] * w[8 + k] + w[12 + k];
+      lo[k] = std::min(lo[k], q);
+      hi[k] = std::max(hi[k], q);
+    }
+  };
+  for (size_t i = 0; i < n; ++i) {
+    const unsigned c = counts[i];
+    if (!c) continue;
+    const uint8_t* v = pos + static_cast<size_t>(starts[i]) * stride;
+    const unsigned step = c > 8 ? c / 8 : 1;
+    for (unsigned j = 0; j < c; j += step) take(v + static_cast<size_t>(j) * stride);
+    take(v + static_cast<size_t>(c - 1) * stride);
+  }
+  if (!(lo[0] <= hi[0])) {
+    ++g_rs.unbounded;
+    return true;
+  }
+  // Sampled points can miss a draw's far corners: a margin of a tenth of
+  // the range, at least 64 units.
+  const float margin = std::max(64.0f, g_range * 0.1f);
+  for (int k = 0; k < 3; ++k) {
+    r.lo[k] = lo[k] - margin;
+    r.hi[k] = hi[k] + margin;
+  }
+  r.bounded = true;
+  if (BoxDist2(r.lo, r.hi, g_range_eye) > g_range * g_range) {
+    ++g_rs.out;
+    return false;
+  }
+  ++g_rs.in;
+  return true;
+}
+
 void Device::ReflectRecord(const ReflectReplay& r) {
   const double t0 = Now();
   g_replays.push_back(r);
@@ -1399,6 +1459,8 @@ void Device::ReflectCache(const ReflectReplay& r, const uint8_t* cpu, UINT cpu_s
   const double now = Now();
   float w[16];
   std::memcpy(w, r.world, sizeof(w));
+  static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  const bool world_identity = std::memcmp(w, kIdentity, sizeof(w)) == 0;
   for (size_t si = 0; si < nsubs; ++si) {
     const ReflectSub& sd = subs[si];
     if (!sd.nverts || (r.indexed && !sd.nidx)) continue;
@@ -1415,6 +1477,16 @@ void Device::ReflectCache(const ReflectReplay& r, const uint8_t* cpu, UINT cpu_s
     };
     for (DWORD i = 0; i < sd.nverts; i += step) take(i);
     take(sd.nverts - 1);
+    // ReflectMaxRange: a far piece of a batch (scenery in world space) is
+    // not kept.
+    if (g_range > 0 && world_identity) {
+      const float m = std::max(64.0f, g_range * 0.1f);
+      const float blo[3] = {slo[0] - m, slo[1] - m, slo[2] - m}, bhi[3] = {shi[0] + m, shi[1] + m, shi[2] + m};
+      if (BoxDist2(blo, bhi, g_range_eye) > g_range * g_range) {
+        ++g_cs.far_skipped;
+        continue;
+      }
+    }
     int32_t q[6];
     for (int k = 0; k < 3; ++k) {
       q[k] = static_cast<int32_t>(std::floor(slo[k] * (1.0f / kCacheGrid)));
@@ -1560,14 +1632,19 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
       // recent, near the bike, and out of the camera's view (what is in view
       // was drawn this frame if the game still draws it).
       g_cache_draw.clear();
+      float fog_end = 0;
+      std::memcpy(&fog_end, &rs_[RS_FOGEND], 4);
+      fog_end *= GetConfig().fog_scale;
+      fog_end = rs_[RS_FOGENABLE] && fog_end > 1 ? fog_end : f;
+      // ReflectMaxRange: how far from the bike world draws count (the
+      // replays below and the next frame's records and cache).
+      const float range = Cfg().max_range > 0 ? std::min(Cfg().max_range, fog_end) : fog_end;
+      g_range = range;
+      std::memcpy(g_range_eye, eye, sizeof(eye));
       if (Cfg().cache && !g_cache.empty() && g.cvb) {
         float radius = Cfg().cache_radius;
-        if (radius <= 0) {
-          float fe = 0;
-          std::memcpy(&fe, &rs_[RS_FOGEND], 4);
-          fe *= GetConfig().fog_scale;
-          radius = rs_[RS_FOGENABLE] && fe > 1 ? fe : f;
-        }
+        if (radius <= 0) radius = fog_end;
+        if (Cfg().max_range > 0) radius = std::min(radius, Cfg().max_range);
         g_cache_radius_used = radius;
         float cvp[16];
         Mul(&view_.m[0][0], &proj_.m[0][0], cvp);
@@ -1683,6 +1760,10 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
               ++g_st.replay_stale;
               continue;
             }
+            if (r.bounded && BoxDist2(r.lo, r.hi, eye) > range * range) {
+              ++g_st.replay_far;
+              continue;
+            }
             if (!have_world || std::memcmp(last_world, r.world, sizeof(last_world)) != 0) {
               Mul(r.world, vpm, vc.wvp);
               b.ctx->UpdateSubresource(g.game_vs_cb, 0, nullptr, &vc, 0, 0);
@@ -1788,19 +1869,25 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
           g_st.cube_s * 1000 / fr, g_st.faces / fr, g_st.faces_skipped, g_st.replays / fr, g_st.replay_stale,
           static_cast<unsigned>(g_sky.size()), g_st.cube_builds, g_st.record_s * 1000 / fr, g_st.records / fr,
           g_st.sun_draws, g_st.passes, g_st.capture_bike, g_st.capture_cam, g_obj_draws, g_xforms, g_ranges.size());
+      if (Cfg().mode == 2)
+        Log("reflections 5s range: world draws within %.0f of the bike (ReflectMaxRange %.0f): %u recorded, %u left out "
+            "as too far, %u without bounds; %.1f replays/face left out as too far",
+            g_range, Cfg().max_range, g_rs.in, g_rs.out, g_rs.unbounded,
+            g_st.faces ? double(g_st.replay_far) / g_st.faces : 0.0);
       if (Cfg().mode == 2 && Cfg().cache) {
         size_t vb = 0, ib = 0;
         for (const auto& kv : g_cache) vb += kv.second.vbytes, ib += kv.second.ibytes;
         Log("reflections 5s cache: %zu draws kept (%.1f MB of %.1f), radius %.0f; per frame: %.1f found again, %.1f new "
             "(%.1f KB copied), %.1f cached draws drawn per cube update; left out: %u in view, %u too far, %u too old; "
-            "%u pushed out (full), %u aged out, %u too big",
+            "%u pushed out (full), %u aged out, %u too big; %.1f/frame too far to keep",
             g_cache.size(), (vb + ib) / 1048576.0, (g.cvb_size + g.cib_size) / 1048576.0, g_cache_radius_used,
             g_cs.hits / fr, g_cs.inserts / fr, g_cs.copied / 1024 / fr,
             g_st.cube_builds ? double(g_cs.drawn) / g_st.faces : 0.0, g_cs.culled_view, g_cs.culled_far,
-            g_cs.culled_old, g_cs.evicted, g_cs.aged, g_cs.too_big);
+            g_cs.culled_old, g_cs.evicted, g_cs.aged, g_cs.too_big, g_cs.far_skipped / fr);
       }
     }
     g_cs = CStats{};
+    g_rs = RangeStats{};
     g_st = RStats{};
     g_obj_draws = g_xforms = 0;
     g_st_since = now;

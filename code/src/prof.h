@@ -37,6 +37,9 @@ enum Zone : int {
   kGetDC,         // GetDC .. ReleaseDC
   kClear,         // Device::Clear
   kGdiText,       // the game's TextOut / DrawText calls (GPU text or GDI)
+  kReflect,       // Reflections: the cube faces drawn at the end of the scene
+  kReflectCache,  //   Reflections: world draws kept for later frames (per draw)
+  kObjectWalk,    // FastObjectWalk: the game's object passes walked by mcm2fix
   kZoneCount
 };
 

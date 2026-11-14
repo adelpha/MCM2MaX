@@ -16,8 +16,13 @@
 #include <cstring>
 #include <set>
 #include <string>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 #include "../config.h"
+
+void WalkSceneEnd();  // fixes_walk.cpp
 #include "directdraw.h"
 #include "msaa.h"
 #include "surface.h"
@@ -1072,7 +1077,11 @@ HRESULT Device::BeginScene() {
 }
 HRESULT Device::EndScene() {
   FlushBatch(kBreakScene);
-  if (ReflectMode() && !IsD3D9()) ReflectEndScene(g_pipe.layout, sizeof(GpuVertex));
+  WalkSceneEnd();  // FastObjectWalk: the scene's object list is done
+  if (ReflectMode() && !IsD3D9()) {
+    PROF_ZONE(kReflect);
+    ReflectEndScene(g_pipe.layout, sizeof(GpuVertex));
+  }
   if (MotionBlurOn()) MotionBlurReplay();  // the arrow, if no HUD draw came after the scene
   RaceTitleDraw(rt_);  // countdown race title, under the HUD panels' text
   HudTextFlush();  // race HUD text goes over everything the scene drew
@@ -1369,10 +1378,32 @@ HRESULT Device::DrawPrimitive(DWORD prim, DWORD fvf, void* v, DWORD n, DWORD) {
   return D3D_OK;
 }
 
+namespace {
+// The game's draw call this came from, when it came through the game's D3D
+// wrapper (0x4ca270, which returns to us at 0x4ca2ed): that wrapper pushes
+// four registers and passes on its seven arguments, so its own return address
+// is 0x34 bytes above ours. `ret` is where our return address is.
+uint32_t GameDrawSite(void* const* ret) {
+  if (reinterpret_cast<uintptr_t>(ret[0]) != 0x4CA2ED) return 0;
+  return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ret[0x34 / 4]));
+}
+// StillScenery: terrain patches (0x481c00: detail layer, ground; 0x481f20),
+// and close-up trees (0x457dc0): positions placed in the world once.
+bool IsSceneryDraw(uint32_t site) {
+  return site == 0x481D1E || site == 0x481DFE || site == 0x4820AF || site == 0x457E14;
+}
+}  // namespace
+
 HRESULT Device::DrawIndexedPrimitive(DWORD prim, DWORD fvf, void* v, DWORD nv, WORD* idx,
                                      DWORD ni, DWORD) {
+#ifdef _MSC_VER
+  void* const* ret_slot = static_cast<void* const*>(_AddressOfReturnAddress());
+#else
+  void* const* ret_slot = static_cast<void* const*>(__builtin_frame_address(0)) + 1;
+#endif
   DD_LOCK;
   if (!v || !nv || !idx || !ni) return D3D_OK;
+  const bool scenery = GetConfig().still_scenery && IsSceneryDraw(GameDrawSite(ret_slot));
   Draw d;
   d.prim = prim;
   d.verts = static_cast<const uint8_t*>(v);
@@ -1384,7 +1415,8 @@ HRESULT Device::DrawIndexedPrimitive(DWORD prim, DWORD fvf, void* v, DWORD nv, W
   SmoothNoteDraw("drawidx", d.layout.tl, d.count);
   if (!d.layout.tl) {
     PROF_ZONE(kSmoothVerts);
-    d.verts = SmoothVertices(d.verts, d.layout.stride, nv, idx);
+    if (scenery) SmoothNoteScenery(d.verts, d.layout.stride, nv);
+    else d.verts = SmoothVertices(d.verts, d.layout.stride, nv, idx);
   }
   Submit(d);
   return D3D_OK;
@@ -2338,6 +2370,7 @@ void Device::SubmitDraw(const Draw& d) {
   // again into the reflection cube.
   if (mode == 0 && has_depth && !submitting_object_ && !ReflectCurrentObject() && ReflectRecording() &&
       !(tex_[0] && IsSkyTextureName(tex_[0]->TextureName()))) {
+    prep_zone.Switch(prof::kReflectCache);
     ReflectReplay r{};
     r.blend = bd.blend;
     r.depth = bd.depth;
@@ -2364,6 +2397,28 @@ void Device::SubmitDraw(const Draw& d) {
     r.base_vertex = base_vertex;
     r.vgen = vgen_;
     r.igen = igen_;
+    // ReflectMaxRange: far scenery (long view distances) is left out of the
+    // cube; its bounds come from a sample of the positions.
+    bool in_range = true;
+    if (d.verts && d.layout.stride) {
+      if (flushing_) {
+        range_starts_.clear();
+        range_counts_.clear();
+        for (const ReflectSub& sb : batch_out_.subs) {
+          range_starts_.push_back(sb.vstart);
+          range_counts_.push_back(sb.nverts);
+        }
+        in_range = ReflectInRange(r, batch_out_.verts.data(), d.layout.stride, range_starts_.data(),
+                                  range_counts_.data(), range_starts_.size());
+      } else {
+        const unsigned start = 0, count = d.count;
+        in_range = ReflectInRange(r, d.verts + static_cast<size_t>(d.first) * d.layout.stride, d.layout.stride,
+                                  &start, &count, 1);
+      }
+    } else {
+      r.bounded = false;
+    }
+    if (!in_range) return;
     ReflectRecord(r);
     // Kept for later frames (behind the camera), when the draw writes depth.
     if (rs_[RS_ZWRITEENABLE] && d.verts && d.layout.stride) {

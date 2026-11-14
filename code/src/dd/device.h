@@ -308,6 +308,7 @@ class Device : public d3d7::IDirect3DDevice7 {
     std::vector<ReflectSub> subs;  // the game's draws in it (reflection cache)
   };
   Batch batch_, batch_out_;
+  std::vector<unsigned> range_starts_, range_counts_;  // ReflectMaxRange scratch
   bool flushing_ = false;
   std::vector<uint8_t> scratch_;
   std::vector<WORD> scratch_idx_;

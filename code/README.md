@@ -259,11 +259,16 @@ ReflectGround=1
 ; (0). ReflectCacheMB: memory for it (default 32). ReflectCacheSecs: how long
 ; something not drawn any more is kept (default 20). ReflectCacheRadius: how
 ; far from the bike kept things are reflected (0 = as far as the fog ends,
-; the default).
+; the default). ReflectMaxRange: the reflection leaves out terrain and
+; scenery further than this from the bike, whatever ViewDistance is (default
+; 1024, a little past the fog at ViewDistance=1; 0 = no limit). Far scenery
+; is too small to see in the reflection, and with a long view distance
+; drawing all of it again for the reflection costs frame rate.
 ReflectCache=1
 ReflectCacheMB=32
 ReflectCacheSecs=20
 ReflectCacheRadius=0
+ReflectMaxRange=1024
 
 ; Which parts reflect. ReflectBikeTextures: bike textures (name patterns, *
 ; matches anything) that reflect at ReflectBike. ReflectHelmetFrames: model
@@ -684,6 +689,20 @@ StateCache=1
 ; send each draw the game makes on its own (for troubleshooting).
 DrawBatch=1
 
+; StillScenery: 1 = terrain and close-up tree draws skip the high frame rate
+; smoothing's checks (default). The game places them in the world once and
+; never moves them, so there is nothing to smooth, but the checks compared
+; every point of them every frame, which added up at long view distances.
+; 0 = check them like everything else.
+StillScenery=1
+
+; FastObjectWalk: 1 = the game's two walks over the objects in view (trees,
+; then fences, signs and buildings) share one list made by the first walk,
+; so the second no longer visits every tree just to skip it (default). Same
+; objects in the same order. Helps most with a long ViewDistance. 0 = the
+; game's own walks.
+FastObjectWalk=1
+
 ; =============================================================================
 ; 3. LOGGING
 ;
@@ -757,6 +776,11 @@ InputLog=0
 ; SortLog: the game's sorts per calling code every 10 s (count, largest,
 ; time). Sorts over 2 ms are always logged. Default 0.
 SortLog=0
+
+; WalkLog: with FastObjectWalk, every 5 seconds how many object lists were
+; made and reused, their size, and now and then a check of a reused list
+; against a fresh walk. Default 0.
+WalkLog=0
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by
 ; SoundMaxDistanceMute. Default 0.

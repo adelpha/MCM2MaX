@@ -28,10 +28,19 @@ struct ReflectReplay {
   UINT nidx, ioff, count;
   INT base_vertex;
   unsigned vgen, igen;
+  // World-space bounds of the draw (sampled; ReflectMaxRange), valid if bounded.
+  float lo[3], hi[3];
+  bool bounded;
 };
 
 // Settings (read from mcm2fix.ini once).
 int ReflectMode();  // 0 off, 1 sky cube, 2 live cube
+// ReflectMaxRange: sets r.lo/hi/bounded from a sample of the draw's
+// positions (pos: first position, `stride` apart, through r.world) and says
+// whether it is within the live cube's range of the bike this frame (false:
+// too far to matter in the reflection, nothing to record or cache).
+bool ReflectInRange(ReflectReplay& r, const uint8_t* pos, unsigned stride, const unsigned* starts,
+                    const unsigned* counts, size_t n);
 // The game's sky box tiles are textures named <sky>_<offset>, sky one of
 // the SKIES.RES cubes (terraNN, burnNN, windNN).
 bool IsSkyTextureName(const std::string& n);

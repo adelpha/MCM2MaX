@@ -40,7 +40,7 @@ const char* const kZoneNames[kZoneCount] = {
     "tick",      "sim",       "sim.control", "sim.manager", "sim.state", "draw",      "smooth.begin",
     "smooth.end", "present",  "postframe",   "flip",        "capwait",   "hudflush",  "compose",
     "swappresent", "submit",  "vertexprep",  "stateapply", "drawcall",  "smoothverts", "upload",  "readback",
-    "keyed",     "blt",       "lock",        "getdc",       "clear",     "gditext",
+    "keyed",     "blt",       "lock",        "getdc",       "clear",     "gditext",   "reflect",   "reflcache", "objwalk",
 };
 const char* const kCounterNames[cCounterCount] = {
     "steps", "draws", "draws_tl", "draws_idx", "verts", "indices", "tex_changes", "state_changes",

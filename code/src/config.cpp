@@ -139,6 +139,9 @@ void LoadConfig() {
   g_config.state_cache = GetPrivateProfileIntA("mcm2fix", "StateCache", 1, ini) != 0;
   g_config.dd_stats = GetPrivateProfileIntA("mcm2fix", "DDStats", 0, ini) != 0;
   g_config.draw_batch = GetPrivateProfileIntA("mcm2fix", "DrawBatch", 1, ini) != 0;
+  g_config.still_scenery = GetPrivateProfileIntA("mcm2fix", "StillScenery", 1, ini) != 0;
+  g_config.fast_object_walk = GetPrivateProfileIntA("mcm2fix", "FastObjectWalk", 1, ini) != 0;
+  g_config.walk_log = GetPrivateProfileIntA("mcm2fix", "WalkLog", 0, ini) != 0;
   g_config.batch_log = GetPrivateProfileIntA("mcm2fix", "BatchLog", 0, ini) != 0;
   g_config.draw_log = GetPrivateProfileIntA("mcm2fix", "DrawLog", 0, ini) != 0;
   {
