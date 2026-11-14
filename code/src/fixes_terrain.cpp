@@ -421,6 +421,7 @@ void ProbeNode(ProbeCtx& p, const uint8_t* n, int depth) {
 }
 
 bool g_probe_walked = false;
+volatile bool g_dump_pending = false;
 
 void ProbeTerrain(const uint8_t* root) {
   if (dd::ProbeStage() != 2) {
@@ -449,6 +450,23 @@ void ArmProbe() {
   dd::ProbeArm(2.0f * (pt.x + 0.5f) / rc.right - 1.0f, 1.0f - 2.0f * (pt.y + 0.5f) / rc.bottom);
 }
 
+bool KeyPressed(int vk, bool& was);
+bool OurWindowInFront();
+
+// Ctrl+F11 is watched on its own thread: the terrain is not drawn while the
+// game is paused, and pausing is how the mouse cursor gets over a gap.
+DWORD WINAPI KeyThread(void*) {
+  bool f11 = false;
+  for (;;) {
+    Sleep(15);
+    const bool hit = KeyPressed(VK_F11, f11);
+    if (hit && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && OurWindowInFront()) {
+      ArmProbe();
+      g_dump_pending = true;
+    }
+  }
+}
+
 bool KeyPressed(int vk, bool& was) {
   const bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
   const bool hit = down && !was;
@@ -463,9 +481,9 @@ bool OurWindowInFront() {
 }
 
 void Keys(const uint8_t* root) {
-  static bool f9 = false, f11 = false;
+  static bool f9 = false;
   const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && OurWindowInFront();
-  const bool k9 = KeyPressed(VK_F9, f9), k11 = KeyPressed(VK_F11, f11);
+  const bool k9 = KeyPressed(VK_F9, f9);
   if (ctrl && k9) {
     if (!g_lod_hooked) {
       patch::Log("terrain: TerrainLodFix hook not installed (code differs); Ctrl+F9 does nothing");
@@ -474,9 +492,9 @@ void Keys(const uint8_t* root) {
       patch::Log("terrain: TerrainLodFix %s (Ctrl+F9)", g_lod_fix ? "ON" : "off");
     }
   }
-  if (ctrl && k11) {
+  if (g_dump_pending) {
+    g_dump_pending = false;
     Dump(root);
-    ArmProbe();
   }
 }
 
@@ -548,5 +566,6 @@ void ApplyTerrainFixes() {
     return;
   }
   patch::Call(kRenderCall, reinterpret_cast<const void*>(&RenderHook), 5);
+  if (HANDLE t = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr)) CloseHandle(t);
   patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F11 dump + probe under the mouse cursor)");
 }

@@ -11,8 +11,8 @@
 namespace dd {
 namespace {
 
-int g_stage = 0;
-float g_nx = 0, g_ny = 0;
+volatile int g_stage = 0;
+volatile float g_nx = 0, g_ny = 0;
 float g_view_proj[16];
 bool g_have_view = false;
 unsigned g_scenes = 0, g_draws = 0, g_hit_draws = 0, g_terrain_draws = 0, g_lines = 0;
@@ -50,8 +50,9 @@ bool Inside(float px, float py, const float* a, const float* b, const float* c, 
 void ProbeArm(float nx, float ny) {
   g_nx = nx;
   g_ny = ny;
-  g_stage = 1;
   g_scenes = g_draws = g_hit_draws = g_terrain_draws = g_lines = 0;
+  g_have_view = false;
+  g_stage = 1;
   patch::Log("probe: armed at %.4f %.4f (normalised); next frame captures the terrain view, the one after logs draws",
              nx, ny);
 }
