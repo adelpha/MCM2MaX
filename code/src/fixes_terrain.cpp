@@ -27,8 +27,10 @@
 // frame and logs what it finds, with statistics every 5 seconds.
 //
 // Debug keys (TerrainLog=1, game window in front):
-//   Ctrl+F9   one-colour far terrain off/on (threshold terrain+0xca4 held at 0)
-//   Ctrl+F10  far plane off/on (scene projection only, dd/device.cpp)
+//   Ctrl+F9   terrain cache trim limits x64 / original
+//   Ctrl+F10  re-mesh visible collapsed blocks with an empty mesh, every frame
+// (terr-2 had one-colour far terrain and far plane switches: neither filled
+// the gaps.)
 //   Ctrl+F11  write the terrain tree (visible nodes) and the camera to the log
 // (terr-1 had culling switches on F9/F10: turning culling off did not fill
 // the gaps StOo sees, so they are gone.)
@@ -40,9 +42,6 @@
 #include "config.h"
 #include "patch.h"
 
-namespace dd {
-extern bool g_debug_no_far_plane;
-}
 
 namespace {
 
@@ -68,8 +67,8 @@ T At(const void* p, size_t off) {
   return v;
 }
 
-bool g_far_colour_off = false;
-int g_saved_ca4 = -1;
+bool g_force_remesh = false;
+bool g_big_cache = false;
 bool g_cull_sub_off = false;
 bool g_cull_node_off = false;
 
@@ -122,6 +121,7 @@ void Walk(const uint8_t* n, int depth) {
   if ((flags & 1) && !(flags & 8)) {  // collapsed: whole mesh
     ++g_st.collapsed;
     if (At<int16_t>(d, 0x13C) == 0) {
+      if (g_force_remesh) const_cast<uint8_t*>(d)[0x121] |= 2;  // Ctrl+F10: mesh it again
       ++g_st.holes_collapsed;
       if (g_hole_logs < kMaxHoleLogs) {
         ++g_hole_logs;
@@ -238,25 +238,30 @@ bool OurWindowInFront() {
 // one colour, terrain+0xc9c, once its texture detail falls under the detail
 // row's threshold terrain+0xca4) off, by holding that threshold at 0.
 
+// Ctrl+F9: the terrain update's cache trims (0x50cdc0: cache +0xc84 trimmed
+// when its unused part passes 1 MB, cache +0xc88 likewise down to 512 KB)
+// with 64 times the room.
+void SetCacheLimits(bool big) {
+  const uint32_t k = big ? 64 : 1;
+  const uint32_t a = 0x100000 * k, b = 0x80000 * k;
+  patch::Write(0x50CE30, &a, 4);
+  patch::Write(0x50CE4B, &a, 4);
+  patch::Write(0x50CE88, &a, 4);
+  patch::Write(0x50CE97, &b, 4);
+}
+
 void Keys(const uint8_t* root) {
   static bool f9 = false, f10 = false, f11 = false;
   const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && OurWindowInFront();
   const bool k9 = KeyPressed(VK_F9, f9), k10 = KeyPressed(VK_F10, f10), k11 = KeyPressed(VK_F11, f11);
-  uint8_t* terrain = At<uint8_t*>(root, 0x34);
   if (ctrl && k9) {
-    g_far_colour_off = !g_far_colour_off;
-    patch::Log("terrain: one-colour far terrain %s (Ctrl+F9), threshold was %d", g_far_colour_off ? "OFF" : "on",
-               terrain ? At<int>(terrain, 0xCA4) : -1);
-    if (!g_far_colour_off && terrain && g_saved_ca4 >= 0) *reinterpret_cast<int*>(terrain + 0xCA4) = g_saved_ca4;
-  }
-  if (g_far_colour_off && terrain) {
-    const int v = At<int>(terrain, 0xCA4);
-    if (v) g_saved_ca4 = v;
-    *reinterpret_cast<int*>(terrain + 0xCA4) = 0;
+    g_big_cache = !g_big_cache;
+    SetCacheLimits(g_big_cache);
+    patch::Log("terrain: cache trim limits %s (Ctrl+F9)", g_big_cache ? "x64" : "original");
   }
   if (ctrl && k10) {
-    dd::g_debug_no_far_plane = !dd::g_debug_no_far_plane;
-    patch::Log("terrain: far plane %s (Ctrl+F10)", dd::g_debug_no_far_plane ? "OFF" : "on");
+    g_force_remesh = !g_force_remesh;
+    patch::Log("terrain: re-mesh empty collapsed blocks %s (Ctrl+F10)", g_force_remesh ? "ON" : "off");
   }
   if (ctrl && k11) Dump(root);
 }
@@ -269,11 +274,11 @@ void Report() {
   patch::Log(
       "terrain 5s: %u frames; per frame: nodes %.0f visible %.0f (max %u) collapsed %.0f, sub-blocks drawn %.0f "
       "culled %.0f, children %.0f, meshed %.1f (max %u); render step %.3f ms (max %.2f); vertex buffers %d "
-      "(%d KB); far colour %s, far plane %s",
+      "(%d KB); empty collapsed blocks %.0f; cache x64 %s, re-mesh %s",
       g_st.frames, g_st.nodes / f, g_st.visible / f, g_st.max_visible, g_st.collapsed / f, g_st.subs_drawn / f,
       g_st.subs_culled / f, g_st.children_drawn / f, g_st.meshes / f, g_st.max_meshes, g_st.render_ms / f,
       g_st.max_render_ms, *reinterpret_cast<int*>(kVbCount), *reinterpret_cast<int*>(kVbBytes) / 1024,
-      g_far_colour_off ? "OFF" : "on", dd::g_debug_no_far_plane ? "OFF" : "on");
+      g_st.holes_collapsed / f, g_big_cache ? "on" : "off", g_force_remesh ? "on" : "off");
   g_st = Stats();
   g_st.start = now;
 }
@@ -313,5 +318,5 @@ void ApplyTerrainFixes() {
     return;
   }
   patch::Call(kRenderCall, reinterpret_cast<const void*>(&RenderHook), 5);
-  patch::Log("terrain log: on (Ctrl+F9 one-colour far terrain, Ctrl+F10 far plane, Ctrl+F11 dump)");
+  patch::Log("terrain log: on (Ctrl+F9 cache limits x64, Ctrl+F10 re-mesh empty blocks, Ctrl+F11 dump)");
 }
