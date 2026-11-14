@@ -2369,6 +2369,7 @@ void Device::SubmitDraw(const Draw& d) {
   // Reflections=2: keep world draws (not bikes, riders or the sky) to draw
   // again into the reflection cube.
   if (mode == 0 && has_depth && !submitting_object_ && !ReflectCurrentObject() && ReflectRecording() &&
+      ReflectFrameDue() &&
       !(tex_[0] && IsSkyTextureName(tex_[0]->TextureName()))) {
     prep_zone.Switch(prof::kReflectCache);
     ReflectReplay r{};

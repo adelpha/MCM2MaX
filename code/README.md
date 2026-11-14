@@ -264,11 +264,15 @@ ReflectGround=1
 ; 1024, a little past the fog at ViewDistance=1; 0 = no limit). Far scenery
 ; is too small to see in the reflection, and with a long view distance
 ; drawing all of it again for the reflection costs frame rate.
+; ReflectFaceRate: how many of the reflection's six sides are redrawn per
+; second, at most (default 60, so the whole reflection about 10 times a
+; second; 0 = one side every frame). Frames that redraw none skip the work.
 ReflectCache=1
 ReflectCacheMB=32
 ReflectCacheSecs=20
 ReflectCacheRadius=0
 ReflectMaxRange=1024
+ReflectFaceRate=60
 
 ; Which parts reflect. ReflectBikeTextures: bike textures (name patterns, *
 ; matches anything) that reflect at ReflectBike. ReflectHelmetFrames: model

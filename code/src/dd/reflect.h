@@ -51,5 +51,8 @@ const void* ReflectCurrentObject();
 void ReflectInstallHooks();
 // A device is going away: drop the draw cache (it holds the device's states).
 void ReflectForget();
+// ReflectFaceRate: whether this frame will redraw a cube face (world draws
+// are only recorded then).
+bool ReflectFrameDue();
 
 }  // namespace dd

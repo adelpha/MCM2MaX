@@ -102,6 +102,9 @@ struct RCfg {
   // of the live cube (drawn, cached and recorded), whatever the view distance
   // (0: no limit, the fog end).
   float max_range = 1024.0f;
+  // ReflectFaceRate: most cube faces redrawn per second (0 = one every
+  // frame). Frames that will not redraw one skip recording world draws.
+  float face_rate = 60.0f;
   std::vector<Pattern> textures;  // texture name -> strength (bikes, plus ReflectTextures)
   std::vector<Pattern> frames;    // frame name -> strength (helmet, plus ReflectFrames)
   std::vector<Pattern> skip_objects;  // ReflectSkipObjects: objects with any of these frames get no reflections
@@ -192,6 +195,7 @@ const RCfg& Cfg() {
   g_cfg.cache_secs = std::clamp(ReadF("ReflectCacheSecs", 20.0f, ini), 0.5f, 600.0f);
   g_cfg.cache_radius = std::clamp(ReadF("ReflectCacheRadius", 0.0f, ini), 0.0f, 1e6f);
   g_cfg.max_range = std::clamp(ReadF("ReflectMaxRange", 1024.0f, ini), 0.0f, 1e6f);
+  g_cfg.face_rate = std::clamp(ReadF("ReflectFaceRate", 60.0f, ini), 0.0f, 10000.0f);
   int size = static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectSize", 128, ini));
   int p = 16;
   while (p < size && p < 1024) p <<= 1;
@@ -955,6 +959,11 @@ std::vector<ReflectReplay> g_replays;
 int g_face_cursor = 0;
 unsigned g_frame = 0;
 bool g_saw_3d = false;
+// ReflectFaceRate: whether this frame may redraw a face (decided at the end
+// of the last one), and when one was last redrawn.
+bool g_face_due = true;
+double g_last_face_t = 0;
+unsigned g_frames_not_due = 0;
 // Where the cube is drawn from: the reflective draw nearest the camera last
 // frame (the player's bike), else the camera.
 // Per object this frame: sum of its reflective vertices (world).
@@ -1429,6 +1438,8 @@ void ReflectForget() {
 
 bool Device::ReflectRecording() const { return Cfg().mode == 2 && !IsD3D9(); }
 
+bool ReflectFrameDue() { return g_face_due; }
+
 void Device::ReflectCache(const ReflectReplay& r, const uint8_t* cpu, UINT cpu_stride, const ReflectSub* subs,
                           size_t nsubs, UINT gpu_stride) {
   if (!Cfg().cache || Cfg().mode != 2 || !cpu || !nsubs || !vbuf_ || (r.indexed && !ibuf_)) return;
@@ -1584,6 +1595,10 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
           stale = true;
           break;
         }
+      if (!g_face_due) {
+        ++g_frames_not_due;
+        goto no_faces;
+      }
       if (stale) {
         ++g_st.faces_skipped;
         goto no_faces;
@@ -1597,6 +1612,7 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
   no_faces:
     if (g_sky.empty() && g_replays.empty()) nfaces = 0;
     if (nfaces) {
+      g_last_face_t = Now();
       if (Cfg().mode == 1 || nfaces == 6) g_sky_dirty = false;
       float eye[3], cam[3], best = 1e30f;
       CameraPos(view_, cam);
@@ -1840,6 +1856,10 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
       if (s) s->Release();
   g_replays.clear();
   g_obj_acc.clear();
+  // ReflectFaceRate: may the next frame redraw a face (and so record its
+  // world draws)?
+  g_face_due = Cfg().mode != 2 || Cfg().face_rate <= 0 || !g.cube_valid ||
+               Now() - g_last_face_t >= 0.9 / Cfg().face_rate;
   ++g_cache_frame;
   // Old entries go (their textures with them), a little at a time.
   if (g_cache_frame % 30 == 0 && !g_cache.empty()) {
@@ -1871,9 +1891,10 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
           g_st.sun_draws, g_st.passes, g_st.capture_bike, g_st.capture_cam, g_obj_draws, g_xforms, g_ranges.size());
       if (Cfg().mode == 2)
         Log("reflections 5s range: world draws within %.0f of the bike (ReflectMaxRange %.0f): %u recorded, %u left out "
-            "as too far, %u without bounds; %.1f replays/face left out as too far",
+            "as too far, %u without bounds; %.1f replays/face left out as too far; ReflectFaceRate %.0f: %u frames "
+            "recorded nothing (no face due)",
             g_range, Cfg().max_range, g_rs.in, g_rs.out, g_rs.unbounded,
-            g_st.faces ? double(g_st.replay_far) / g_st.faces : 0.0);
+            g_st.faces ? double(g_st.replay_far) / g_st.faces : 0.0, Cfg().face_rate, g_frames_not_due);
       if (Cfg().mode == 2 && Cfg().cache) {
         size_t vb = 0, ib = 0;
         for (const auto& kv : g_cache) vb += kv.second.vbytes, ib += kv.second.ibytes;
@@ -1888,6 +1909,7 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
     }
     g_cs = CStats{};
     g_rs = RangeStats{};
+    g_frames_not_due = 0;
     g_st = RStats{};
     g_obj_draws = g_xforms = 0;
     g_st_since = now;
