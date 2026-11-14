@@ -29,6 +29,7 @@ add_library(mcm2fix SHARED
   src/fixes_reverb.cpp
   src/fixes_sort.cpp
   src/fixes_walk.cpp
+  src/fartrees.cpp
   src/fixes_ai.cpp
   src/diagnostics.cpp
   src/crash.cpp

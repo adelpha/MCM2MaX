@@ -14,6 +14,8 @@
 #include "backend.h"
 #include "d3d7.h"
 
+struct FarTreeFrame;
+
 namespace dd {
 struct ReflectReplay;
 
@@ -195,6 +197,15 @@ class Device : public d3d7::IDirect3DDevice7 {
     const uint8_t* game_verts = nullptr;  // the game's own vertex array (before SimSmooth), if known
   };
   void Submit(const Draw& d);
+ public:
+  // FarTrees (fartrees.cpp): draws the far trees with the current state.
+  bool DrawFarTrees(const ::FarTreeFrame& f);
+ private:
+  ID3D11Buffer* tree_buf_ = nullptr;
+  ID3D11ShaderResourceView* tree_srv_ = nullptr;
+  ID3D11Buffer* tree_cb_ = nullptr;
+  size_t tree_cap_ = 0;   // trees the buffer holds
+  size_t tree_sent_ = 0;  // trees uploaded so far
   bool BatchAdd(const Draw& d);
   bool StageStateUnused(DWORD stage, DWORD type) const;
   HRESULT SetTransformNow(DWORD type, d3d7::D3DMATRIX* m);

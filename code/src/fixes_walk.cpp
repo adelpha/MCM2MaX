@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "config.h"
+#include "fartrees.h"
 #include "patch.h"
 #include "prof.h"
 
@@ -230,6 +231,8 @@ void* __fastcall VegNext(void* grid, void*) {
   if (!g_veg.active || g_veg.grid != grid || g_veg.pass != pass) {
     // A new pass (the vegetation pass restarted the query just before).
     g_veg.active = false;
+    FarTreesFrameEnd();
+    FarTreesPassStart();
     if (ListValid(grid)) {
       ++g_st.reused_veg;
       MaybeCheck(grid);
@@ -266,6 +269,7 @@ void* __fastcall VegNext(void* grid, void*) {
       void* obj = list.ents[from + i].obj;
       // vfunc 0: the object works out its depth key (obj+6).
       reinterpret_cast<ThisVoid>((*static_cast<void***>(obj))[0])(obj, nullptr);
+      if (FarTreeSkip(obj)) continue;  // FarTrees: drawn on the GPU instead
       g_veg.cur.push_back({static_cast<uint32_t>(At<uint16_t>(obj, 6)) << 16 | static_cast<uint32_t>(i), obj});
     }
     // By key, objects with the same key in the order found (the game's sort

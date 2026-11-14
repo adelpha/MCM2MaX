@@ -29,6 +29,9 @@ struct Config {
   bool still_scenery = true;  // StillScenery: terrain and tree draws skip the SimSmooth vertex checks (device.cpp)
   bool fast_object_walk = true;  // FastObjectWalk: the scene's object passes walk a flat list (fixes_walk.cpp)
   bool walk_log = false;      // WalkLog: FastObjectWalk statistics every 5 s
+  bool far_trees = true;      // FarTrees: far tree billboards drawn on the GPU (fartrees.cpp)
+  float far_tree_distance = 0;  // FarTreeDistance: from how far (0 = automatic)
+  bool far_tree_log = false;  // FarTreeLog: statistics every 5 s and a check against the game's billboards
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)
   bool batch_log = false;     // BatchLog: log draw batching every 5 s
   bool draw_log = false;      // DrawLog: measure which draw calls could be merged (dd/drawlog.cpp)

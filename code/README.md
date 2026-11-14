@@ -707,6 +707,16 @@ StillScenery=1
 ; game's own walks.
 FastObjectWalk=1
 
+; FarTrees: 1 = distant trees are drawn by the graphics card in one go,
+; from numbers written down once per tree, instead of the game building
+; every billboard again each frame (default). They look the same; the game
+; still draws the trees near the camera. Needs FastObjectWalk=1 and the
+; Direct3D 11 renderer. FarTreeDistance: from how far (in the game's depth
+; units; 0 = automatic, one and a half times the distance of the 3D trees,
+; and never closer than that). 0 = the game builds them all.
+FarTrees=1
+FarTreeDistance=0
+
 ; =============================================================================
 ; 3. LOGGING
 ;
@@ -785,6 +795,12 @@ SortLog=0
 ; made and reused, their size, and now and then a check of a reused list
 ; against a fresh walk. Default 0.
 WalkLog=0
+
+; FarTreeLog: with FarTrees, every 5 seconds how many trees are drawn by the
+; graphics card and how many are left to the game, and now and then a check
+; of the game's own billboards against the numbers far trees are drawn
+; from. Default 0.
+FarTreeLog=0
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by
 ; SoundMaxDistanceMute. Default 0.

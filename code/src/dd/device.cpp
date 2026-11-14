@@ -10,6 +10,7 @@
 #include "hudtext.h"
 #include "racetitle.h"
 #include "reflect.h"
+#include "../fartrees.h"
 
 #include <algorithm>
 #include <cmath>
@@ -145,6 +146,47 @@ VSOut vs_main(VSIn i) {
 #endif
   return o;
 }
+#ifdef TREES
+// FarTrees (fartrees.cpp): the game's far tree billboards, made here from
+// each tree's fixed numbers and the frame's camera. Same quad, texture
+// coordinates, colour and culling as the game's builder (0x45be20).
+Buffer<float4> ftrees : register(t4);
+cbuffer TreeParams : register(b3) {
+  float4 tr0;  // right x, right z, view _13, view _33
+  float4 tr1;  // view _43, key scale, key unit, far depth (minus eps)
+  float4 tr2;  // max depth, focal, min size, six_ac
+  float4 tr3;  // six on, six_84, six near, eps
+  float4 tcol;
+  float4 tspec;
+};
+VSOut vs_tree(uint id : SV_VertexID) {
+  VSOut o;
+  uint t = id / 6, c = id % 6;
+  uint corner = c < 3 ? c : (c == 3 ? 0 : c - 1);  // (0 1 2) (0 2 3)
+  float4 a = ftrees.Load(t * 3);      // x, z, bottom y, top y
+  float4 b = ftrees.Load(t * 3 + 1);  // left, right, H, -
+  float4 u = ftrees.Load(t * 3 + 2);  // u right, u left, v top, v bottom
+  float v = a.x * tr0.z + a.y * tr0.w + tr1.x;
+  float key = v * tr1.y;
+  key = key < 0 ? 0 : min(floor(key), 65535);
+  float depth = key * tr1.z;
+  bool six = tr3.x != 0 && ((tr3.y != 0 && depth < tr3.z) || (depth + tr3.w) * tr2.w < b.z);
+  bool draw = depth > tr1.w && depth < tr2.x && b.z * tr2.y / max(depth, 1e-6) > tr2.z && !six;
+  bool rside = corner == 0 || corner == 3;
+  float side = rside ? b.y : -b.x;
+  float3 pos = float3(a.x + side * tr0.x, corner < 2 ? a.z : a.w, a.y - side * tr0.y);
+  float4 p = mul(float4(pos, 1), wvp);
+  p.x += p.w / vp.z;
+  p.y -= p.w / vp.w;
+  o.pos = draw ? p : float4(0, 0, -2, 1);
+  o.fogw = p.w;
+  o.diff = tcol;
+  o.spec = tspec;
+  o.t0 = float2(rside ? u.x : u.y, corner < 2 ? u.w : u.z);
+  o.t1 = o.t0;
+  return o;
+}
+#endif
 float4 Arg(int a, float4 diff, float4 spec, float4 cur, float4 texc) {
   int sel = a & 15;
   float4 v = cur;
@@ -333,6 +375,8 @@ struct Pipeline {
   ID3D11VertexShader* vs_shadow[2] = {};
   ID3D11PixelShader* ps_shadow[2] = {};
   bool shadow_ok = false;
+  // FarTrees, [flat].
+  ID3D11VertexShader* vs_tree[2] = {};
   ID3D11InputLayout* layout = nullptr;
   ID3D11VertexShader* clear_vs = nullptr;
   ID3D11PixelShader* clear_ps = nullptr;
@@ -386,6 +430,13 @@ bool InitPipeline() {
     if (!g_pipe.vs_shadow[flat] || !g_pipe.ps_shadow[flat]) g_pipe.shadow_ok = false;
   }
   Log("rider shadows: terrain shader variant %s", g_pipe.shadow_ok ? "ready" : "FAILED (no GPU shadows)");
+  for (int flat = 0; flat < 2; ++flat) {
+    std::string src = std::string("#define TREES\n") + (flat ? "#define FLAT\n" : "") + kShader;
+    ID3DBlob* vs = Compile(src.c_str(), "vs_tree", "vs_4_0");
+    if (vs) b.device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &g_pipe.vs_tree[flat]);
+    SafeRelease(vs);
+  }
+  Log("far trees: shader %s", g_pipe.vs_tree[0] && g_pipe.vs_tree[1] ? "ready" : "FAILED (FarTrees off)");
   ID3DBlob* cvs = Compile(kClearShader, "vs_main", "vs_4_0");
   ID3DBlob* cps = Compile(kClearShader, "ps_main", "ps_4_0");
   if (!cvs || !cps) {
@@ -671,7 +722,8 @@ HRESULT VertexBuffer::ProcessVerticesStrided(DWORD, DWORD, DWORD, D3DDRAWPRIMITI
 // --------------------------------------------------------------------- Device
 
 namespace {
-Device* g_batch_owner = nullptr;  // the device with merged draws waiting (DrawBatch)
+Device* g_batch_owner = nullptr;
+Device* g_tree_device = nullptr;  // FarTrees: the device of the latest scene  // the device with merged draws waiting (DrawBatch)
 }  // namespace
 
 // ------------------------------------------------------------ draw batching
@@ -953,6 +1005,10 @@ Device::~Device() {
   SafeRelease(ibuf_);
   SafeRelease(vs_cb_);
   SafeRelease(ps_cb_);
+  SafeRelease(tree_srv_);
+  SafeRelease(tree_buf_);
+  SafeRelease(tree_cb_);
+  if (g_tree_device == this) g_tree_device = nullptr;
   if (g_bound.owner == this) g_bound = Bound{};
   dd_->Release();
 }
@@ -1073,6 +1129,7 @@ HRESULT Device::EnumTextureFormats(LPD3DENUMPIXELFORMATSCALLBACK cb, void* ctx) 
 
 HRESULT Device::BeginScene() {
   FlushBatch(kBreakScene);
+  g_tree_device = this;
   return D3D_OK;
 }
 HRESULT Device::EndScene() {
@@ -1403,7 +1460,11 @@ HRESULT Device::DrawIndexedPrimitive(DWORD prim, DWORD fvf, void* v, DWORD nv, W
 #endif
   DD_LOCK;
   if (!v || !nv || !idx || !ni) return D3D_OK;
-  const bool scenery = GetConfig().still_scenery && IsSceneryDraw(GameDrawSite(ret_slot));
+  const uint32_t site = GameDrawSite(ret_slot);
+  const bool scenery = GetConfig().still_scenery && IsSceneryDraw(site);
+  // FarTrees: the game's own tree billboards (FarTreeLog compares them with
+  // the numbers far trees are drawn from).
+  if (site == 0x45CB34 && fvf == 0x1E2) FarTreesCheckDraw(v, nv, idx, ni);
   Draw d;
   d.prim = prim;
   d.verts = static_cast<const uint8_t*>(v);
@@ -2433,6 +2494,131 @@ void Device::SubmitDraw(const Draw& d) {
       }
     }
   }
+}
+
+// ---- FarTrees (fartrees.cpp)
+
+namespace {
+struct TreeConstants {
+  float tr0[4], tr1[4], tr2[4], tr3[4], tcol[4], tspec[4];
+};
+}  // namespace
+
+bool FarTreesDrawable() {
+  if (!g_tree_device || IsD3D9()) return false;
+  return InitPipeline() && g_pipe.vs_tree[0] && g_pipe.vs_tree[1];
+}
+
+bool DrawFarTrees(const FarTreeFrame& f) {
+  if (!g_tree_device) return false;
+  return g_tree_device->DrawFarTrees(f);
+}
+
+bool Device::DrawFarTrees(const FarTreeFrame& f) {
+  if (IsD3D9() || !InitPipeline() || !g_pipe.vs_tree[0] || !g_pipe.vs_tree[1]) return false;
+  if (!f.count || !f.trees) return true;
+  FlushBatch(kBreakScreen);
+  Backend& b = B();
+  // The trees' numbers: a buffer that grows; only new trees are sent.
+  if (f.count > tree_cap_) {
+    {
+      size_t cap = tree_cap_ ? tree_cap_ : 4096;
+      while (cap < f.count) cap *= 2;
+      SafeRelease(tree_srv_);
+      SafeRelease(tree_buf_);
+      D3D11_BUFFER_DESC bd{};
+      bd.Usage = D3D11_USAGE_DEFAULT;
+      bd.ByteWidth = static_cast<UINT>(cap * 48);
+      bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+      if (FAILED(b.device->CreateBuffer(&bd, nullptr, &tree_buf_))) {
+        LogOnce("far trees: buffer of %zu trees failed", cap);
+        tree_cap_ = 0;
+        return false;
+      }
+      D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+      sd.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+      sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+      sd.Buffer.FirstElement = 0;
+      sd.Buffer.NumElements = static_cast<UINT>(cap * 3);
+      if (FAILED(b.device->CreateShaderResourceView(tree_buf_, &sd, &tree_srv_))) {
+        SafeRelease(tree_buf_);
+        tree_cap_ = 0;
+        return false;
+      }
+      tree_cap_ = cap;
+    }
+    tree_sent_ = 0;
+  }
+  if (f.dirty_from < tree_sent_) tree_sent_ = f.dirty_from;
+  if (tree_sent_ < f.count) {
+    D3D11_BOX box{static_cast<UINT>(tree_sent_ * 48), 0, 0, static_cast<UINT>(f.count * 48), 1, 1};
+    b.ctx->UpdateSubresource(tree_buf_, 0, &box, f.trees + tree_sent_ * 12, 0, 0);
+    tree_sent_ = f.count;
+  }
+  if (!tree_cb_) {
+    D3D11_BUFFER_DESC cb{};
+    cb.Usage = D3D11_USAGE_DEFAULT;
+    cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cb.ByteWidth = sizeof(TreeConstants);
+    if (FAILED(b.device->CreateBuffer(&cb, nullptr, &tree_cb_))) return false;
+  }
+  bool has_depth = false;
+  if (!BindTarget(has_depth)) return false;
+  TreeConstants tc{};
+  tc.tr0[0] = f.right[0];
+  tc.tr0[1] = f.right[1];
+  tc.tr0[2] = f.view[0];
+  tc.tr0[3] = f.view[1];
+  tc.tr1[0] = f.view[2];
+  tc.tr1[1] = f.key_scale;
+  tc.tr1[2] = f.key_unit;
+  tc.tr1[3] = f.far_depth - f.eps;
+  tc.tr2[0] = f.max_depth;
+  tc.tr2[1] = f.focal;
+  tc.tr2[2] = f.min_size;
+  tc.tr2[3] = f.six_ac;
+  tc.tr3[0] = f.six_a8 ? 1.0f : 0.0f;
+  tc.tr3[1] = f.six_84 ? 1.0f : 0.0f;
+  tc.tr3[2] = f.six_near;
+  tc.tr3[3] = f.eps;
+  ColorToFloat(f.diffuse, tc.tcol);
+  ColorToFloat(f.specular, tc.tspec);
+  b.ctx->UpdateSubresource(tree_cb_, 0, nullptr, &tc, 0, 0);
+
+  VSConstants vc{};
+  std::memcpy(vc.wvp, Wvp(), sizeof(vc.wvp));
+  vc.vp[0] = static_cast<float>(viewport_.dwX);
+  vc.vp[1] = static_cast<float>(viewport_.dwY);
+  vc.vp[2] = static_cast<float>(viewport_.dwWidth ? viewport_.dwWidth : 1);
+  vc.vp[3] = static_cast<float>(viewport_.dwHeight ? viewport_.dwHeight : 1);
+  vc.mode[0] = 0;
+  Bound& bd = Cache(this);
+  if (!bd.vc_ok || std::memcmp(&bd.vc, &vc, sizeof(vc)) != 0) {
+    b.ctx->UpdateSubresource(vs_cb_, 0, nullptr, &vc, 0, 0);
+    bd.vc = vc;
+    bd.vc_ok = true;
+  }
+  D3D11_VIEWPORT v{vc.vp[0], vc.vp[1], vc.vp[2], vc.vp[3], viewport_.dvMinZ, viewport_.dvMaxZ};
+  if (!bd.vp_ok || std::memcmp(&bd.vp, &v, sizeof(v)) != 0) {
+    b.ctx->RSSetViewports(1, &v);
+    bd.vp = v;
+    bd.vp_ok = true;
+  }
+  ApplyState(false, true, has_depth, false);
+  ID3D11VertexShader* vs = g_pipe.vs_tree[rs_[RS_SHADEMODE] == 1 ? 1 : 0];
+  if (bd.vs != vs) b.ctx->VSSetShader(bd.vs = vs, nullptr, 0);
+  b.ctx->VSSetShaderResources(4, 1, &tree_srv_);
+  b.ctx->VSSetConstantBuffers(3, 1, &tree_cb_);
+  if (bd.topo != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+    b.ctx->IASetPrimitiveTopology(bd.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  b.ctx->Draw(static_cast<UINT>(f.count * 6), 0);
+  ID3D11ShaderResourceView* none = nullptr;
+  b.ctx->VSSetShaderResources(4, 1, &none);
+  if (cur_msaa_) MsaaMarkDrawn();
+  if (has_depth) Note3DDraw();
+  rt_->MarkGpuWritten();
+  ++Counters().draws;
+  return true;
 }
 
 }  // namespace dd

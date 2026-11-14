@@ -40,6 +40,7 @@ enum Zone : int {
   kReflect,       // Reflections: the cube faces drawn at the end of the scene
   kReflectCache,  //   Reflections: world draws kept for later frames (per draw)
   kObjectWalk,    // FastObjectWalk: the game's object passes walked by mcm2fix
+  kFarTrees,      // FarTrees: far tree billboards drawn on the GPU (game side and draw)
   kZoneCount
 };
 

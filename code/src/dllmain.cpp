@@ -32,6 +32,7 @@ void ApplySoundFixes();
 void ApplyReverbFixes();
 void ApplySortFixes();
 void ApplyWalkFixes();
+void ApplyFarTreeFixes();
 void ApplyAiFixes();
 namespace input { void Apply(); }
 void LogTextureSummary();
@@ -97,6 +98,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
       ApplyReverbFixes();
       ApplySortFixes();
       ApplyWalkFixes();
+      ApplyFarTreeFixes();
       ApplyAiFixes();
       dd::InstallGpuShadows();  // after the smoothing and restart hooks it chains
       input::Apply();
