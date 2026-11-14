@@ -197,6 +197,39 @@ struct Registry {
   }
 } g_reg;
 
+// The far trees in the order the walk handed them over last pass, with what
+// each needs here (identity, H). The walk visits them in nearly the same
+// order every frame, so most trees are found by reading this list straight
+// through instead of a hash lookup (several cache misses per tree with tens
+// of thousands of trees).
+struct Hot {
+  const void* obj;
+  uint32_t idx;
+  Ident id;
+  float h;
+};
+struct Sequence {
+  std::vector<Hot> prev, cur;
+  std::vector<uint32_t> where;  // tree index -> its place in prev (+1; 0 = not there)
+  size_t pos = 0;
+  void Clear() {
+    prev.clear();
+    cur.clear();
+    where.clear();
+    pos = 0;
+  }
+  // A new pass: this pass's list becomes the one to follow.
+  void Start() {
+    prev.swap(cur);
+    cur.clear();
+    pos = 0;
+    if (where.size() < g_reg.Count()) where.resize(g_reg.Count() + g_reg.Count() / 4 + 64, 0);
+    std::fill(where.begin(), where.end(), 0u);
+    for (size_t k = 0; k < prev.size(); ++k)
+      if (prev[k].idx < where.size()) where[prev[k].idx] = static_cast<uint32_t>(k + 1);
+  }
+} g_seq;
+
 // This pass's rule (FarTreesPassStart).
 struct Pass {
   bool ok = false;
@@ -218,6 +251,7 @@ bool g_skipped_this_frame = false;
 bool g_logged_setup = false;
 
 struct Stats {
+  unsigned seq_hits = 0, seq_misses = 0, seq_resyncs = 0;
   unsigned frames = 0, passes = 0, skipped = 0, handed = 0, near_trees = 0, six = 0, other_tex = 0, draws = 0,
            missed = 0, resets = 0, added = 0, draw_fail = 0, empty_runs = 0;
   double draw_ms = 0;
@@ -271,6 +305,7 @@ void FarTreesPassStart() {
   if (mgr != g_seen_mgr || types0 != g_seen_types || grid != g_seen_grid) {
     if (g_reg.Count()) ++g_st.resets;
     g_reg.Clear();
+    g_seq.Clear();
     g_seen_mgr = mgr;
     g_seen_types = types0;
     g_seen_grid = grid;
@@ -292,6 +327,7 @@ void FarTreesPassStart() {
   g_pass.far_d = std::max(GetConfig().far_tree_distance, min_far);
   if (!(g_pass.far_d > 0) || !(g_pass.unit > 0)) return;
   g_pass.ok = true;
+  g_seq.Start();
   ++g_st.passes;
   if (GetConfig().far_tree_log && !g_logged_setup) {
     g_logged_setup = true;
@@ -317,10 +353,27 @@ bool FarTreeSkip(void* obj) {
     ++g_st.other_tex;
     return false;
   }
-  bool added = false;
-  const size_t i = g_reg.Find(g_pass.mgr, obj, type, &added);
-  if (added) ++g_st.added;
-  if (SixVertex(depth, g_reg.nums[i * 12 + 6])) {
+  // Next in last pass's order (the usual case), else the hash lookup, and
+  // carry on from where that tree was last pass.
+  const Ident id = IdentOf(obj);
+  Hot hot;
+  Sequence& q = g_seq;
+  if (q.pos < q.prev.size() && q.prev[q.pos].obj == obj && q.prev[q.pos].id == id) {
+    hot = q.prev[q.pos++];
+    ++g_st.seq_hits;
+  } else {
+    bool added = false;
+    const size_t i = g_reg.Find(g_pass.mgr, obj, type, &added);
+    if (added) ++g_st.added;
+    hot = Hot{obj, static_cast<uint32_t>(i), id, g_reg.nums[i * 12 + 6]};
+    ++g_st.seq_misses;
+    if (i < q.where.size() && q.where[i]) {
+      q.pos = q.where[i];  // the one after it
+      ++g_st.seq_resyncs;
+    }
+  }
+  q.cur.push_back(hot);
+  if (SixVertex(depth, hot.h)) {
     ++g_st.six;
     return false;
   }
@@ -507,10 +560,12 @@ void MaybeLog() {
   if (GetConfig().far_tree_log && g_st.passes) {
     const double p = g_st.passes;
     patch::Log("far trees 5s: %u passes; %zu trees written down (+%u), drawn here %.0f/frame, left to the game: "
-               "%.0f near, %.1f bent, %.1f other texture; %u draws (%.3f ms each on the CPU), %u frames with no "
+               "%.0f near, %.1f bent, %.1f other texture; lookups %.1f%% in order (%u out of order, %u picked up again); %u draws (%.3f ms each on the CPU), %u frames with no "
                "billboard state call, %u runs with only far trees, %u resets, %u failed",
                g_st.passes, g_reg.Count(), g_st.added, g_st.skipped / p, g_st.near_trees / p, g_st.six / p,
-               g_st.other_tex / p, g_st.draws, g_st.draws ? g_st.draw_ms / g_st.draws : 0.0, g_st.missed,
+               g_st.other_tex / p,
+               g_st.seq_hits + g_st.seq_misses ? 100.0 * g_st.seq_hits / (g_st.seq_hits + g_st.seq_misses) : 0.0,
+               g_st.seq_misses, g_st.seq_resyncs, g_st.draws, g_st.draws ? g_st.draw_ms / g_st.draws : 0.0, g_st.missed,
                g_st.empty_runs, g_st.resets, g_st.draw_fail);
     if (g_st.chk_frames)
       patch::Log("far trees 5s check: %u frames, game billboards %u flat (%u matched) + %u bent (%u matched); "
