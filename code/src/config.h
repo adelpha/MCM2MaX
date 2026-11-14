@@ -33,6 +33,7 @@ struct Config {
   bool far_tree_cells = true;  // FarTreeCells: grid cells holding only far trees are left out of the walk
   float far_tree_distance = 0;  // FarTreeDistance: from how far (0 = automatic)
   bool terrain_lod_fix = true;  // TerrainLodFix: clamp the far-block detail number (fixes_terrain.cpp)
+  bool terrain_hole_fix = true;  // TerrainHoleFix: refresh children of wholly-visible split nodes (fixes_terrain.cpp)
   float terrain_detail = 1.0f;  // TerrainDetail: terrain mesh detail multiplier (fixes_terrain.cpp)
   int terrain_log = 0;  // TerrainLog: terrain statistics, hole checks and debug keys (fixes_terrain.cpp)
   int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees

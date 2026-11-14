@@ -32,7 +32,7 @@
 //    data+0x178 the draw pass (0x4818b0 / 0x481a40 / 0x481c00) reads.
 //
 // Debug keys (TerrainLog=1, game window in front):
-//   Ctrl+F9   TerrainLodFix on / off
+//   Ctrl+F9   TerrainHoleFix on / off
 //   Ctrl+F10  TerrainDetail: ini value, x2, x4, x0.5, x0.25 of it (leaf culling
 //             at 0x483281 is still counted; turning it off did not help)
 // TerrainLog=2 also looks for holes every 2 seconds on its own: the terrain
@@ -157,6 +157,66 @@ asm(".text\n"
     "  jmp *%eax\n");
 #endif
 
+// TerrainHoleFix. Eval (0x4836e0) walks every visible node that is split
+// into children and, when the node is wholly in view, marks each child
+// wholly in view too (vis 0x3fffff): "cmp [esi+40h],200000h / jne" at
+// 0x48371d. But a node that Setup found wholly in view (0x4830c9) has vis
+// 0x3fffff, not 0x200000, so the exact compare fails and its children keep
+// whatever vis they had the last time the node was only partly in view;
+// children that were off screen then (vis 0) are never built or drawn while
+// the parent's own mesh leaves their area to them: a hole until the camera
+// turns enough for the node to be partly in view again. The original view
+// distance seldom has a split node wholly in view, ViewDistance=10 often
+// does. The fix tests the bit instead (0x200000 set) for 0x3fffff nodes.
+extern "C" {
+unsigned g_hole_fix = 1;
+unsigned g_hole_fixed = 0;     // children whose vis the fix changed
+unsigned g_hole_parents = 0;   // wholly-in-view split nodes seen
+void __cdecl TerrainVisFix(uint8_t* parent, uint8_t* child) {
+  uint32_t v, c;
+  std::memcpy(&v, parent + 0x40, 4);
+  if (v == 0x200000) {
+    c = 0x3FFFFF;
+    std::memcpy(child + 0x40, &c, 4);
+    return;
+  }
+  if (v != 0x3FFFFF) return;
+  ++g_hole_parents;
+  std::memcpy(&c, child + 0x40, 4);
+  if (c == 0x3FFFFF) return;
+  ++g_hole_fixed;
+  if (!g_hole_fix) return;
+  c = 0x3FFFFF;
+  std::memcpy(child + 0x40, &c, 4);
+}
+void TerrainVisStub();
+}
+
+#ifdef _MSC_VER
+// Replaces "cmp [esi+40h],ebp / jne 483725" at 0x48371d (eax = the child,
+// esi = the node); goes on at 0x483725, which reloads ecx and edx.
+__declspec(naked) void TerrainVisStub() {
+  __asm {
+    push eax
+    push esi
+    call TerrainVisFix
+    add esp, 8
+    mov eax, 483725h
+    jmp eax
+  }
+}
+#else
+asm(".text\n"
+    ".globl _TerrainVisStub\n"
+    "_TerrainVisStub:\n"
+    "  pushl %eax\n"
+    "  pushl %esi\n"
+    "  call _TerrainVisFix\n"
+    "  addl $8, %esp\n"
+    "  movl $0x483725, %eax\n"
+    "  jmp *%eax\n");
+#endif
+
 namespace {
 
 constexpr uintptr_t kRenderCall = 0x50D090;  // call 4820e0 (terrain render step), ecx = root node
@@ -190,10 +250,12 @@ T At(const void* p, size_t off) {
 // call only, so the blocks are built as if seen TerrainDetail times bigger
 // (more detail above 1, less below).
 constexpr uintptr_t kParamsCall = 0x50CFF3;
+constexpr uintptr_t kHoleCmp = 0x48371D;
 constexpr uintptr_t kParams = 0x50D350;
 float g_detail = 1.0f;
 float g_detail_ini = 1.0f;
 bool g_params_hooked = false;
+bool g_hole_hooked = false;
 int g_last_tol = 0, g_last_focal = 0;
 
 void __fastcall ParamsHook(uint8_t* t, void*) {
@@ -568,11 +630,12 @@ void Keys(const uint8_t* root) {
     }
   }
   if (ctrl && k9) {
-    if (!g_lod_hooked) {
-      patch::Log("terrain: TerrainLodFix hook not installed (code differs); Ctrl+F9 does nothing");
+    if (!g_hole_hooked) {
+      patch::Log("terrain: TerrainHoleFix hook not installed (code differs); Ctrl+F9 does nothing");
     } else {
-      g_lod_fix = !g_lod_fix;
-      patch::Log("terrain: TerrainLodFix %s (Ctrl+F9)", g_lod_fix ? "ON" : "off");
+      g_hole_fix = !g_hole_fix;
+      patch::Log("terrain: TerrainHoleFix %s (Ctrl+F9)", g_hole_fix ? "ON" : "off");
+      dd::DebugNotice(g_hole_fix ? "TerrainHoleFix ON" : "TerrainHoleFix off");
     }
   }
   if (g_dump_pending) {
@@ -591,12 +654,14 @@ void Report() {
       "culled %.0f, children %.0f, meshed %.1f (max %u); render step %.3f ms (max %.2f); vertex buffers %d "
       "(%d KB); empty collapsed blocks %.0f; detail number: %u conversions on the unclamped path, %u over 65535 "
       "(largest %u), TerrainLodFix %s; leaf tests %.0f culled %.0f, leaf culling %s; tolerance %d focal %d "
-      "TerrainDetail %.2f",
+      "TerrainDetail %.2f; TerrainHoleFix %s: wholly-in-view split nodes %.1f, children it marked %.1f",
       g_st.frames, g_st.nodes / f, g_st.visible / f, g_st.max_visible, g_st.collapsed / f, g_st.subs_drawn / f,
       g_st.subs_culled / f, g_st.children_drawn / f, g_st.meshes / f, g_st.max_meshes, g_st.render_ms / f,
       g_st.max_render_ms, *reinterpret_cast<int*>(kVbCount), *reinterpret_cast<int*>(kVbBytes) / 1024,
       g_st.holes_collapsed / f, g_lod_calls, g_lod_over, g_lod_max, !g_lod_hooked ? "not installed" : g_lod_fix ? "on" : "off", g_leaf_tests / f, g_leaf_culled / f,
-      g_leaf_cull_off ? "OFF" : "on", g_last_tol, g_last_focal, g_detail);
+      g_leaf_cull_off ? "OFF" : "on", g_last_tol, g_last_focal, g_detail,
+      !g_hole_hooked ? "not installed" : g_hole_fix ? "on" : "off", g_hole_parents / f, g_hole_fixed / f);
+  g_hole_parents = g_hole_fixed = 0;
   g_leaf_tests = g_leaf_culled = 0;
   ReportOverNodes();
   g_lod_calls = g_lod_over = g_lod_max = 0;
@@ -645,6 +710,19 @@ void ApplyTerrainFixes() {
       patch::Log("terrain: TerrainLodFix: code differs, not applied");
     }
   }
+  {
+    const uint8_t cmp_jne[] = {0x39, 0x6E, 0x40, 0x75, 0x03};  // cmp [esi+40h],ebp; jne 483725
+    g_hole_fix = c.terrain_hole_fix ? 1 : 0;
+    if (c.terrain_hole_fix || c.terrain_log) {
+      if (patch::Matches(kHoleCmp, cmp_jne, 5)) {
+        patch::Jump(kHoleCmp, reinterpret_cast<uintptr_t>(&TerrainVisStub), 5);
+        g_hole_hooked = true;
+        patch::Log("terrain: TerrainHoleFix %s", g_hole_fix ? "on" : "off (counting only)");
+      } else {
+        patch::Log("terrain: TerrainHoleFix: code differs, not applied");
+      }
+    }
+  }
   g_detail = g_detail_ini = c.terrain_detail;
   if (c.terrain_detail != 1.0f || c.terrain_log) {
     const uint8_t call_params[] = {0xE8, 0x58, 0x03, 0x00, 0x00};  // call 50d350
@@ -669,5 +747,5 @@ void ApplyTerrainFixes() {
   else
     patch::Log("terrain log: leaf cull call differs, Ctrl+F10 does nothing");
   if (HANDLE t = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr)) CloseHandle(t);
-  patch::Log("terrain log: on (Ctrl+F9 TerrainLodFix on/off, Ctrl+F10 TerrainDetail x1/x2/x4/x0.5/x0.25, Ctrl+F11 dump + probe)");
+  patch::Log("terrain log: on (Ctrl+F9 TerrainHoleFix on/off, Ctrl+F10 TerrainDetail x1/x2/x4/x0.5/x0.25, Ctrl+F11 dump + probe)");
 }

@@ -170,6 +170,13 @@ ViewDistance=1
 ; number has not been seen to reach the top so far, even with ViewDistance=10.)
 TerrainLodFix=1
 
+; TerrainHoleFix: 1 = fixes holes in distant terrain (sky showing through
+; hills, trees standing on nothing) that come and go as the camera turns,
+; mostly with a high ViewDistance (default). The game forgot to refresh the
+; smallest terrain pieces of a block that was wholly in view. 0 = the game's
+; own behaviour.
+TerrainHoleFix=1
+
 ; TerrainDetail: how finely the terrain is built, 0.25 to 8 (default 1, the
 ; game's own). Above 1, hills keep more of their shape further away, at some
 ; cost in frame rate; below 1, less.
@@ -822,7 +829,7 @@ FarTreeLog=0
 
 ; TerrainLog: terrain statistics every 5 seconds, including how often the
 ; terrain detail number overflowed (see TerrainLodFix). Also turns on debug
-; keys: Ctrl+F9 switches TerrainLodFix on and off, Ctrl+F10 steps
+; keys: Ctrl+F9 switches TerrainHoleFix on and off, Ctrl+F10 steps
 ; TerrainDetail through 2, 4, 0.5 and 0.25 times its value and back (shown
 ; on screen), Ctrl+F11 writes the
 ; terrain and camera to the log and probes the point under the mouse cursor

@@ -148,6 +148,7 @@ void LoadConfig() {
   if (g_config.far_tree_distance < 0) g_config.far_tree_distance = 0;
   g_config.far_tree_log = GetPrivateProfileIntA("mcm2fix", "FarTreeLog", 0, ini);
   g_config.terrain_lod_fix = GetPrivateProfileIntA("mcm2fix", "TerrainLodFix", 1, ini) != 0;
+  g_config.terrain_hole_fix = GetPrivateProfileIntA("mcm2fix", "TerrainHoleFix", 1, ini) != 0;
   g_config.terrain_log = GetPrivateProfileIntA("mcm2fix", "TerrainLog", 0, ini);
   g_config.batch_log = GetPrivateProfileIntA("mcm2fix", "BatchLog", 0, ini) != 0;
   g_config.draw_log = GetPrivateProfileIntA("mcm2fix", "DrawLog", 0, ini) != 0;
