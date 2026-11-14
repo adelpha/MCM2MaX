@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <unordered_set>
 #include <vector>
 
 #include "config.h"
@@ -120,7 +121,7 @@ void MaybeLog() {
 // `stamp`: write the pass number into each object (as the game's walk does)
 // and skip those that have it; else (a check) use `seen` to skip repeats.
 void Collect(void* grid, std::vector<Entry>& ents, std::vector<uint32_t>& cell_end, bool stamp,
-             std::vector<void*>* seen, unsigned* ncells, unsigned* nbuckets) {
+             std::unordered_set<void*>* seen, unsigned* ncells, unsigned* nbuckets) {
   const uint16_t pass = At<uint16_t>(grid, 0x6C);
   for (void** cell = At<void**>(grid, 0x70); cell; cell = static_cast<void**>(cell[0])) {
     ++*ncells;
@@ -135,8 +136,7 @@ void Collect(void* grid, std::vector<Entry>& ents, std::vector<uint32_t>& cell_e
           if (w == pass) continue;
           w = pass;
         } else {
-          if (std::find(seen->begin(), seen->end(), obj) != seen->end()) continue;
-          seen->push_back(obj);
+          if (!seen->insert(obj).second) continue;
         }
         ents.push_back({obj, At<uint8_t>(obj, 8)});
       }
@@ -183,8 +183,8 @@ void MaybeCheck(void* grid) {
   if (!g_log || ++g_check_tick % 240 != 0) return;
   std::vector<Entry> ents;
   std::vector<uint32_t> ends;
-  std::vector<void*> seen;
-  seen.reserve(g_list.ents.size());
+  std::unordered_set<void*> seen;  // a linear search here was O(n^2): 20-180 ms per check
+  seen.reserve(g_list.ents.size() * 2);
   unsigned nc = 0, nb = 0;
   Collect(grid, ents, ends, false, &seen, &nc, &nb);
   ++g_st.checks;
