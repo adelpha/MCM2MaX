@@ -80,11 +80,12 @@ struct MenuSlider {
 };
 constexpr int kAnisoSteps[] = {0, 2, 4, 8, 16};
 constexpr int kMsaaSteps[] = {0, 2, 4, 8};
-constexpr int kViewSteps[] = {50, 75, 100, 125, 150, 200, 300, 400};
+// Below 1x the game's own Overall Graphics Quality slider covers it (StOo).
+constexpr int kViewSteps[] = {100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000};
 MenuSlider g_sliders[] = {
     {"Mcm2fixAniso", "Anisotropy", "Anisotropy", kAnisoSteps, 5, true, false},
     {"Mcm2fixMsaa", "Antialiasing", "Antialiasing", kMsaaSteps, 4, false, false},
-    {"Mcm2fixView", "View Distance", "ViewDistance", kViewSteps, 8, false, true},
+    {"Mcm2fixView", "View Distance", "ViewDistance", kViewSteps, 12, false, true},
 };
 constexpr int kNumSliders = 3;
 constexpr int kMsaaSlider = 1;
