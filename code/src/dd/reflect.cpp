@@ -1687,10 +1687,13 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
             ++g_cs.culled_far;
             continue;
           }
-          if (!BoxOutside(e.lo, e.hi, cvp)) {
-            ++g_cs.culled_view;
-            continue;
-          }
+          // Kept draws in the camera's view used to be left out (the game
+          // draws what is in view itself), but a kept draw is often a batch
+          // spanning things in view and behind the bike, so everything
+          // behind went with it (gterr-17: objects behind the bike gone at
+          // once). Draws seen this frame are skipped above; the rest are
+          // drawn, each side culled to its own view below.
+          (void)cvp;
           g_cache_draw.push_back(&e);
         }
       }
@@ -1844,6 +1847,10 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
           const ReflectReplay* prev = nullptr;
           for (const CacheEntry* ce : g_cache_draw) {
             const ReflectReplay& r = ce->st;
+            if (BoxOutside(ce->lo, ce->hi, vpm)) {
+              ++g_cs.culled_view;
+              continue;
+            }
             if (!have_world || std::memcmp(last_world, r.world, sizeof(last_world)) != 0) {
               Mul(r.world, vpm, vc.wvp);
               b.ctx->UpdateSubresource(g.game_vs_cb, 0, nullptr, &vc, 0, 0);
