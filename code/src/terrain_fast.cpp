@@ -658,6 +658,24 @@ void Eval(Node* n) { EvalNode(n); }
 
 static void DrawBlocks(Node* n, int a1, int x, int y, int q, int a6);
 
+// Counts for the 5 s log: draws, vertices, and how many 0x481c00 colours as
+// "far" (terrain +0xca4 >= the node's or sub-block's texel measure).
+static inline void CountDraw(const Node* n, int sub, int vc) {
+  ++g_stats.draw_calls;
+  g_stats.draw_verts += static_cast<unsigned>(vc);
+  const uint8_t* tex = n->tex;
+  if (!tex) return;
+  float m;
+  if (sub == -1) {
+    m = *reinterpret_cast<const float*>(tex + 0x34);
+  } else {
+    const uint8_t* subs = *reinterpret_cast<uint8_t* const*>(tex + 0x38);
+    if (!subs) return;
+    m = *reinterpret_cast<const float*>(subs + sub * 44 + 0x28);
+  }
+  if (static_cast<double>(Ti(n->T, 0xCA4)) >= m) ++g_stats.draw_far;
+}
+
 static inline DrawFn PickDraw(const Node* n) {
   return reinterpret_cast<DrawFn>(At<int32_t>(n->T, kAltDraw) ? kDrawAlt : kDraw);
 }
@@ -706,7 +724,7 @@ static void DrawBlocks(Node* n, int a1, int /*x*/, int /*y*/, int q, int a6) {
     if (vc != 0 && (static_cast<int>(*reinterpret_cast<const int16_t*>(D + kSubMask)) & (1 << s))) {
       uint8_t* verts = *reinterpret_cast<uint8_t**>(D + kVerts) + v0 * 32;
       uint8_t* idx = *reinterpret_cast<uint8_t**>(D + kIdx) + i0 * 2;
-      ++g_stats.draw_calls;
+      CountDraw(n, s, vc);
       PickDraw(n)(n, 0, a6, verts, vc, idx, ic, s);
     }
   }
@@ -731,12 +749,304 @@ static void DrawBlocks(Node* n, int a1, int /*x*/, int /*y*/, int q, int a6) {
     uint8_t* cd = ch->D;
     const int16_t vc = *reinterpret_cast<const int16_t*>(cd + kVCount);
     if (vc && !(cd[kFlags] & 8)) {
-      ++g_stats.draw_calls;
+      CountDraw(ch, -1, vc);
       PickDraw(n)(ch, 0, a6, *reinterpret_cast<uint8_t**>(cd + kVerts), vc, *reinterpret_cast<uint8_t**>(cd + kIdx),
                   *reinterpret_cast<const int16_t*>(cd + kICount), -1);
     }
     DrawWalk(ch, a1, 0, 0, 0x10, 0, a6);
   }
+}
+
+// ---- Mesh (0x480c30 / 0x481150 / 0x480dc0 / 0x481640 / 0x47ede0) ------------
+//
+// A node's mesh is a binary triangle tree over its 17x17 vertex grid: the
+// builders (0x480790, 0x480160) call Tri (0x480c30) for the two halves of
+// the square and Corner (0x481640) for skipped corners; Tri and Half
+// (0x481150) split while the midpoint vertex is active (flag 0x80 in the
+// data's per-vertex bytes), Fan (0x480dc0) closes the finest level where a
+// node has no children, and Vert (0x47ede0) emits a grid vertex once per
+// build into the scratch builder at 0x67da58 (stamp per grid vertex). The
+// builder copies vertices and indices into the node's buffers afterwards.
+
+struct MeshVtx {
+  float x, y, z;
+  uint32_t c;  // normal x, or 0, or a packed grid position
+  uint32_t d, e;
+  float u, v;
+};
+struct MeshBuilder {
+  Node* node;                       // 0x0000
+  uint32_t stamp;                   // 0x0004 build number
+  struct { uint32_t st, vi; } slot[0x121];  // 0x0008 per grid vertex: stamp, vertex number
+  MeshVtx verts[0x121];             // 0x0910
+  int32_t count;                    // 0x2d30
+  int32_t gx, gy, shift;            // 0x2d34
+  uint8_t* vdata;                   // 0x2d40 node vinfo
+  uint32_t s10;                     // 0x2d44
+  float du, dv, dscale;             // 0x2d48 data +0x15c, +0x158, +0x160
+  int32_t f54;                      // 0x2d54
+  float scale;                      // 0x2d58 terrain +0x40
+  float ymin, ymax;                 // 0x2d5c
+  int32_t alt;                      // 0x2d64 terrain +0xcb0
+  uint32_t c9c, ca0;                // 0x2d68
+  float grid;                       // 0x2d70
+};
+static_assert(offsetof(MeshBuilder, verts) == 0x910, "builder");
+static_assert(offsetof(MeshBuilder, count) == 0x2d30, "builder");
+static_assert(offsetof(MeshBuilder, vdata) == 0x2d40, "builder");
+static_assert(offsetof(MeshBuilder, scale) == 0x2d58, "builder");
+static_assert(offsetof(MeshBuilder, grid) == 0x2d70, "builder");
+
+static inline MeshBuilder* MB() { return reinterpret_cast<MeshBuilder*>(0x67DA58); }
+static inline uint16_t* MIdx() { return reinterpret_cast<uint16_t*>(0x6807D4); }
+// The exe's row tables, read in place (the walk can step one row outside).
+static inline int R17(int y) { return *reinterpret_cast<const int32_t*>(0x572238 + y * 4); }
+static inline int R16(int y) { return *reinterpret_cast<const int32_t*>(0x5721F4 + y * 4); }
+static inline int32_t GridX0() { return *reinterpret_cast<const int32_t*>(0x67B624); }
+static inline int32_t GridY0() { return *reinterpret_cast<const int32_t*>(0x6807D0); }
+static inline float Kf(uintptr_t a) { return *reinterpret_cast<const float*>(a); }
+
+// 0x47ede0: the vertex number of grid vertex (x, y), emitting it if new.
+static int Vert(int x, int y) {
+  MeshBuilder* B = MB();
+  const int idx = R17(y) + x;
+  if (B->slot[idx].st >= B->stamp) return static_cast<int>(B->slot[idx].vi);
+  const int c = B->count;
+  Node* n = B->node;
+  if (c == 0) {
+    B->gx = n->gx;
+    B->gy = n->gy;
+    B->shift = n->shift;
+    B->vdata = n->vinfo;
+    B->s10 = Bits(n->s10);
+    B->du = Df(n->D, 0x15C);
+    B->dv = Df(n->D, 0x158);
+    B->dscale = Df(n->D, 0x160);
+    B->f54 = 0;
+    B->scale = Tf(n->T, 0x40);
+    B->ymin = FromBits(0x7F7FFFFF);
+    B->ymax = FromBits(0xFF7FFFFF);
+    B->alt = Ti(n->T, 0xCB0);
+    B->c9c = static_cast<uint32_t>(Ti(n->T, 0xC9C));
+    B->ca0 = static_cast<uint32_t>(Ti(n->T, 0xCA0));
+    B->grid = Kf(0x572284);
+    if (n->level == 1) B->grid = static_cast<float>(static_cast<double>(Kf(0x572284)) * Kf(0x557748));
+  }
+  MeshVtx& v = B->verts[c];
+  const double sc = B->scale;
+  const int sh = B->shift & 31;
+  v.x = static_cast<float>(static_cast<double>(static_cast<int32_t>(static_cast<uint32_t>(B->gx + x) << sh)) * sc);
+  v.z = static_cast<float>(static_cast<double>(static_cast<int32_t>(static_cast<uint32_t>(B->gy + y) << sh)) * sc);
+  const int32_t base = *reinterpret_cast<const int32_t*>(n->vinfo + 0xD4C);
+  const uint32_t h = *reinterpret_cast<const uint16_t*>(B->vdata + idx * 8 + 2);
+  double hy = static_cast<double>(static_cast<int32_t>(h - static_cast<uint32_t>(base))) * n->s10;
+  hy = hy + static_cast<double>(base);
+  hy = hy * n->s14;
+  hy = hy * sc;
+  v.y = static_cast<float>(hy);
+  if (!(v.y >= B->ymin)) B->ymin = v.y;
+  if (v.y > B->ymax) B->ymax = v.y;
+  if (n->D[kFlags] & 4) {
+    const double k = Kf(0x558F48);
+    const int8_t* b = reinterpret_cast<const int8_t*>(B->vdata + idx * 8 + 4);
+    const bool neg = !(static_cast<double>(n->s10) >= *reinterpret_cast<const double*>(0x5558A0));
+    const int b4 = neg ? -b[0] : b[0], b6 = neg ? -b[2] : b[2];
+    v.c = Bits(static_cast<float>(b4 * k));
+    v.d = Bits(static_cast<float>(b[1] * k));
+    v.e = Bits(static_cast<float>(b6 * k));
+  } else {
+    const int32_t gx0 = GridX0(), gy0 = GridY0();
+    const double k44 = Kf(0x558F44), k40 = Kf(0x558F40);
+    v.u = static_cast<float>(((static_cast<double>(x - gx0) * B->dscale + B->dv) * k44) + k40);
+    v.v = static_cast<float>(((static_cast<double>(y - gy0) * B->dscale + B->du) * k44) + k40);
+    if (B->alt) {
+      v.c = 0;
+      v.d = Bits(static_cast<float>(static_cast<double>(x - gx0) * B->grid));
+      v.e = Bits(static_cast<float>(static_cast<double>(y - gy0) * B->grid));
+    } else {
+      v.d = B->c9c;
+      v.e = B->ca0;
+      const uint32_t g = static_cast<uint32_t>(gx0);
+      v.c = (((g << 16) - g + static_cast<uint32_t>(x)) << 16) - static_cast<uint32_t>(gy0) + static_cast<uint32_t>(y);
+    }
+  }
+  B->slot[idx].vi = static_cast<uint32_t>(c);
+  B->slot[idx].st = B->stamp;
+  B->count = c + 1;
+  ++g_stats.mesh_verts;
+  return c;
+}
+
+static inline bool Active(const Node* n, int x, int y) { return (n->D[R17(y) + x] & 0x80) != 0; }
+
+static inline void Emit(int t, int x0, int y0, int x1, int y1, int x2, int y2) {
+  uint16_t* I = MIdx() + t * 3;
+  I[0] = static_cast<uint16_t>(Vert(x0, y0));
+  I[1] = static_cast<uint16_t>(Vert(x1, y1));
+  I[2] = static_cast<uint16_t>(Vert(x2, y2));
+}
+
+// A child that blocks a triangle of the finest level is one with no mesh of
+// its own in view; returns the game's "no child mesh" flag (1 = draw it).
+static inline int NoChildMesh(const Node* c) {
+  if (!c) return 1;
+  const uint8_t* d = c->D;
+  const int t = ((d[kFlags] & 1) ? 0 : *reinterpret_cast<const int16_t*>(d + 0x12C)) +
+                *reinterpret_cast<const int16_t*>(d + 0x12A);
+  if (t != 0) return 1;
+  return c->vis ? 0 : 1;
+}
+
+static int Half(Node* n, int L, int cnt, int x, int y, int dx, int dy, int* out);
+
+// 0x480dc0: the two triangles at a finest-level edge without children.
+static void Fan(Node* n, int mx, int my, int dx, int dy, int t) {
+  const int idx = R17(my) + mx;
+  const uint8_t* E = n->vinfo + 7;  // per-vertex byte 7
+  const uint8_t* A = n->D;
+  int f, g;
+  if (dx == 0 ? dy == 1 : dx == 1) {
+    f = ((E[(idx - 18) * 8] & 1) && (A[idx - 18] & 0x80)) ? 1 : 0;
+    Emit(t, mx, my, mx, my - 1, mx - 1, my - f);
+    if (dx == 0) {
+      g = (!(E[(idx - 17) * 8] & 1) && (A[idx - 16] & 0x80)) ? 1 : 0;
+      Emit(t + 1, mx, my, mx + 1, my - g, mx, my - 1);
+    } else {
+      g = (!(E[(idx - 1) * 8] & 1) && (A[idx + 16] & 0x80)) ? 1 : 0;
+      Emit(t + 1, mx, my, mx - 1, my + g, mx, my + 1);
+    }
+  } else {
+    f = ((E[idx * 8] & 1) && (A[idx + 18] & 0x80)) ? 1 : 0;
+    Emit(t, mx, my, mx, my + 1, mx + 1, my + f);
+    if (dx == 0) {
+      g = (!(E[(idx - 1) * 8] & 1) && (A[idx + 16] & 0x80)) ? 1 : 0;
+      Emit(t + 1, mx, my, mx - 1, my + g, mx, my + 1);
+    } else {
+      g = (!(E[(idx - 17) * 8] & 1) && (A[idx - 16] & 0x80)) ? 1 : 0;
+      Emit(t + 1, mx, my, mx + 1, my - g, mx, my - 1);
+    }
+  }
+}
+
+// 0x480c30
+static int Tri(Node* n, int L, int cnt, int x, int y, int dx, int dy, int* out) {
+  const int mx = x + dx, my = y + dy;
+  if (!Active(n, mx, my)) {
+    *out = 0;
+    return cnt;
+  }
+  const int L1 = L - 1;
+  int f1 = 0, f2 = 0;
+  if (L1 != 0) {
+    cnt = Half(n, L1, cnt, mx, my, -dx, 0, &f1);
+    cnt = Half(n, L1, cnt, mx, my, 0, -dy, &f2);
+  } else if (n->kids) {
+    *out = 1;
+    return cnt;
+  }
+  if (!f1) Emit(cnt++, mx, my, mx - dx, my - dx, mx - dx, my + dx);
+  if (!f2) Emit(cnt++, mx, my, mx + dy, my - dy, mx - dy, my - dy);
+  *out = 1;
+  return cnt;
+}
+
+// 0x481150
+static int Half(Node* n, int L, int cnt, int x, int y, int dx, int dy, int* out) {
+  int mx, my;
+  if (dx == 0) {
+    mx = x;
+    my = y + dy;
+  } else {
+    mx = x + dx;
+    my = y;
+  }
+  if (!Active(n, mx, my)) {
+    *out = 0;
+    return cnt;
+  }
+  const int L1 = L - 1;
+  int f1, f2;
+  if (L1 != 0) {
+    const int d = dx == 0 ? dy : dx;
+    const int s = d >= 0 ? -(d >> 1) : ((-d) >> 1);
+    cnt = Tri(n, L1, cnt, mx, my, s, s, &f1);
+    if (dx == 0)
+      cnt = Tri(n, L1, cnt, mx, my, -s, s, &f2);
+    else
+      cnt = Tri(n, L1, cnt, mx, my, s, -s, &f2);
+  } else {
+    Node** k = n->kids;
+    if (!k) {
+      Fan(n, mx, my, dx, dy, cnt);
+      *out = 1;
+      return cnt + 2;
+    }
+    if (n->D[kFlags] & 1) {
+      f1 = f2 = 0;
+    } else {
+      const Node *c1, *c2;
+      if (dx == 0) {
+        if (dy > 0) {
+          const int j = R16(my - 1) + mx;
+          c1 = k[j - 1];
+          c2 = k[j];
+        } else {
+          const int j = R16(my) + mx;
+          c1 = k[j];
+          c2 = k[j - 1];
+        }
+      } else if (dx > 0) {
+        c1 = k[R16(my - 1) + mx - 1];
+        c2 = k[R16(my) + mx - 1];
+      } else {
+        c1 = k[R16(my) + mx];
+        c2 = k[R16(my - 1) + mx];
+      }
+      f1 = NoChildMesh(c1);
+      f2 = NoChildMesh(c2);
+    }
+  }
+  if (!f1) {
+    if (dx == 0)
+      Emit(cnt++, mx, my, mx, my - dy, mx - dy, my);
+    else
+      Emit(cnt++, mx, my, mx, my - dx, mx - dx, my);
+  }
+  if (!f2) {
+    if (dx == 0)
+      Emit(cnt++, mx, my, mx + dy, my, mx, my - dy);
+    else
+      Emit(cnt++, mx, my, mx - dx, my, mx, my + dx);
+  }
+  *out = 1;
+  return cnt;
+}
+
+int MeshTri(Node* n, int L, int cnt, int x, int y, int dx, int dy, int* out) {
+  if (L == 8) {
+    // A builder's top-level call: fetch the node's vertex bytes up front.
+    const uint8_t* vi = n->vinfo;
+    for (int o = 0; o < 0x908; o += 64) Prefetch(vi + o);
+    Prefetch(vi + 0xD4C);
+    for (int o = 0; o < 0x121; o += 64) Prefetch(n->D + o);
+  }
+  ++g_stats.mesh_calls;
+  return Tri(n, L, cnt, x, y, dx, dy, out);
+}
+
+// 0x481640: one corner triangle.
+int MeshCorner(int t, int x, int y, int dx, int dy) {
+  uint16_t* I = MIdx() + t * 3;
+  if (dx == dy) {
+    I[2] = static_cast<uint16_t>(Vert(x, y));
+    I[0] = static_cast<uint16_t>(Vert(x, y + dy));
+    I[1] = static_cast<uint16_t>(Vert(x + dx, y));
+  } else {
+    I[0] = static_cast<uint16_t>(Vert(x, y));
+    I[1] = static_cast<uint16_t>(Vert(x + dx, y));
+    I[2] = static_cast<uint16_t>(Vert(x, y + dy));
+  }
+  return t + 1;
 }
 
 // ---- FPU check ---------------------------------------------------------------

@@ -22,6 +22,8 @@ struct Stats {
   unsigned hole_parents = 0, hole_fixed = 0;
   unsigned eval_nodes = 0, eval_tests = 0;
   unsigned draw_blocks = 0, draw_calls = 0;
+  unsigned mesh_calls = 0, mesh_verts = 0;
+  unsigned draw_verts = 0, draw_far = 0;
 };
 extern Stats g_stats;
 
@@ -31,6 +33,12 @@ float Detail(Node* n, int flag);
 void Eval(Node* n);
 // 0x4818b0 (this, a1, x, y, size, quadrant, a6); returns 1.
 int DrawWalk(Node* n, int a1, int x, int y, int size, int q, int a6);
+
+// 0x480c30 (this, level, triangles, x, y, dx, dy, out): a node's mesh
+// triangles into the scratch builder 0x67da58; returns the triangle count.
+int MeshTri(Node* n, int L, int cnt, int x, int y, int dx, int dy, int* out);
+// 0x481640 (this unused; triangle, x, y, dx, dy): one corner triangle.
+int MeshCorner(int t, int x, int y, int dx, int dy);
 
 // The FPU is at 53-bit precision (the rewrites are exact only then).
 bool FpuIs53();

@@ -717,6 +717,8 @@ constexpr uintptr_t kEvalFn = 0x4836E0;
 constexpr uintptr_t kDrawWalkFn = 0x4818B0;
 constexpr uintptr_t kDrawFn = 0x481C00;
 constexpr uintptr_t kDrawAltFn = 0x481F20;
+constexpr uintptr_t kMeshTriFn = 0x480C30;
+constexpr uintptr_t kMeshCornerFn = 0x481640;
 
 struct Hook {
   uintptr_t at = 0;
@@ -738,7 +740,7 @@ struct Hook {
     in = true;
   }
 };
-Hook g_h_detail, g_h_eval, g_h_draw;
+Hook g_h_detail, g_h_eval, g_h_draw, g_h_tri, g_h_corner;
 bool g_fast_hooked = false;
 bool g_fast_on = false;
 uint8_t* g_detail_tramp = nullptr;  // the game's Detail: its first 6 bytes, then jmp 0x482556
@@ -746,16 +748,20 @@ uint8_t* g_detail_tramp = nullptr;  // the game's Detail: its first 6 bytes, the
 using DetailFn = float(__fastcall*)(void* n, void* edx, int flag);
 using EvalFn = void(__fastcall*)(void* n, void* edx);
 using DrawWalkFn = int(__fastcall*)(void* n, void* edx, int a1, int x, int y, int size, int q, int a6);
+using MeshTriFn = int(__fastcall*)(void* n, void* edx, int L, int cnt, int x, int y, int dx, int dy, int* out);
+using MeshCornerFn = int(__fastcall*)(void* n, void* edx, int t, int x, int y, int dx, int dy);
 
 struct CheckStats {
   unsigned detail = 0, detail_bad = 0;
   unsigned eval = 0, eval_bad_nodes = 0, eval_nodes = 0, eval_bad_terrain = 0;
   unsigned draw = 0, draw_calls = 0, draw_bad = 0;
+  unsigned mesh = 0, mesh_bad = 0;
   unsigned logged = 0;
   double eval_ms = 0;
 } g_chk;
 bool g_check_detail = false;  // this frame's Setup compares Detail
 bool g_check_draw = false;    // this frame's draw walk is compared
+bool g_check_mesh = false;    // this frame's mesh building is compared
 DWORD g_check_last = 0;
 
 void SyncFastOptions() {
@@ -931,6 +937,7 @@ void CheckDraw(uint8_t* n, int a1, int x, int y, int size, int q, int a6) {
 
 int __fastcall DrawHook(uint8_t* n, void*, int a1, int x, int y, int size, int q, int a6) {
   prof::Scope z(prof::kTerrDraw);
+  g_check_mesh = false;
   if (g_check_draw) {
     g_check_draw = false;
     CheckDraw(n, a1, x, y, size, q, a6);
@@ -938,13 +945,94 @@ int __fastcall DrawHook(uint8_t* n, void*, int a1, int x, int y, int size, int q
   return tf::DrawWalk(reinterpret_cast<tf::Node*>(n), a1, x, y, size, q, a6);
 }
 
+// Mesh building: Tri (0x480c30) and Corner (0x481640) write vertices into
+// the scratch builder 0x67da58 and indices from 0x6807d4. The check runs the
+// game's call first, then ours from the same start, and compares the
+// builder, the indices written, the return value and the flag.
+constexpr uintptr_t kBuilder = 0x67DA58;
+constexpr size_t kBuilderLen = 0x6807D4 - 0x67DA58;  // up to the index array
+constexpr uintptr_t kMeshIdx = 0x6807D4;
+constexpr size_t kMeshIdxMax = 3 * 1100;  // triangles of one node mesh, with room
+
+void CheckMeshResult(const char* what, uint8_t* n, int rg, int ro, int og, int oo, int t0,
+                     const std::vector<uint8_t>& gb, const std::vector<uint16_t>& gi) {
+  ++g_chk.mesh;
+  const uint8_t* b = reinterpret_cast<const uint8_t*>(kBuilder);
+  const uint16_t* ix = reinterpret_cast<const uint16_t*>(kMeshIdx);
+  bool bad = rg != ro || og != oo;
+  size_t o = kBuilderLen;
+  if (!bad && std::memcmp(gb.data(), b, kBuilderLen) != 0) {
+    o = 0;
+    while (gb[o] == b[o]) ++o;
+    bad = true;
+  }
+  int ti = -1;
+  if (!bad && rg > t0)
+    for (int i = t0 * 3; i < rg * 3 && i < static_cast<int>(kMeshIdxMax); ++i)
+      if (gi[i] != ix[i]) {
+        ti = i;
+        bad = true;
+        break;
+      }
+  if (!bad) return;
+  ++g_chk.mesh_bad;
+  CheckLog("%s differs: node L%u @%u,%u: triangles %d / %d, flag %d / %d, builder +%04x %s, index %d", what,
+           At<uint8_t>(n, 0x28), At<uint16_t>(n, 0x24), At<uint16_t>(n, 0x26), rg, ro, og, oo,
+           static_cast<unsigned>(o), o < kBuilderLen ? "differs" : "same", ti);
+}
+
+int __fastcall MeshTriHook(uint8_t* n, void*, int L, int cnt, int x, int y, int dx, int dy, int* out) {
+  if (!g_check_mesh || L != 8)
+    return tf::MeshTri(reinterpret_cast<tf::Node*>(n), L, cnt, x, y, dx, dy, out);
+  static std::vector<uint8_t> pb, gb;
+  static std::vector<uint16_t> pi, gi;
+  pb.assign(reinterpret_cast<uint8_t*>(kBuilder), reinterpret_cast<uint8_t*>(kBuilder) + kBuilderLen);
+  pi.assign(reinterpret_cast<uint16_t*>(kMeshIdx), reinterpret_cast<uint16_t*>(kMeshIdx) + kMeshIdxMax);
+  const int out0 = *out;
+  g_h_tri.Off();
+  const int rg = reinterpret_cast<MeshTriFn>(kMeshTriFn)(n, nullptr, L, cnt, x, y, dx, dy, out);
+  g_h_tri.On();
+  const int og = *out;
+  gb.assign(reinterpret_cast<uint8_t*>(kBuilder), reinterpret_cast<uint8_t*>(kBuilder) + kBuilderLen);
+  gi.assign(reinterpret_cast<uint16_t*>(kMeshIdx), reinterpret_cast<uint16_t*>(kMeshIdx) + kMeshIdxMax);
+  std::memcpy(reinterpret_cast<void*>(kBuilder), pb.data(), kBuilderLen);
+  std::memcpy(reinterpret_cast<void*>(kMeshIdx), pi.data(), kMeshIdxMax * 2);
+  *out = out0;
+  const int ro = tf::MeshTri(reinterpret_cast<tf::Node*>(n), L, cnt, x, y, dx, dy, out);
+  CheckMeshResult("mesh", n, rg, ro, og, *out, cnt, gb, gi);
+  return ro;
+}
+
+int __fastcall MeshCornerHook(uint8_t* n, void*, int t, int x, int y, int dx, int dy) {
+  if (!g_check_mesh) return tf::MeshCorner(t, x, y, dx, dy);
+  static std::vector<uint8_t> pb, gb;
+  static std::vector<uint16_t> gi;
+  pb.assign(reinterpret_cast<uint8_t*>(kBuilder), reinterpret_cast<uint8_t*>(kBuilder) + kBuilderLen);
+  uint16_t* ix = reinterpret_cast<uint16_t*>(kMeshIdx);
+  uint16_t pi[3] = {ix[t * 3], ix[t * 3 + 1], ix[t * 3 + 2]};
+  g_h_corner.Off();
+  const int rg = reinterpret_cast<MeshCornerFn>(kMeshCornerFn)(n, nullptr, t, x, y, dx, dy);
+  g_h_corner.On();
+  gb.assign(reinterpret_cast<uint8_t*>(kBuilder), reinterpret_cast<uint8_t*>(kBuilder) + kBuilderLen);
+  gi.assign(ix, ix + kMeshIdxMax);
+  std::memcpy(reinterpret_cast<void*>(kBuilder), pb.data(), kBuilderLen);
+  std::memcpy(ix + t * 3, pi, sizeof(pi));
+  const int ro = tf::MeshCorner(t, x, y, dx, dy);
+  CheckMeshResult("mesh corner", n, rg, ro, 0, 0, t, gb, gi);
+  return ro;
+}
+
 void SetFast(bool on) {
   if (on) {
     g_h_detail.On();
     g_h_draw.On();
+    g_h_tri.On();
+    g_h_corner.On();
   } else {
     g_h_detail.Off();
     g_h_draw.Off();
+    g_h_tri.Off();
+    g_h_corner.Off();
   }
   g_fast_on = on;
 }
@@ -983,8 +1071,10 @@ void __fastcall EvalHook(uint8_t* root, void*) {
       check = true;
     }
   }
+  g_check_mesh = false;
   if (check) {
     CheckEval(root);
+    g_check_mesh = true;    // this frame's mesh building (after Eval)
     g_check_draw = true;    // this frame's draw walk
     g_check_detail = true;  // next frame's Setup
   } else {
@@ -1004,16 +1094,18 @@ void FastReport() {
   if (c.terrain_check || c.terrain_log) {
     const double f = frames ? frames : 1;
     patch::Log("terrain fast 5s: %u frames; per frame: nodes evaluated %.0f, vertices tested %.0f, sub-blocks walked "
-               "%.0f, draw calls %.0f; detail numbers clamped %u",
+               "%.0f, draw calls %.0f (%.0f far-coloured, %.0f vertices), meshes built %.1f (%.0f vertices); detail "
+               "numbers clamped %u",
                frames, tf::g_stats.eval_nodes / f, tf::g_stats.eval_tests / f, tf::g_stats.draw_blocks / f,
-               tf::g_stats.draw_calls / f, tf::g_stats.lod_over);
+               tf::g_stats.draw_calls / f, tf::g_stats.draw_far / f, tf::g_stats.draw_verts / f,
+               tf::g_stats.mesh_calls / 2.0 / f, tf::g_stats.mesh_verts / f, tf::g_stats.lod_over);
   }
   if (c.terrain_check)
     patch::Log("terrain check 5s: Detail %u calls, %u differ; Eval %u frames (%u nodes), %u nodes and %u terrains differ "
-               "(%.1f ms per check); draw walk %u walks (%u calls), %u differ",
+               "(%.1f ms per check); draw walk %u walks (%u calls), %u differ; mesh %u calls, %u differ",
                g_chk.detail, g_chk.detail_bad, g_chk.eval, g_chk.eval_nodes, g_chk.eval_bad_nodes,
                g_chk.eval_bad_terrain, g_chk.eval ? g_chk.eval_ms / g_chk.eval : 0.0, g_chk.draw, g_chk.draw_calls,
-               g_chk.draw_bad);
+               g_chk.draw_bad, g_chk.mesh, g_chk.mesh_bad);
   const unsigned logged = g_chk.logged;
   g_chk = CheckStats();
   g_chk.logged = logged;
@@ -1038,8 +1130,11 @@ void InstallFastTerrain() {
   static const uint8_t detail0[] = {0x83, 0xEC, 0x1C, 0x56, 0x8B, 0xF1};  // sub esp,1ch / push esi / mov esi,ecx
   static const uint8_t eval0[] = {0x83, 0xEC, 0x0C, 0x56, 0x8B, 0xF1};    // sub esp,0ch / push esi / mov esi,ecx
   static const uint8_t draw0[] = {0x53, 0x55, 0x56, 0x8B, 0xF1, 0x57};    // push ebx/ebp/esi / mov esi,ecx / push edi
+  static const uint8_t tri0[] = {0x53, 0x55, 0x8B, 0x6C, 0x24, 0x1C};     // push ebx/ebp / mov ebp,[esp+1ch]
+  static const uint8_t corner0[] = {0x8B, 0x44, 0x24, 0x14, 0x8B, 0x4C};  // mov eax,[esp+14h] / mov ecx,...
   if (!patch::Matches(kDetailFn, detail0, 6) || !patch::Matches(kEvalFn, eval0, 6) ||
-      !patch::Matches(kDrawWalkFn, draw0, 6)) {
+      !patch::Matches(kDrawWalkFn, draw0, 6) || !patch::Matches(kMeshTriFn, tri0, 6) ||
+      !patch::Matches(kMeshCornerFn, corner0, 6)) {
     patch::Log("terrain: FastTerrain: code differs, not applied");
     return;
   }
@@ -1055,9 +1150,13 @@ void InstallFastTerrain() {
   g_h_detail.Install(reinterpret_cast<const void*>(&DetailHook));
   g_h_eval.Install(reinterpret_cast<const void*>(&EvalHook));
   g_h_draw.Install(reinterpret_cast<const void*>(&DrawHook));
+  g_h_tri.at = kMeshTriFn;
+  g_h_corner.at = kMeshCornerFn;
+  g_h_tri.Install(reinterpret_cast<const void*>(&MeshTriHook));
+  g_h_corner.Install(reinterpret_cast<const void*>(&MeshCornerHook));
   g_fast_hooked = g_fast_on = true;
   SyncFastOptions();
-  patch::Log("terrain: FastTerrain on (detail numbers 482550, Eval 4836e0, draw walk 4818b0 rewritten; Ctrl+F8 "
+  patch::Log("terrain: FastTerrain on (detail numbers 482550, Eval 4836e0, draw walk 4818b0, mesh 480c30/481640 rewritten; Ctrl+F8 "
              "switches it)%s",
              GetConfig().terrain_check ? "; TerrainCheck=1: compared with the game's code every 2 s" : "");
 }

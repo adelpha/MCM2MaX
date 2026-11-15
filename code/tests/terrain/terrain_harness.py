@@ -282,6 +282,89 @@ def diff_bytes(a, b, base, limit=8):
     return out
 
 
+BUILDER = 0x67DA58
+BUILDER_LEN = 0x6807D4 - 0x67DA58
+MIDX = 0x6807D4
+MIDX_LEN = 3 * 1100 * 2
+
+
+def mesh_test(e, w, rng, checks, t, fr):
+    """Builds node meshes with the game's Tri/Corner (0x480c30/0x481640) and ours
+    from the same builder state; compares the builder, indices and results."""
+    fails = 0
+    T = w.T
+    e.wf(T + 0x40, rng.choice([1.0, 0.5, 3.0, 0.3333]))
+    e.w32(T + 0xC9C, rng.randrange(1 << 32))
+    e.w32(T + 0xCA0, rng.randrange(1 << 32))
+    out = e.alloc(16)
+    nodes = list(w.nodes)
+    rng.shuffle(nodes)
+    for n in nodes[:40]:
+        D = e.r32(n + 0x38)
+        sd = e.read(D, DATA_SIZE)
+        vi = e.r32(n + 0x0C)
+        svi = e.read(vi, 0x908)
+        b = bytearray(svi)
+        for v in range(289):      # byte 7 bit 0: read by the finest level (0x480dc0)
+            b[v * 8 + 7] = rng.randrange(4)
+        e.write(vi, bytes(b))
+        f = sd[0x121] & ~4
+        if rng.random() < 0.4:
+            f |= 4
+        e.w8(D + 0x121, f)
+        for o in (0x158, 0x15C, 0x160):
+            e.wf(D + o, rng.uniform(-4, 4))
+        # children's triangle counts (read by the finest level)
+        for c in w.kids(n):
+            cd = e.r32(c + 0x38)
+            e.w16(cd + 0x12A, rng.choice([0, 0, 0, 3]))
+            e.w16(cd + 0x12C, rng.choice([0, 0, 1]))
+        e.w32(0x67B624, rng.choice([0, 0, 1, -3]))
+        e.w32(0x6807D0, rng.choice([0, 0, 2, -1]))
+        # the builder's start (0x47ed70), as the builders do
+        e.call(0x47ED70, (n,), ecx=BUILDER)
+        if rng.random() < 0.5:
+            calls = [('t', 0, 0, 8, 8), ('c', 0, 0, 16, 16), ('t', 16, 16, -8, -8), ('c', 16, 16, -16, -16)]
+        else:
+            calls = [('t', 0, 16, 8, -8), ('c', 0, 16, 16, -16), ('t', 16, 0, -8, 8), ('c', 16, 0, -16, 16)]
+        cnt = 0
+        for c in calls:
+            if c[0] == 'c' and rng.random() < 0.5:
+                continue
+            sb, si = e.read(BUILDER, BUILDER_LEN), e.read(MIDX, MIDX_LEN)
+            e.w32(out, 7)
+            if c[0] == 't':
+                rg = e.call(0x480C30, (8, cnt) + c[1:] + (out,), ecx=n)
+            else:
+                rg = e.call(0x481640, (cnt,) + c[1:], ecx=n)
+            og = e.r32(out)
+            gb, gi = e.read(BUILDER, BUILDER_LEN), e.read(MIDX, MIDX_LEN)
+            e.write(BUILDER, sb)
+            e.write(MIDX, si)
+            e.w32(out, 7)
+            if c[0] == 't':
+                ro = e.call(e.exp['H_MeshTri'], (n, 8, cnt) + c[1:] + (out,))
+            else:
+                ro = e.call(e.exp['H_MeshCorner'], (cnt,) + c[1:])
+            oo = e.r32(out)
+            ob, oi = e.read(BUILDER, BUILDER_LEN), e.read(MIDX, MIDX_LEN)
+            checks['mesh'] += 1
+            checks['mesh_tris'] += max(0, rg - cnt)
+            if rg != ro or og != oo or gb != ob or gi != oi:
+                fails += 1
+                if fails < 6:
+                    print('MESH MISMATCH tree %d frame %d node 0x%x call %r: tris game %d ours %d, flag %d/%d' %
+                          (t, fr, n, c, rg, ro, og, oo))
+                    for l in diff_bytes(gb, ob, BUILDER) + diff_bytes(gi, oi, MIDX):
+                        print('   ', l)
+            e.write(BUILDER, gb)
+            e.write(MIDX, gi)
+            cnt = rg
+        e.write(D, sd)
+        e.write(vi, svi)
+    return fails
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('exe')
@@ -302,7 +385,7 @@ def main():
     if a.lodfix:
         print('note: TerrainLodFix clamp compared as off for the game side (only differs above 65535)')
     fails = 0
-    checks = {'detail': 0, 'eval': 0, 'draw': 0, 'draw_calls': 0}
+    checks = {'detail': 0, 'eval': 0, 'draw': 0, 'draw_calls': 0, 'mesh': 0, 'mesh_tris': 0}
     for t in range(a.trees):
         rng = random.Random(a.seed * 1000 + t)
         e.brk = HEAP
@@ -386,6 +469,7 @@ def main():
                     if x != y:
                         print('    first difference at call %d: game %r ours %r' % (i, x, y))
                         break
+            fails += mesh_test(e, w, rng, checks, t, fr)
         st = struct.unpack('<8I', e.read(e.call(e.exp['H_Stats']), 32))
         print('  ours: eval nodes %d tests %d, draw blocks %d calls %d' % (st[4], st[5], st[6], st[7]))
     print('checks: %r; mismatches: %d' % (checks, fails))

@@ -184,7 +184,8 @@ TerrainHoleFix=1
 TerrainDetail=2
 
 ; FastTerrain: 1 = the game's per-frame terrain code (how detailed each
-; block is, which of its points are used, and the walk that draws it) runs
+; block is, which of its points are used, building its triangles when that
+; changes, and the walk that draws it) runs
 ; as mcm2fix's own rewrite, which gives exactly the same results, bit for
 ; bit, but reads ahead in memory and avoids the old maths' slow spots
 ; (default). Ctrl+F8 switches it on and off while racing (shown on screen).
