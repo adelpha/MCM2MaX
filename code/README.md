@@ -301,18 +301,20 @@ ReflectSun=1
 
 ; ReflectSize: the reflection picture's size per cube side in pixels
 ; (default 128; bigger only matters with a low blur).
-; ReflectLiveFaces: Reflections=2 redraws this many of the six cube sides
-; per frame, 1 to 6 (default 1: the whole reflection is fresh every six
-; frames). ReflectGround: brightness of the ground below the horizon in the
+; ReflectLiveFaces: how many of the reflection's six cube sides each
+; update redraws, 1 to 6 (default 6: the whole reflection; fewer spreads
+; the work over several updates). How often updates happen is
+; ReflectFaceRate, below. ReflectGround: brightness of the ground below the horizon in the
 ; reflection, as a share of the fog colour (default 1).
 ReflectSize=128
-ReflectLiveFaces=1
+ReflectLiveFaces=6
 ReflectGround=1
 
 ; ReflectCache: with Reflections=2, terrain, trees and track objects drawn
 ; in recent frames are kept on the graphics card, so the reflection also
 ; shows what is around the bike behind the camera (1, default), not just sky
-; (0). ReflectCacheMB: memory for it (default 32). ReflectCacheSecs: how long
+; (0). ReflectCacheMB: memory for it (default 128; with a long view
+; distance less than that forgets things soon after they leave view). ReflectCacheSecs: how long
 ; something not drawn any more is kept (default 20). ReflectCacheRadius: how
 ; far from the bike kept things are reflected (0 = as far as the fog ends,
 ; the default). ReflectMaxRange: the reflection leaves out terrain and
@@ -320,11 +322,11 @@ ReflectGround=1
 ; 1024, a little past the fog at ViewDistance=1; 0 = no limit). Far scenery
 ; is too small to see in the reflection, and with a long view distance
 ; drawing all of it again for the reflection costs frame rate.
-; ReflectFaceRate: how many of the reflection's six sides are redrawn per
-; second, at most (default 60, so the whole reflection about 10 times a
-; second; 0 = one side every frame). Frames that redraw none skip the work.
+; ReflectFaceRate: how many times a second, at most, the reflection is
+; updated (default 60; 0 = every frame). Each update redraws
+; ReflectLiveFaces sides. Frames between updates skip the work.
 ReflectCache=1
-ReflectCacheMB=32
+ReflectCacheMB=128
 ReflectCacheSecs=20
 ReflectCacheRadius=0
 ReflectMaxRange=1024

@@ -24,7 +24,7 @@
 //  - Reflections=2 (live): the same sky, plus the frame's world draws
 //    (terrain, trees, track objects; not bikes or riders) drawn again into
 //    the cube from the player's bike, ReflectLiveFaces of the six faces per
-//    frame. Only what the game sent this frame can be drawn again, and the
+//    update (ReflectFaceRate updates a second at most). Only what the game sent this frame can be drawn again, and the
 //    game leaves out what is behind the camera, so those directions show sky.
 //    The draws are not converted again: they are re-issued from the vertex
 //    and index data already on the GPU, with a different camera.
@@ -95,15 +95,16 @@ struct RCfg {
   // ReflectCache: world draws kept for later frames, so the live cube shows
   // what is around the bike behind the camera too.
   bool cache = true;
-  int cache_mb = 32;
+  int cache_mb = 128;
   float cache_secs = 20.0f;
   float cache_radius = 0.0f;  // 0: the game's fog end
   // ReflectMaxRange: world draws further than this from the bike are left out
   // of the live cube (drawn, cached and recorded), whatever the view distance
   // (0: no limit, the fog end).
   float max_range = 1024.0f;
-  // ReflectFaceRate: most cube faces redrawn per second (0 = one every
-  // frame). Frames that will not redraw one skip recording world draws.
+  // ReflectFaceRate: most cube updates per second (each redraws up to
+  // ReflectLiveFaces faces; 0 = every frame). Frames that will not update
+  // skip recording world draws.
   float face_rate = 60.0f;
   std::vector<Pattern> textures;  // texture name -> strength (bikes, plus ReflectTextures)
   std::vector<Pattern> frames;    // frame name -> strength (helmet, plus ReflectFrames)
@@ -191,7 +192,7 @@ const RCfg& Cfg() {
   }
   g_cfg.sun = std::clamp(ReadF("ReflectSun", 1.0f, ini), 0.0f, 4.0f);
   g_cfg.cache = GetPrivateProfileIntA("mcm2fix", "ReflectCache", 1, ini) != 0;
-  g_cfg.cache_mb = std::clamp(static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectCacheMB", 32, ini)), 4, 512);
+  g_cfg.cache_mb = std::clamp(static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectCacheMB", 128, ini)), 4, 512);
   g_cfg.cache_secs = std::clamp(ReadF("ReflectCacheSecs", 20.0f, ini), 0.5f, 600.0f);
   g_cfg.cache_radius = std::clamp(ReadF("ReflectCacheRadius", 0.0f, ini), 0.0f, 1e6f);
   g_cfg.max_range = std::clamp(ReadF("ReflectMaxRange", 1024.0f, ini), 0.0f, 1e6f);
@@ -200,7 +201,7 @@ const RCfg& Cfg() {
   int p = 16;
   while (p < size && p < 1024) p <<= 1;
   g_cfg.size = p;
-  g_cfg.live_faces = std::clamp(static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectLiveFaces", 1, ini)), 1, 6);
+  g_cfg.live_faces = std::clamp(static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectLiveFaces", 6, ini)), 1, 6);
   g_cfg.ground = std::clamp(ReadF("ReflectGround", 1.0f, ini), 0.0f, 2.0f);
   g_cfg.log = GetPrivateProfileIntA("mcm2fix", "ReflectLog", 0, ini) != 0;
   g_cfg.debug = GetPrivateProfileIntA("mcm2fix", "ReflectDebug", 0, ini) != 0;
