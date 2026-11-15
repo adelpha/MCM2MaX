@@ -306,6 +306,7 @@ Surface::~Surface() {
   SafeRelease(clipper_);
   gpu_.Reset();
   replaced_.Reset();
+  replace_pending_ = false;
   keyed_.Reset();
   if (!root_ && dd_ && DirectDraw::Current() == dd_) dd_->ForgetSurface(this);
 }
@@ -809,6 +810,7 @@ void Surface::MatchReplacement(const uint8_t* bgra, UINT w, UINT h) {
                         uploads_ <= 3;  // not video or other streaming textures
   if (!eligible) {
     replaced_.Reset();
+    replace_pending_ = false;
     tex_hash_ = 0;
     return;
   }
@@ -826,18 +828,29 @@ void Surface::MatchReplacement(const uint8_t* bgra, UINT w, UINT h) {
   }
   if (!tex_name_.empty()) {
     // Known by name: dumped and replaced by name, at whatever size the game
-    // streamed it in. Falls back to the hash below.
+    // streamed it in. Falls back to the hash.
     DumpNamedTexture(tex_name_, bgra, w, h);
-    if (LoadReplacementByName(tex_name_, replaced_)) return;
   } else if (exact) {
     DumpTexture(hash, bgra, w, h);
   }
-  if (exact) LoadReplacement(hash, replaced_);
+  replace_gen_ = ReplacementGeneration();
+  replace_pending_ = FindReplacement(tex_name_, hash, exact, replaced_) == kReplacePending;
+}
+
+void Surface::PollReplacement() {
+  // The picture is being decoded on the decoding thread; look again each
+  // time that thread finishes one.
+  const unsigned gen = ReplacementGeneration();
+  if (gen == replace_gen_) return;
+  replace_gen_ = gen;
+  replace_pending_ =
+      FindReplacement(tex_name_, tex_hash_, ExactTextureHashNeeded(), replaced_) == kReplacePending;
 }
 
 const GpuTexture* Surface::SampleTex() {
   GpuTexture* g = Gpu();
   Surface* o = SyncOwner();
+  if (o->replace_pending_) o->PollReplacement();
   return o->replaced_.Valid() ? &o->replaced_ : g;
 }
 

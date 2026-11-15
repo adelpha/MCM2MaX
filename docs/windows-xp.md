@@ -32,8 +32,6 @@ it on every MinGW build.
   to the fixed-function Direct3D 9 renderer (`dd/backend9.cpp`, d3d9.dll
   loaded at run time; ini `Renderer=D3D9` forces it). Only with no Direct3D 9
   at all does mcm2fix leave the game on Windows' own DirectDraw.
-- **Texture replacement/dump** use WIC, which XP SP3 has only with .NET 3.0+
-  or the WIC redistributable; without it they log a failure and do nothing.
 - Registry: HKCU works the same. XP has no UAC virtualisation, so the HKLM
   import on first run finds only what an XP install wrote there.
 

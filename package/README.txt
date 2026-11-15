@@ -93,6 +93,11 @@ FFmpeg's source is the n7.1 release. The build script that produces this
 DLL is tools/build-ffmpeg.sh in the mcm2fix source, so the DLL can be
 rebuilt against a modified FFmpeg.
 
+Replacement pictures (PNG, TGA, BMP, JPEG) are read with Wuffs
+(https://github.com/google/wuffs), (c) The Wuffs Authors, under the MIT
+licence (see licenses\Wuffs-MIT.txt). Texture dumps are written with
+stb_image_write by Sean Barrett (public domain).
+
 The HUD fonts in FONTS are Contrail One (c) 2011 Sorkin Type Co and DSEG7
 Classic (c) 2017 keshikan, both under the SIL Open Font License 1.1 (see
 licenses\ContrailOne-OFL.txt and licenses\DSEG-OFL.txt).

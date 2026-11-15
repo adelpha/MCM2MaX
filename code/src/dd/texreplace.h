@@ -4,7 +4,7 @@
 // Every texture the game uploads is identified by a 64-bit hash of its top
 // level (size and pixels). TextureDump=1 saves each one once as
 //   %LOCALAPPDATA%\Motocross Madness 2\textures_dump\<hash>.png
-// and a picture with the same name (PNG, JPEG or BMP, any size) placed in
+// and a picture with the same name (PNG, TGA, JPEG or BMP, any size) placed in
 //   <game folder>\textures   or   %LOCALAPPDATA%\Motocross Madness 2\textures
 // is drawn in its place, with full mipmaps generated on the GPU.
 //
@@ -28,8 +28,14 @@ uint64_t TextureHash(const uint8_t* bgra, UINT w, UINT h);
 bool ExactTextureHashNeeded();
 uint64_t FastTextureHash(const uint8_t* bgra, UINT w, UINT h);
 
-// True (and `out` filled) if a replacement picture exists for `hash`.
-bool LoadReplacement(uint64_t hash, GpuTexture& out);
+// Replacement for a texture known by `name` (TextureKey, may be empty) or,
+// when `exact`, by its TextureHash. kReplaced: `out` shares the picture's
+// texture. kPending: the picture is still being decoded (decoding thread);
+// ask again once ReplacementGeneration() has changed.
+enum { kReplaceNone = 0, kReplaced = 1, kReplacePending = 2 };
+int FindReplacement(const std::string& name, uint64_t hash, bool exact, GpuTexture& out);
+unsigned ReplacementGeneration();
+void ReplacementMemoryLog();
 
 // Save the texture as PNG if TextureDump is on and it wasn't saved before.
 void DumpTexture(uint64_t hash, const uint8_t* bgra, UINT w, UINT h);
@@ -43,7 +49,6 @@ void SetCopyTextureName(const char* name);  // nullptr clears
 std::string TakeCopyTextureName();
 std::string TextureKey(const char* name);  // "Riders\Rider01.tga" -> "riders_rider01"
 
-bool LoadReplacementByName(const std::string& key, GpuTexture& out);
 void DumpNamedTexture(const std::string& key, const uint8_t* bgra, UINT w, UINT h);
 
 }  // namespace dd

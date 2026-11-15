@@ -1046,9 +1046,143 @@ void SetFast(bool on) {
 bool KeyPressed(int vk, bool& was);
 bool OurWindowInFront();
 
+// TerrainCheck=1 / TerrainLog=1: why node meshes are rebuilt. The mesh walk
+// (0x47fed0) calls a builder (0x480790, or 0x480160 when data+0x121 bit 8)
+// for each node whose data+0x121 bit 1 is set; the builder keeps the mesh in
+// data+0x134/0x138 and registers it with the mesh cache (T+0xc88). Each frame
+// 0x50cdd0 evicts meshes not drawn last frame from that cache once they pass
+// 1 MB (down to 512 KB), and terrain textures from T+0xc84 the same way; an
+// evicted mesh (callback 0x47fc10) is rebuilt when its node is drawn again.
+// The builder call sites are wrapped to sort each rebuild by what changed
+// since that node's last build.
+struct MeshRec {
+  uint32_t frame;
+  uint32_t vis;      // node+0x40
+  uint32_t tex;      // D+8 (the node's terrain texture)
+  uint32_t counts;   // data+0x12a | data+0x12c << 16
+};
+struct MeshWhy {
+  unsigned builds = 0, forced = 0;
+  unsigned first = 0, evicted = 0, vis = 0, tex = 0, counts = 0, same = 0;
+  unsigned age1 = 0, age10 = 0, age_old = 0;
+  unsigned evict_calls[2] = {}, evict_n[2] = {};
+  uint64_t evict_bytes[2] = {};
+  uint32_t cache[2] = {};  // cache objects seen (mesh, texture)
+} g_why;
+std::vector<std::pair<uint8_t*, MeshRec>> g_mesh_recs;  // open hash on node pointer
+uint32_t g_frame_no = 0;
+bool g_why_hooked = false;
+
+MeshRec* FindRec(uint8_t* n, bool& fresh) {
+  if (g_mesh_recs.empty()) g_mesh_recs.resize(1u << 16);
+  const size_t mask = g_mesh_recs.size() - 1;
+  size_t i = (reinterpret_cast<uintptr_t>(n) >> 4) * 2654435761u & mask;
+  for (size_t probe = 0; probe < 64; ++probe, i = (i + 1) & mask) {
+    auto& e = g_mesh_recs[i];
+    if (e.first == n) { fresh = false; return &e.second; }
+    if (!e.first) { e.first = n; fresh = true; return &e.second; }
+  }
+  fresh = true;
+  return nullptr;  // table crowded: not tracked
+}
+
+void NoteBuild(uint8_t* n, bool forced) {
+  uint8_t* d = At<uint8_t*>(n, 0x38);
+  uint8_t* D = At<uint8_t*>(n, 0x3c);
+  MeshRec now{g_frame_no, At<uint32_t>(n, 0x40), D ? At<uint32_t>(D, 8) : 0,
+              uint32_t(At<uint16_t>(d, 0x12a)) | uint32_t(At<uint16_t>(d, 0x12c)) << 16};
+  ++g_why.builds;
+  if (forced) ++g_why.forced;
+  bool fresh = true;
+  MeshRec* r = FindRec(n, fresh);
+  if (!r || fresh) {
+    ++g_why.first;
+  } else {
+    const uint32_t age = g_frame_no - r->frame;
+    if (age <= 1) ++g_why.age1; else if (age <= 10) ++g_why.age10; else ++g_why.age_old;
+    if (!At<uint32_t>(d, 0x134)) ++g_why.evicted;
+    else if (now.vis != r->vis) ++g_why.vis;
+    else if (now.tex != r->tex) ++g_why.tex;
+    else if (now.counts != r->counts) ++g_why.counts;
+    else ++g_why.same;
+  }
+  if (r) *r = now;
+}
+
+int __fastcall BuildWrap(uint8_t* n, void*) {
+  NoteBuild(n, false);
+  return reinterpret_cast<ThisVoid>(0x480790)(n, nullptr);
+}
+int __fastcall BuildFullWrap(uint8_t* n, void*) {
+  NoteBuild(n, true);
+  return reinterpret_cast<ThisVoid>(0x480160)(n, nullptr);
+}
+using EvictFn = int(__fastcall*)(void* cache, void* edx, int target);
+int Evict(int which, uint8_t* cache, int target) {
+  const uint32_t n0 = At<uint32_t>(cache, 4), b0 = At<uint32_t>(cache, 0x10);
+  const int r = reinterpret_cast<EvictFn>(0x4011B0)(cache, nullptr, target);
+  ++g_why.evict_calls[which];
+  g_why.evict_n[which] += n0 - At<uint32_t>(cache, 4);
+  g_why.evict_bytes[which] += b0 - At<uint32_t>(cache, 0x10);
+  g_why.cache[which] = reinterpret_cast<uint32_t>(cache);
+  return r;
+}
+int __fastcall EvictMeshWrap(uint8_t* cache, void*, int target) { return Evict(0, cache, target); }
+int __fastcall EvictTexWrap(uint8_t* cache, void*, int target) { return Evict(1, cache, target); }
+
+void InstallMeshWhy() {
+  const uint8_t b_full[] = {0xE8, 0xC1, 0x00, 0x00, 0x00};
+  const uint8_t b_norm[] = {0xE8, 0xEA, 0x06, 0x00, 0x00};
+  const uint8_t b_tex[] = {0xE8, 0x5B, 0x43, 0xEF, 0xFF};
+  const uint8_t b_mesh[] = {0xE8, 0x0F, 0x43, 0xEF, 0xFF};
+  const uint8_t b_flush[] = {0xE8, 0x05, 0x64, 0xEF, 0xFF};
+  if (!patch::Matches(0x48009A, b_full, 5) || !patch::Matches(0x4800A1, b_norm, 5) ||
+      !patch::Matches(0x50CE50, b_tex, 5) || !patch::Matches(0x50CE9C, b_mesh, 5) ||
+      !patch::Matches(0x50ADA6, b_flush, 5)) {
+    patch::Log("terrain: mesh rebuild log: code differs, not applied");
+    return;
+  }
+  patch::Call(0x48009A, reinterpret_cast<const void*>(&BuildFullWrap), 5);
+  patch::Call(0x4800A1, reinterpret_cast<const void*>(&BuildWrap), 5);
+  patch::Call(0x50CE50, reinterpret_cast<const void*>(&EvictTexWrap), 5);
+  patch::Call(0x50CE9C, reinterpret_cast<const void*>(&EvictMeshWrap), 5);
+  patch::Call(0x50ADA6, reinterpret_cast<const void*>(&EvictTexWrap), 5);
+  g_why_hooked = true;
+  patch::Log("terrain: mesh rebuild log on (builders 480790/480160, cache evictions 4011b0 from 50ce50/50ce9c/50ada6)");
+}
+
+void MeshWhyReport(unsigned frames) {
+  if (!g_why_hooked) return;
+  const double f = frames ? frames : 1;
+  const MeshWhy& w = g_why;
+  auto cache_line = [](uint32_t c, char* out, size_t sz) {
+    if (!c) { std::snprintf(out, sz, "not seen"); return; }
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(c);
+    std::snprintf(out, sz, "%u entries, %.0f KB", At<uint32_t>(p, 4), At<uint32_t>(p, 0x10) / 1024.0);
+  };
+  char mc[64], tc[64];
+  cache_line(w.cache[0], mc, sizeof(mc));
+  cache_line(w.cache[1], tc, sizeof(tc));
+  patch::Log("terrain mesh rebuilds 5s, per frame: %.1f built (%.1f full); first build %.1f, after eviction %.1f, "
+             "visibility changed %.1f, texture changed %.1f, neighbour counts changed %.1f, nothing seen changed "
+             "%.1f; last built 1 frame before %.1f, 2-10 frames %.1f, longer %.1f",
+             w.builds / f, w.forced / f, w.first / f, w.evicted / f, w.vis / f, w.tex / f, w.counts / f, w.same / f,
+             w.age1 / f, w.age10 / f, w.age_old / f);
+  patch::Log("terrain caches 5s: mesh cache %s (mesh bytes %u KB, peak %u KB), evicted %.1f meshes / %.0f KB per "
+             "frame; texture cache %s, evicted %.1f textures / %.0f KB per frame (%u calls)",
+             mc, *reinterpret_cast<uint32_t*>(0x690440) / 1024, *reinterpret_cast<uint32_t*>(0x69043C) / 1024,
+             w.evict_n[0] / f, w.evict_bytes[0] / 1024.0 / f, tc, w.evict_n[1] / f, w.evict_bytes[1] / 1024.0 / f,
+             w.evict_calls[1]);
+  const MeshWhy keep_caches = g_why;
+  g_why = MeshWhy();
+  g_why.cache[0] = keep_caches.cache[0];
+  g_why.cache[1] = keep_caches.cache[1];
+}
+
 void FastReport();
 
 void __fastcall EvalHook(uint8_t* root, void*) {
+  ++g_frame_no;
   static bool f8 = false;
   if (KeyPressed(VK_F8, f8) && g_fast_hooked && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && OurWindowInFront()) {
     SetFast(!g_fast_on);
@@ -1135,6 +1269,7 @@ void FastReport() {
                g_chk.detail, g_chk.detail_bad, g_chk.eval, g_chk.eval_nodes, g_chk.eval_bad_nodes,
                g_chk.eval_bad_terrain, g_chk.eval ? g_chk.eval_ms / g_chk.eval : 0.0, g_chk.draw, g_chk.draw_calls,
                g_chk.draw_bad, g_chk.mesh, g_chk.mesh_bad);
+  MeshWhyReport(frames);
   const unsigned logged = g_chk.logged;
   g_chk = CheckStats();
   g_chk.logged = logged;
@@ -1246,6 +1381,7 @@ void ApplyTerrainFixes() {
     }
   }
   InstallFastTerrain();
+  if (c.terrain_check || c.terrain_log) InstallMeshWhy();
   if (c.profile) {
     const uint8_t call_setup[] = {0xE8, 0x0F, 0x5D, 0xF7, 0xFF};   // call 482d20
     const uint8_t call_mesh[] = {0xE8, 0x44, 0x2E, 0xF7, 0xFF};    // call 47fec0

@@ -62,6 +62,7 @@ add_library(mcm2fix SHARED
   src/dd/hook.cpp
   src/dd/msaa.cpp
   src/dd/texreplace.cpp
+  src/dd/texdecode.cpp
   src/dd/probe.cpp
   src/dd/reflect.cpp
   src/dd/gpushadow.cpp
@@ -88,7 +89,7 @@ set_target_properties(mcm2fix PROPERTIES PREFIX "" OUTPUT_NAME "mcm2fix")
 
 # d3d11.dll, dxgi.dll and d3d9.dll are loaded at run time (dd/backend*.cpp),
 # so the DLL loads where they are missing and the renderer can fall back.
-target_link_libraries(mcm2fix PRIVATE dxguid gdi32 user32 ole32 windowscodecs winmm shell32 shlwapi)
+target_link_libraries(mcm2fix PRIVATE dxguid gdi32 user32 ole32 winmm shell32 shlwapi)
 target_compile_definitions(mcm2fix PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 
 # SSE2 kernels (simd_sse2.cpp) are only called after a CPU check; the rest
@@ -100,6 +101,9 @@ if(NOT MSVC)
   # contraction into fused multiply-adds, no reordering.
   set_source_files_properties(src/terrain_fast.cpp PROPERTIES COMPILE_OPTIONS
     "-msse2;-mfpmath=sse;-mstackrealign;-ffp-contract=off;-fno-strict-aliasing")
+  # Wuffs and stb_image_write (third_party): their own code, their own
+  # warnings. Wuffs picks its SSE4.2/AVX2 paths at run time by CPU check.
+  set_source_files_properties(src/dd/texdecode.cpp PROPERTIES COMPILE_OPTIONS "-w;-mstackrealign")
 endif()
 
 if(MSVC)
@@ -124,7 +128,7 @@ if(MCM2FIX_TESTS)
     target_link_libraries(dd_smoke PRIVATE "${MCM2FIX_FFMPEG}/lib/libavcodec.a"
                                            "${MCM2FIX_FFMPEG}/lib/libavutil.a")
   endif()
-  target_link_libraries(dd_smoke PRIVATE dxguid gdi32 user32 ole32 windowscodecs winmm shell32 shlwapi)
+  target_link_libraries(dd_smoke PRIVATE dxguid gdi32 user32 ole32 winmm shell32 shlwapi)
   target_compile_definitions(dd_smoke PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   if(NOT MSVC)
     # Loaded away from Mcm2.exe's addresses, which the test fills with zeros

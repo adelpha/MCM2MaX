@@ -357,7 +357,7 @@ TrueColorTextures=1
 ; if there is one (default). Replacements go in the "textures" folder in the
 ; game folder or in %LOCALAPPDATA%\Motocross Madness 2\textures (that one wins
 ; when both have the same picture). Name each file like the dumped texture
-; (see TextureDump). PNG, JPEG or BMP, any size, full colour with alpha.
+; (see TextureDump). PNG, TGA, JPEG or BMP, any size, full colour with alpha.
 ; 0 = always use the game's own textures.
 TextureReplace=1
 
@@ -367,6 +367,13 @@ TextureReplace=1
 ; are saved as <name>.png, others as <16 hex digits>.png. 0 = off (default).
 ; Slows loading while on.
 TextureDump=0
+
+; TextureDecodeThread: 1 = read replacement pictures on a separate thread
+; (default). The game keeps its own texture until the picture is ready, a few
+; frames later, so loading a big picture never holds up the game. 0 = read
+; each picture when the game loads the texture, which pauses the game for as
+; long as that takes.
+TextureDecodeThread=1
 
 ; RiderShadows: how the riders' shadows are drawn. The game drew one shadow,
 ; for the rider the camera follows, into a small picture on the CPU.
@@ -1005,7 +1012,7 @@ it in `textures\` in the game folder or in
 at every size. Textures without a name are dumped as `<hash>.png` instead
 (16 hex digits of the texture's size and pixels; anything after the 16
 digits and a `_` is ignored) and replaced only when the game loads exactly
-those pixels. PNG, JPEG and BMP of any size work, at full 32-bit colour;
+those pixels. PNG, TGA, JPEG and BMP of any size work, at full 32-bit colour;
 mipmaps are generated on the GPU. Keep alpha where the original has it.
 Textures that change every frame (videos) are never replaced, and menu
 screens, the cursor and fonts are not textures, so they can't be replaced.

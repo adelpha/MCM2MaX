@@ -118,6 +118,7 @@ struct Config {
   float model_lod = 1.0f;     // ModelLod: detailed models are kept this many times further away
   bool texture_replace = true;  // TextureReplace: load replacement textures from textures\ folder
   bool texture_dump = false;    // TextureDump: save every texture the game uploads as PNG
+  bool texture_decode_thread = true;  // TextureDecodeThread: decode replacement pictures off the game thread
   bool true_color_textures = true;  // TrueColorTextures: load textures as 24/32-bit instead of 16-bit
   bool texture_log = false;         // TextureLog: log the format of each texture the game creates
 };

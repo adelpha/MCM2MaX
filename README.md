@@ -121,7 +121,7 @@ Windows 10 and 11.
   Strength, softness and shine are tunable per material (`ReflectBike*`,
   `ReflectHelmet*`, `ReflectRider*`). `LiquidMetal=1` turns every bike and
   rider into liquid chrome. Direct3D 11.
-- **Texture dumping and replacement** by name with PNG, JPEG or BMP files of
+- **Texture dumping and replacement** by name with PNG, TGA, JPEG or BMP files of
   any size (`TextureDump`, `TextureReplace`). See
   [below](#texture-dumping-and-replacement).
 - **Sharp text**. The game draws its menu and HUD text with GDI on 640x480
@@ -341,9 +341,6 @@ built with MinGW, and CI checks that it imports nothing XP lacks.
 - Without a desktop compositor, windowed Direct3D 9 often ignores VSync, so
   mcm2fix waits for the vertical blank itself (`VSync=1`).
   `Fullscreen=Exclusive` avoids the issue entirely.
-- Texture dump/replacement uses WIC, which XP has only with .NET 3.0+ or the
-  WIC redistributable. Without it those features log a failure and do
-  nothing.
 
 Details: [docs/windows-xp.md](docs/windows-xp.md).
 
@@ -505,6 +502,7 @@ The file has three parts:
 | `TrueColorTextures` | `1` | `0`, `1` | Loads textures in full colour (24-bit, or 32-bit with alpha) wherever the picture has more than 16 bits; a bug made the game always use 16-bit. Most of the game's art is stored in 16-bit, so only a few textures change. Changing it renames unnamed dumped textures. |
 | `TextureReplace` | `1` | `0`, `1` | Uses replacement pictures from `textures\` in the game folder or in `%LOCALAPPDATA%\Motocross Madness 2\textures\` (the per-user folder wins). See [Texture dumping and replacement](#texture-dumping-and-replacement). |
 | `TextureDump` | `0` | `0`, `1` | Saves every texture the game loads as a PNG in `%LOCALAPPDATA%\Motocross Madness 2\textures_dump`, to start replacements from. Loading is slower while it's on. |
+| `TextureDecodeThread` | `1` | `0`, `1` | Reads replacement pictures on a separate thread, so a big picture never holds up the game; the game's own texture shows until the picture is ready, a few frames later. `0` reads each picture when the game loads the texture. |
 | `RiderShadows` | `2` | `0`, `1`, `2` | `2`: every rider and bike casts a shadow, drawn by the graphics card at high resolution with soft edges, following the riders smoothly between simulation steps. `1`: only the rider the camera follows has one, as in the original game, but drawn the same new way. `0`: the game's own shadow (one rider, drawn into a small picture on the CPU). Direct3D 11 only; the Direct3D 9 renderer always uses the game's shadow. Tracks where the game draws no shadow (no sun) still have none. |
 | `ShadowStrength` | `0` | `0`, 1-100 | How dark the `RiderShadows` shadows are, in percent. `0` = as dark as the game's own shadow. |
 | `ShadowSoftness` | `100` | 0-400 | How much the `RiderShadows` shadows blur and fade with the rider's height above the ground, in percent. Crisp where the wheels touch the ground, wide and faint under a high jump. `0` = always sharp. |
@@ -685,7 +683,7 @@ The shipped `mcm2fix.ini` is generated from the block in
 2. Edit or upscale a file and keep its name. Put it in `textures\` in the
    game folder, or in `%LOCALAPPDATA%\Motocross Madness 2\textures\`.
 3. With `TextureReplace=1` (the default) the file replaces that texture at
-   every size. PNG, JPEG and BMP of any size work, at full 32-bit colour,
+   every size. PNG, TGA, JPEG and BMP of any size work, at full 32-bit colour,
    and mipmaps are generated on the GPU. Keep alpha where the original has
    it.
 
