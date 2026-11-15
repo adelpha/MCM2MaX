@@ -1360,6 +1360,21 @@ void __fastcall TerrainDrawSite(void* root, void*, void* dev) {
   reinterpret_cast<TerrainDrawFn>(0x481870)(root, nullptr, dev);
 }
 
+// 0x481890 (thiscall root; device wrapper, texture; ret 8) walks the game's
+// terrain once more: at 0x50bf2b it is the one draw of the terrain (detail on
+// stage 1), at 0x50c0bf the detail texture's second pass. GpuTerrain draws
+// both itself, so the game's (stale) blocks must not be drawn over it.
+using TerrainPassFn = int(__fastcall*)(void* root, void* edx, void* dev, void* tex);
+int __fastcall TerrainOnePassSite(void* root, void*, void* dev, void* tex) {
+  GpuTerrainKeys();
+  if (GpuTerrainDraw(root)) return 1;
+  return reinterpret_cast<TerrainPassFn>(0x481890)(root, nullptr, dev, tex);
+}
+int __fastcall TerrainDetailPassSite(void* root, void*, void* dev, void* tex) {
+  if (GpuTerrainActive()) return 1;
+  return reinterpret_cast<TerrainPassFn>(0x481890)(root, nullptr, dev, tex);
+}
+
 }  // namespace
 
 void ApplyTerrainFixes() {
@@ -1432,6 +1447,14 @@ void ApplyTerrainFixes() {
         patch::Matches(0x50BFAF, call_draw1, 5) && patch::Matches(0x50BFFC, call_draw2, 5)) {
       patch::Call(0x50BFAF, reinterpret_cast<const void*>(&TerrainDrawSite), 5);
       patch::Call(0x50BFFC, reinterpret_cast<const void*>(&TerrainDrawSite), 5);
+      const uint8_t call_pass1[] = {0xE8, 0x60, 0x59, 0xF7, 0xFF};  // 50bf2b: call 481890
+      const uint8_t call_pass2[] = {0xE8, 0xCC, 0x57, 0xF7, 0xFF};  // 50c0bf: call 481890
+      if (patch::Matches(0x50BF2B, call_pass1, 5) && patch::Matches(0x50C0BF, call_pass2, 5)) {
+        patch::Call(0x50BF2B, reinterpret_cast<const void*>(&TerrainOnePassSite), 5);
+        patch::Call(0x50C0BF, reinterpret_cast<const void*>(&TerrainDetailPassSite), 5);
+      } else {
+        patch::Log("terrain: GpuTerrain: detail pass code differs; the game's detail pass is left as it is");
+      }
       patch::Call(0x50D00C, reinterpret_cast<const void*>(&SetupZone), 5);
       patch::Call(0x50D03E, reinterpret_cast<const void*>(&EvalSite), 5);
       patch::Call(0x50D077, reinterpret_cast<const void*>(&MeshZone), 5);

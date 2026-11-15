@@ -231,6 +231,8 @@ float4 ps_main(VSOut i) : SV_Target {
   float4 white = float4(1, 1, 1, 1);
   float4 tc0 = tex0.Sample(smp0, i.t0);
   float4 tc1 = tex1.Sample(smp1, i.t1);
+  // GpuTerrain's detail texture fades out between acut.z and acut.w (depth).
+  if (acut.w > 0) tc1.a *= saturate((acut.w - i.fogw) / max(acut.w - acut.z, 0.001));
   if (scol[0].w == 0) tc0 = white;
   if (scol[1].w == 0) tc1 = white;
   float4 cur = i.diff;
@@ -2055,6 +2057,8 @@ void Device::ApplyState(bool tl, bool depth_clip, bool has_depth, bool shadow) {
       if (seen.insert(key).second) Log("alpha draw: %s", key);
     }
   }
+  pc.cut[2] = detail_fade_[0];
+  pc.cut[3] = detail_fade_[1];
   if (!bd.pc_ok || std::memcmp(&bd.pc, &pc, sizeof(pc)) != 0) {
     b.ctx->UpdateSubresource(ps_cb_, 0, nullptr, &pc, 0, 0);
     bd.pc = pc;
@@ -2812,6 +2816,8 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     bd.vp = v;
     bd.vp_ok = true;
   }
+  detail_fade_[0] = m.detail_fade[0];
+  detail_fade_[1] = m.detail_fade[1];
   // Visible chunks' ranges, sorted by texture so each is bound once.
   std::vector<const gt::Range*>& todo = terr_todo_;
   std::vector<int32_t>& todo_base = terr_todo_base_;
@@ -2856,6 +2862,7 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     ++draws;
   }
   bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
+  detail_fade_[0] = detail_fade_[1] = 0;
 
   for (int i = 0; i < kRs; ++i) rs_[rs_keys[i]] = rs_save[i];
   tex_[0] = tex_save[0];

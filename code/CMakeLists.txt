@@ -38,6 +38,7 @@ add_library(mcm2fix SHARED
   src/regtrace.cpp
   src/config.cpp
   src/framerate.cpp
+  src/freecam.cpp
   src/input_timing.cpp
   src/prof.cpp
   src/simd.cpp

@@ -212,6 +212,7 @@ class Device : public d3d7::IDirect3DDevice7 {
   ID3D11Buffer* terr_vb_ = nullptr;
   ID3D11Buffer* terr_ib_ = nullptr;
   unsigned terr_gen_ = 0;
+  float detail_fade_[2] = {0, 0};
   std::vector<const gt::Range*> terr_todo_;
   std::vector<int32_t> terr_todo_base_;
   std::vector<uint32_t> terr_order_;

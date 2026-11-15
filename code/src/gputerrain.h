@@ -46,6 +46,7 @@ struct Mesh {
   std::vector<Range> ranges;
   std::vector<void*> textures;  // per material: the renderer's texture (a reference held), or null
   void* detail = nullptr;       // the detail texture (a reference held), or null
+  float detail_fade[2] = {0, 0};  // its fade: from, to (depth)
   unsigned generation = 0;      // bumped for each new mesh
 };
 

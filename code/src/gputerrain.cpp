@@ -555,6 +555,19 @@ bool Build(uint8_t* root) {
       m.detail = dsurf;
       dd::GpuTerrainAddRefTexture(dsurf);
     }
+    // The game lays it only on blocks whose texel measure (0x47d9f0: 16 cells
+    // * T+0x70 / distance / 0.25 for a block on its parent's sub-block
+    // texture) is above T+0xca4: out to T+0x70 * 64 / ca4.
+    const float t70 = static_cast<float>(Rd<int32_t>(b.T, 0x70));
+    const float ca4 = static_cast<float>(Rd<int32_t>(b.T, 0xCA4));
+    float reach = (t70 > 0 && ca4 > 0) ? t70 * 64.0f / ca4 : 0;
+    if (GetConfig().gpu_terrain_detail_reach > 0) reach = GetConfig().gpu_terrain_detail_reach;
+    if (!(reach > 0)) reach = 400;
+    m.detail_fade[0] = reach * 0.75f;
+    m.detail_fade[1] = reach;
+    patch::Log("gpu terrain: detail reach %.0f (T+70 %d, ca4 %d, ini %.0f), faded from %.0f", reach,
+               Rd<int32_t>(b.T, 0x70), Rd<int32_t>(b.T, 0xCA4), GetConfig().gpu_terrain_detail_reach,
+               m.detail_fade[0]);
     char d[160];
     dd::GpuTerrainDescribeTexture(dsurf, d, sizeof(d));
     patch::Log("gpu terrain: detail texture object %p surface %s, game's detail switch %d, game's mode %s; %s",

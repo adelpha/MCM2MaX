@@ -15,6 +15,7 @@
 
 #include "config.h"
 #include "framerate.h"
+#include "freecam.h"
 #include "smooth.h"
 #include "patch.h"
 #include "dd/hudtext.h"
@@ -77,6 +78,10 @@ float Widen(float deg, float aspect) {
 }
 
 void __stdcall AdjustFov(uintptr_t cam) {
+  if (GetConfig().free_cam) {
+    FreeCamApply(cam);
+    if (!GetConfig().wide_fov && GetConfig().fov <= 0.0f) return;
+  }
   int w = *reinterpret_cast<int*>(cam + 0x1a8);
   int h = *reinterpret_cast<int*>(cam + 0x1ac);
   if (w <= 0 || h <= 0) return;
@@ -480,7 +485,7 @@ void InstallOverlayLayoutHook() {
 void ApplyWidescreenFov() {
   InstallOverlayLayoutHook();
   if (GetConfig().fov_log) InstallSetFovLog();
-  if (!GetConfig().wide_fov && GetConfig().fov <= 0.0f) return;
+  if (!GetConfig().wide_fov && GetConfig().fov <= 0.0f && !GetConfig().free_cam) return;
   if (!patch::Matches(kCameraUpdate, kCameraUpdateEntry, sizeof(kCameraUpdateEntry))) {
     patch::Log("widescreen fov: camera update code differs, not applied");
     return;

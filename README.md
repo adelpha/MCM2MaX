@@ -635,8 +635,12 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `WalkLog` | `0` | With `FastObjectWalk`, every 5 seconds how many object lists were made and reused, and now and then a check of a reused list against a fresh walk (costs frame rate). |
 | `FarTreeLog` | `0` | With `FarTrees`, every 5 seconds how many trees the graphics card drew and how many were left to the game, plus checks of the game's billboards against the far-tree numbers. `2` also tints GPU-drawn trees red. |
 | `TerrainCheck` | `0` | With `FastTerrain`, every 2 seconds one frame also runs the game's own terrain code and logs any difference from the rewrite (there should be none), with a summary every 5 seconds. Costs a few milliseconds every 2 seconds. |
-| `GpuTerrainDetail` | `1` | `0`, `1` | With `GpuTerrain`, the game's fine detail texture is laid over the terrain, as the game does close up. `0` = without it. |
+| `GpuTerrainDetail` | `1` | With `GpuTerrain`, the game's fine detail texture is laid over the terrain, as the game does close up. `0` = without it. |
+| `GpuTerrainDetailReach` | `0` | How far from the camera the detail texture reaches (it fades out over the last quarter). `0` = as far as the game draws it. |
 | `GpuTerrainLog` | `1` | With `GpuTerrain`, how the terrain was built and every 5 seconds what was drawn. `2` also tints the terrain by detail level. |
+| `FreeCam` | `1` | Ctrl+F6 during a race freezes it and gives a free camera for screenshots: mouse or arrow keys look, W/A/S/D move, Space/E up, C/Q down, Shift faster, Z slower. Ctrl+F6 again and the race carries on. |
+| `FreeCamSpeed` | `60` | Free camera speed in feet per second. |
+| `FreeCamMouse` | `25` | Free camera mouse sensitivity. |
 | `TerrainLog` | `0` | Terrain statistics every 5 seconds, with debug keys: Ctrl+F9 switches `TerrainHoleFix` on and off, Ctrl+F10 steps `TerrainDetail` (shown on screen), Ctrl+F11 writes the terrain to the log and probes the point under the cursor (Direct3D 11). `2` also looks for holes in the terrain every 2 seconds. |
 | `SoundLog` | `0` | 3D sound buffers, and when `SoundMaxDistanceMute` mutes or unmutes them. |
 | `SoundPauseLog` | `0` | When a race is paused and unpaused: every DirectSound call for a few seconds, failed calls, and the state of every sound buffer and of the window DirectSound follows. |

@@ -209,6 +209,11 @@ GpuTerrain=0
 ; over the terrain, as the game does close up (default 1). 0 = without it.
 GpuTerrainDetail=1
 
+; GpuTerrainDetailReach: how far from the camera the detail texture reaches,
+; in the game's units (it fades out over the last quarter). 0 = as far as
+; the game draws it (default).
+GpuTerrainDetailReach=0
+
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
 ; (default 1). 2 = fog starts twice as far away. Above 1, the edge of the
 ; drawn world may show through the fog unless ViewDistance is raised too.
@@ -887,6 +892,15 @@ TerrainCheck=0
 ; 5 seconds what was drawn (default 1). 2 also tints the terrain by detail
 ; level.
 GpuTerrainLog=1
+
+; FreeCam: 1 = Ctrl+F6 during a race freezes it and gives a free (fly)
+; camera, for screenshots from the same spot. Mouse or arrow keys look,
+; W/A/S/D move, Space/E up, C/Q down, Shift faster, Z slower; Ctrl+F6 again
+; and the race carries on. FreeCamSpeed is in feet per second (default 60),
+; FreeCamMouse the mouse sensitivity (default 25). Default 1.
+FreeCam=1
+FreeCamSpeed=60
+FreeCamMouse=25
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by
 ; SoundMaxDistanceMute. Default 0.
