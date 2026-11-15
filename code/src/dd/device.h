@@ -208,7 +208,16 @@ class Device : public d3d7::IDirect3DDevice7 {
   // GpuTerrain (gputerrain.cpp): the whole terrain from its own buffers.
   bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st);
   Surface* Texture0() const { return tex_[0]; }
+  void CaptureTerrainState(int site, bool log);
  private:
+  // GpuTerrain: the game's sampler settings for its terrain base and detail
+  // textures (MIN/MAG/MIPFILTER, MIPMAPLODBIAS, MAXMIPLEVEL), and draws of
+  // the game's terrain passes still to log.
+  DWORD terr_samp_[2][5] = {};
+  bool terr_samp_ok_[2] = {false, false};
+  int terr_probe_left_ = 0;
+  int terr_probe_site_ = 0;
+  void LogTerrainProbe(const Draw& d);
   ID3D11Buffer* terr_vb_ = nullptr;
   ID3D11Buffer* terr_ib_ = nullptr;
   unsigned terr_gen_ = 0;

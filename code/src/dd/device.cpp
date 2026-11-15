@@ -2216,6 +2216,7 @@ void Device::Submit(const Draw& d) {
     prof::Count(prof::cIndices, d.nidx);
   }
   if (DrawLogOn()) NoteDrawLog(d);
+  if (terr_probe_left_ > 0 && !d.layout.tl) LogTerrainProbe(d);
   if (!d.layout.tl) {
     if (MotionBlurOn() && MotionBlurNote(d, false)) return;
     // Reflections: bike and rider draws go unbatched, reflective ones with
@@ -2664,6 +2665,10 @@ void GpuTerrainAddRefTexture(void* t) {
   if (t) static_cast<Surface*>(t)->AddRef();
 }
 
+void GpuTerrainCaptureState(int site, bool log) {
+  if (g_tree_device) g_tree_device->CaptureTerrainState(site, log);
+}
+
 void GpuTerrainDescribeTexture(void* t, char* out, size_t n) {
   if (!t) {
     std::snprintf(out, n, "no texture");
@@ -2671,6 +2676,63 @@ void GpuTerrainDescribeTexture(void* t, char* out, size_t n) {
   }
   Surface* s = static_cast<Surface*>(t);
   std::snprintf(out, n, "%ux%u \"%s\"", s->Width(), s->Height(), s->TextureName().c_str());
+}
+
+namespace {
+const DWORD kSampKeys[5] = {TSS_MINFILTER, TSS_MAGFILTER, TSS_MIPFILTER, TSS_MIPMAPLODBIAS, TSS_MAXMIPLEVEL};
+std::string DescribeStage(const DWORD* t, Surface* tex) {
+  char b[400];
+  std::snprintf(b, sizeof(b),
+                "tex %s %ux%u mips %u | colorop %lu (%lu,%lu) alphaop %lu (%lu,%lu) uv %lu | min %lu mag %lu mip %lu "
+                "bias %.2f maxlevel %lu aniso %lu addr %lu/%lu",
+                tex ? ("\"" + tex->TextureName() + "\"").c_str() : "none", tex ? tex->Width() : 0,
+                tex ? tex->Height() : 0, tex ? tex->MipLevels() : 0, t[TSS_COLOROP], t[TSS_COLORARG1],
+                t[TSS_COLORARG2], t[TSS_ALPHAOP], t[TSS_ALPHAARG1], t[TSS_ALPHAARG2], t[TSS_TEXCOORDINDEX],
+                t[TSS_MINFILTER], t[TSS_MAGFILTER], t[TSS_MIPFILTER], AsFloat(t[TSS_MIPMAPLODBIAS]), t[TSS_MAXMIPLEVEL],
+                t[TSS_MAXANISOTROPY], t[TSS_ADDRESSU], t[TSS_ADDRESSV]);
+  return b;
+}
+const char* kSiteName[3] = {"base pass", "one-pass (base + detail)", "detail pass"};
+}  // namespace
+
+void Device::CaptureTerrainState(int site, bool log) {
+  // Which stage holds what at this site.
+  const int base_stage = site == 2 ? -1 : 0;
+  const int detail_stage = site == 1 ? 1 : site == 2 ? 0 : -1;
+  if (base_stage >= 0) {
+    for (int k = 0; k < 5; ++k) terr_samp_[0][k] = tss_[base_stage][kSampKeys[k]];
+    terr_samp_ok_[0] = true;
+  }
+  if (detail_stage >= 0) {
+    for (int k = 0; k < 5; ++k) terr_samp_[1][k] = tss_[detail_stage][kSampKeys[k]];
+    terr_samp_ok_[1] = true;
+  }
+  if (!log) return;
+  Log("gpu terrain: game's %s state: stage0 %s", kSiteName[site], DescribeStage(tss_[0], tex_[0]).c_str());
+  Log("gpu terrain: game's %s state: stage1 %s", kSiteName[site], DescribeStage(tss_[1], tex_[1]).c_str());
+  Log("gpu terrain: game's %s state: blend %lu src %lu dst %lu specular %lu fog %lu zfunc %lu zwrite %lu "
+             "tfactor %08lx; Anisotropy %d MipBias %.2f",
+             kSiteName[site], rs_[RS_ALPHABLENDENABLE], rs_[RS_SRCBLEND], rs_[RS_DESTBLEND], rs_[RS_SPECULARENABLE],
+             rs_[RS_FOGENABLE], rs_[RS_ZFUNC], rs_[RS_ZWRITEENABLE], rs_[RS_TEXTUREFACTOR], GetConfig().anisotropy,
+             GetConfig().mip_bias);
+  terr_probe_site_ = site;
+  terr_probe_left_ = 4;
+}
+
+void Device::LogTerrainProbe(const Draw& d) {
+  --terr_probe_left_;
+  uint32_t dif = 0, spec = 0;
+  float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+  const uint8_t* v = d.verts ? d.verts + static_cast<size_t>(d.first) * d.layout.stride : nullptr;
+  if (v && d.layout.diffuse >= 0) std::memcpy(&dif, v + d.layout.diffuse, 4);
+  if (v && d.layout.specular >= 0) std::memcpy(&spec, v + d.layout.specular, 4);
+  if (v && d.layout.ntex > 0) std::memcpy(&u0, v + d.layout.tex[0], 4), std::memcpy(&v0, v + d.layout.tex[0] + 4, 4);
+  if (v && d.layout.ntex > 1) std::memcpy(&u1, v + d.layout.tex[1], 4), std::memcpy(&v1, v + d.layout.tex[1] + 4, 4);
+  Log("gpu terrain: game's %s draw: stride %u, %lu verts, first vertex diffuse %08x specular %08x uv0 (%.3f %.3f) "
+             "uv1 (%.3f %.3f); stage0 %s; stage1 colorop %lu tex %s (mip %lu)",
+             kSiteName[terr_probe_site_], d.layout.stride, d.count, dif, spec, u0, v0, u1, v1,
+             DescribeStage(tss_[0], tex_[0]).c_str(), tss_[1][TSS_COLOROP],
+             tex_[1] ? tex_[1]->TextureName().c_str() : "none", tss_[1][TSS_MIPFILTER]);
 }
 
 namespace {
@@ -2783,6 +2845,8 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   tss_[0][TSS_MAGFILTER] = 2;  // linear
   tss_[0][TSS_MINFILTER] = 2;
   tss_[0][TSS_MIPFILTER] = 3;  // linear between mip levels
+  tss_[0][TSS_MIPMAPLODBIAS] = 0;
+  tss_[0][TSS_MAXMIPLEVEL] = 0;
   tss_[1][TSS_COLOROP] = 1;    // disable
   tss_[1][TSS_ALPHAOP] = 1;
   // The detail texture (as the game's one-pass mode, 0x50be69): stage 1 on
@@ -2796,6 +2860,13 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   tss_[1][TSS_MAGFILTER] = 2;
   tss_[1][TSS_MINFILTER] = 2;
   tss_[1][TSS_MIPFILTER] = 3;
+  tss_[1][TSS_MIPMAPLODBIAS] = 0;
+  tss_[1][TSS_MAXMIPLEVEL] = 0;
+  // Sample them as the game set its own terrain passes up (captured where
+  // it would have drawn them, GpuTerrainCaptureState).
+  for (int st = 0; st < 2; ++st)
+    if (terr_samp_ok_[st])
+      for (int k = 0; k < 5; ++k) tss_[st][kSampKeys[k]] = terr_samp_[st][k];
 
   VSConstants vc{};
   std::memcpy(vc.wvp, vpm, sizeof(vc.wvp));

@@ -105,6 +105,7 @@ class Surface : public IDirectDrawSurface7 {
   // A temporary copy of a surface from the system DirectDraw (caller releases).
   static Surface* CopyForeign(DirectDraw* dd, IUnknown* s);
   UINT Width() const { return desc_.dwWidth; }
+  UINT MipLevels() const { return static_cast<UINT>(1 + mips_.size()); }
   UINT Height() const { return desc_.dwHeight; }
   DWORD Caps() const { return desc_.ddsCaps.dwCaps; }
   bool IsDepth() const { return layout_.depth; }

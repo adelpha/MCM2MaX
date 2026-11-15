@@ -70,6 +70,12 @@ void* GpuTerrainCurrentTexture();
 void GpuTerrainReleaseTexture(void* t);
 void GpuTerrainAddRefTexture(void* t);
 void GpuTerrainDescribeTexture(void* t, char* out, size_t n);
+// The game's own terrain pass state, captured where it would draw: `site`
+// 0 = base (0x481870 sites, stage 0), 1 = one-pass (stage 0 base, stage 1
+// detail), 2 = two-pass detail (stage 0). The GPU terrain samples its base
+// and detail textures the way the game last set them up. With `log`, the
+// state and the next few draws of that pass are written to the log.
+void GpuTerrainCaptureState(int site, bool log);
 }  // namespace dd
 
 // fixes_terrain.cpp. `root`: the game's terrain root node.

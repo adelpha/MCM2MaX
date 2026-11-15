@@ -1354,8 +1354,25 @@ int __fastcall BlocksZone(void* root, void*) {
 // thiscall root, arg the device wrapper, ret 4), inside the scene with the
 // camera of this frame.
 using TerrainDrawFn = void(__fastcall*)(void* root, void* edx, void* dev);
+// GpuTerrainLog: log the game's terrain pass state at each site once at the
+// start and again each time Ctrl+F7 changes GpuTerrain (the draws are logged
+// only while the game draws them itself).
+bool g_probe_due[3] = {true, true, true};
+bool g_probe_was_on = false;
+bool ProbeDue(int site) {
+  const bool on = GpuTerrainActive();
+  if (on != g_probe_was_on) {
+    g_probe_was_on = on;
+    g_probe_due[0] = g_probe_due[1] = g_probe_due[2] = true;
+  }
+  if (!GetConfig().gpu_terrain || !GetConfig().gpu_terrain_log || !g_probe_due[site]) return false;
+  g_probe_due[site] = false;
+  return true;
+}
+
 void __fastcall TerrainDrawSite(void* root, void*, void* dev) {
   GpuTerrainKeys();
+  if (GetConfig().gpu_terrain) dd::GpuTerrainCaptureState(0, ProbeDue(0));
   if (GpuTerrainDraw(root)) return;
   reinterpret_cast<TerrainDrawFn>(0x481870)(root, nullptr, dev);
 }
@@ -1367,10 +1384,12 @@ void __fastcall TerrainDrawSite(void* root, void*, void* dev) {
 using TerrainPassFn = int(__fastcall*)(void* root, void* edx, void* dev, void* tex);
 int __fastcall TerrainOnePassSite(void* root, void*, void* dev, void* tex) {
   GpuTerrainKeys();
+  if (GetConfig().gpu_terrain) dd::GpuTerrainCaptureState(1, ProbeDue(1));
   if (GpuTerrainDraw(root)) return 1;
   return reinterpret_cast<TerrainPassFn>(0x481890)(root, nullptr, dev, tex);
 }
 int __fastcall TerrainDetailPassSite(void* root, void*, void* dev, void* tex) {
+  if (GetConfig().gpu_terrain) dd::GpuTerrainCaptureState(2, ProbeDue(2));
   if (GpuTerrainActive()) return 1;
   return reinterpret_cast<TerrainPassFn>(0x481890)(root, nullptr, dev, tex);
 }
