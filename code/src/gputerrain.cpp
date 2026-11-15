@@ -259,6 +259,10 @@ struct Builder {
                                : 0xFFFFFFFFu;
           v.t0[0] = static_cast<float>(((x - x0) * uscale + uoff) * 0.9375 + 0.03125);
           v.t0[1] = static_cast<float>(((y - y0) * uscale + voff) * 0.9375 + 0.03125);
+          // Detail texture (T+0xc3c), second uv: one repeat per 12 cells of
+          // the finest level (0x481cc2: grid position / 12).
+          v.t1[0] = static_cast<float>(static_cast<double>(static_cast<uint32_t>(ni.gx + x) << (ni.shift & 31)) / 12.0);
+          v.t1[1] = static_cast<float>(static_cast<double>(static_cast<uint32_t>(ni.gy + y) << (ni.shift & 31)) / 12.0);
         } else {
           v.diffuse = Shade(N[y][x][0], N[y][x][1], N[y][x][2], ni.level, log);
         }
@@ -373,19 +377,18 @@ struct Builder {
       const NodeInfo* P = ni.parent;
       int mat = -1;
       float us = 1, sc = 0, uo = 0, vo = 0;
-      if (P && Kind(P->texcode) == kShared) {
+      // Up close the game's choice falls to case 1 (0x47db2e, the parent's
+      // sub-block texture: 4x4 blocks share it), far away to case 0 (the
+      // parent's own texture over 16x16 blocks).
+      const uint32_t psub = (P && P->has_subs) ? P->sub[(ni.iy >> 2) * 4 + (ni.ix >> 2)] : 0xFFFFu;
+      if ((psub & 0xFFFE) != 0xFFFE && !(psub & 1)) {
+        mat = Material(psub, &us);
+        sc = 1.0f / 64, uo = (ni.ix & 3) / 4.0f, vo = (ni.iy & 3) / 4.0f;
+        ++ts.from_parent_sub;
+      } else if (P && Kind(P->texcode) == kShared) {
         mat = Material(P->texcode, &us);
         sc = 1.0f / 256, uo = ni.ix / 16.0f, vo = ni.iy / 16.0f;
         ++ts.from_parent;
-      } else if (P && P->has_subs) {
-        const uint32_t c = P->sub[(ni.iy >> 2) * 4 + (ni.ix >> 2)];
-        if ((c & 0xFFFE) != 0xFFFE && !(c & 1)) {
-          mat = Material(c, &us);
-          sc = 1.0f / 64, uo = (ni.ix & 3) / 4.0f, vo = (ni.iy & 3) / 4.0f;
-          ++ts.from_parent_sub;
-        } else {
-          ++ts.parent_none;
-        }
       } else {
         ++ts.parent_none;
       }
@@ -541,6 +544,23 @@ bool Build(uint8_t* root) {
                  Rd<uint32_t>(obj, 0x68), Rd<float>(obj, 0x84), Rd<float>(obj, 0x88), Rd<float>(obj, 0x8C), d);
     }
   }
+  // The detail texture the game lays over the terrain near the camera
+  // (T+0xc3c, its surface at +0x74; used when 0x57a8dc is set).
+  {
+    uint8_t* dobj = Rd<uint8_t*>(b.T, 0xC3C);
+    const int on = *reinterpret_cast<const int*>(0x57A8DC);
+    const int multi = Rd<int>(*reinterpret_cast<uint8_t* const*>(0x5743AC), 0x2D0);
+    void* dsurf = dobj ? Rd<void*>(dobj, 0x74) : nullptr;
+    if (dsurf && on && GetConfig().gpu_terrain_detail) {
+      m.detail = dsurf;
+      dd::GpuTerrainAddRefTexture(dsurf);
+    }
+    char d[160];
+    dd::GpuTerrainDescribeTexture(dsurf, d, sizeof(d));
+    patch::Log("gpu terrain: detail texture object %p surface %s, game's detail switch %d, game's mode %s; %s",
+               static_cast<void*>(dobj), d, on, multi ? "two passes" : "one pass, two stages",
+               m.detail ? "drawn" : "not drawn");
+  }
   const Builder::TexStats& t = b.ts;
   patch::Log("gpu terrain: textures: %u shared in the track; node codes shared %u, streamed %u, sub-blocks %u (%u "
              "without a sub-block table); sub-block codes shared %u, streamed %u, none %u; %u bad shared numbers; "
@@ -565,10 +585,12 @@ bool Build(uint8_t* root) {
     patch::Log("gpu terrain: no terrain found under the root node (%u nodes); the game draws the terrain",
                b.st.nodes_mem);
     for (void* tx : m.textures) dd::GpuTerrainReleaseTexture(tx);
+    dd::GpuTerrainReleaseTexture(m.detail);
     return false;
   }
   m.generation = g_mesh.generation + 1;
   for (void* t : g_mesh.textures) dd::GpuTerrainReleaseTexture(t);
+  dd::GpuTerrainReleaseTexture(g_mesh.detail);
   g_mesh = std::move(m);
   const BuildStats& s = b.st;
   const double mb = (g_mesh.verts.size() * sizeof(gt::Vertex) + g_mesh.idx.size() * 2) / 1048576.0;

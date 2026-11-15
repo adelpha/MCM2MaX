@@ -2656,6 +2656,10 @@ void GpuTerrainReleaseTexture(void* t) {
   if (t) static_cast<Surface*>(t)->Release();
 }
 
+void GpuTerrainAddRefTexture(void* t) {
+  if (t) static_cast<Surface*>(t)->AddRef();
+}
+
 void GpuTerrainDescribeTexture(void* t, char* out, size_t n) {
   if (!t) {
     std::snprintf(out, n, "no texture");
@@ -2777,6 +2781,17 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   tss_[0][TSS_MIPFILTER] = 3;  // linear between mip levels
   tss_[1][TSS_COLOROP] = 1;    // disable
   tss_[1][TSS_ALPHAOP] = 1;
+  // The detail texture (as the game's one-pass mode, 0x50be69): stage 1 on
+  // the second uv, its colour blended in by its own alpha.
+  Surface* detail = static_cast<Surface*>(m.detail);
+  tss_[1][TSS_COLORARG1] = 2;  // texture
+  tss_[1][TSS_COLORARG2] = 1;  // current
+  tss_[1][TSS_ALPHAARG2] = 1;
+  tss_[1][TSS_TEXCOORDINDEX] = 1;
+  tss_[1][TSS_ADDRESS] = tss_[1][TSS_ADDRESSU] = tss_[1][TSS_ADDRESSV] = 1;
+  tss_[1][TSS_MAGFILTER] = 2;
+  tss_[1][TSS_MINFILTER] = 2;
+  tss_[1][TSS_MIPFILTER] = 3;
 
   VSConstants vc{};
   std::memcpy(vc.wvp, vpm, sizeof(vc.wvp));
@@ -2827,6 +2842,9 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
                        : nullptr;
       tex_[0] = t;
       tss_[0][TSS_COLOROP] = t ? 4 : 3;  // modulate texture by diffuse, or diffuse alone
+      tex_[1] = (t && detail) ? detail : nullptr;
+      tss_[1][TSS_COLOROP] = tex_[1] ? 13 : 1;  // blend texture alpha, or off
+      tss_[1][TSS_ALPHAOP] = tex_[1] ? 4 - 1 : 1;  // select arg 2 (current)
       ApplyState(false, true, has_depth, false);
       const UINT stride = sizeof(gt::Vertex), zero = 0;
       b.ctx->IASetVertexBuffers(0, 1, &terr_vb_, &stride, &zero);

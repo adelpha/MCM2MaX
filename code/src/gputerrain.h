@@ -45,6 +45,7 @@ struct Mesh {
   std::vector<Chunk> chunks;
   std::vector<Range> ranges;
   std::vector<void*> textures;  // per material: the renderer's texture (a reference held), or null
+  void* detail = nullptr;       // the detail texture (a reference held), or null
   unsigned generation = 0;      // bumped for each new mesh
 };
 
@@ -66,6 +67,7 @@ bool GpuTerrainDrawable();
 // description for the log.
 void* GpuTerrainCurrentTexture();
 void GpuTerrainReleaseTexture(void* t);
+void GpuTerrainAddRefTexture(void* t);
 void GpuTerrainDescribeTexture(void* t, char* out, size_t n);
 }  // namespace dd
 

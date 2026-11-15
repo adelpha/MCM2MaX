@@ -205,6 +205,10 @@ TerrainMeshCache=32768
 ; racing. Default 0.
 GpuTerrain=0
 
+; GpuTerrainDetail: with GpuTerrain, the game's fine detail texture is laid
+; over the terrain, as the game does close up (default 1). 0 = without it.
+GpuTerrainDetail=1
+
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
 ; (default 1). 2 = fog starts twice as far away. Above 1, the edge of the
 ; drawn world may show through the fog unless ViewDistance is raised too.

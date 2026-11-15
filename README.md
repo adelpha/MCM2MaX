@@ -635,6 +635,7 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `WalkLog` | `0` | With `FastObjectWalk`, every 5 seconds how many object lists were made and reused, and now and then a check of a reused list against a fresh walk (costs frame rate). |
 | `FarTreeLog` | `0` | With `FarTrees`, every 5 seconds how many trees the graphics card drew and how many were left to the game, plus checks of the game's billboards against the far-tree numbers. `2` also tints GPU-drawn trees red. |
 | `TerrainCheck` | `0` | With `FastTerrain`, every 2 seconds one frame also runs the game's own terrain code and logs any difference from the rewrite (there should be none), with a summary every 5 seconds. Costs a few milliseconds every 2 seconds. |
+| `GpuTerrainDetail` | `1` | `0`, `1` | With `GpuTerrain`, the game's fine detail texture is laid over the terrain, as the game does close up. `0` = without it. |
 | `GpuTerrainLog` | `1` | With `GpuTerrain`, how the terrain was built and every 5 seconds what was drawn. `2` also tints the terrain by detail level. |
 | `TerrainLog` | `0` | Terrain statistics every 5 seconds, with debug keys: Ctrl+F9 switches `TerrainHoleFix` on and off, Ctrl+F10 steps `TerrainDetail` (shown on screen), Ctrl+F11 writes the terrain to the log and probes the point under the cursor (Direct3D 11). `2` also looks for holes in the terrain every 2 seconds. |
 | `SoundLog` | `0` | 3D sound buffers, and when `SoundMaxDistanceMute` mutes or unmutes them. |

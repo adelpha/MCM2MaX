@@ -40,6 +40,7 @@ struct Config {
   int terrain_check = 0;      // TerrainCheck: compare FastTerrain with the game's own code every 2 s
   int terrain_mesh_cache_kb = 32768;  // TerrainMeshCache: KB of terrain meshes kept when not drawn (game: 1024)
   bool gpu_terrain = false;   // GpuTerrain: whole terrain built once at full detail on the GPU (gputerrain.cpp)
+  bool gpu_terrain_detail = true;  // GpuTerrainDetail: the game's detail texture over GPU terrain
   int gpu_terrain_log = 1;    // GpuTerrainLog: 0 off, 1 build and 5 s lines, 2 also tint by node level
   int terrain_log = 0;  // TerrainLog: terrain statistics, hole checks and debug keys (fixes_terrain.cpp)
   int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees

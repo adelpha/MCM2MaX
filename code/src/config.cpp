@@ -155,6 +155,7 @@ void LoadConfig() {
   g_config.terrain_check = GetPrivateProfileIntA("mcm2fix", "TerrainCheck", 0, ini);
   g_config.terrain_mesh_cache_kb = GetPrivateProfileIntA("mcm2fix", "TerrainMeshCache", 32768, ini);
   g_config.gpu_terrain = GetPrivateProfileIntA("mcm2fix", "GpuTerrain", 0, ini) != 0;
+  g_config.gpu_terrain_detail = GetPrivateProfileIntA("mcm2fix", "GpuTerrainDetail", 1, ini) != 0;
   g_config.gpu_terrain_log = GetPrivateProfileIntA("mcm2fix", "GpuTerrainLog", 1, ini);
   g_config.batch_log = GetPrivateProfileIntA("mcm2fix", "BatchLog", 0, ini) != 0;
   g_config.draw_log = GetPrivateProfileIntA("mcm2fix", "DrawLog", 0, ini) != 0;
