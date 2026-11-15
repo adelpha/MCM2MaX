@@ -177,10 +177,19 @@ TerrainLodFix=1
 ; own behaviour.
 TerrainHoleFix=1
 
-; TerrainDetail: how finely the terrain is built, 0.25 to 8 (default 1, the
-; game's own). Above 1, hills keep more of their shape further away, at some
-; cost in frame rate; below 1, less.
-TerrainDetail=1
+; TerrainDetail: how finely the terrain is built, 0.25 to 8 (default 2;
+; 1 is the game's own). Above 1, hills keep more of their shape further away
+; and change shape less as you ride towards them, at some cost in frame rate;
+; below 1, less.
+TerrainDetail=2
+
+; FastTerrain: 1 = the game's per-frame terrain code (how detailed each
+; block is, which of its points are used, and the walk that draws it) runs
+; as mcm2fix's own rewrite, which gives exactly the same results, bit for
+; bit, but reads ahead in memory and avoids the old maths' slow spots
+; (default). Ctrl+F8 switches it on and off while racing (shown on screen).
+; 0 = the game's own code.
+FastTerrain=1
 
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
 ; (default 1). 2 = fog starts twice as far away. Above 1, the edge of the
@@ -639,6 +648,12 @@ TagReverb=Default
 ; measurable slowdowns. 0 = the game's own code.
 FastCrt=1
 
+; FastFtol: 1 = the game's float-to-integer conversion, used all over its
+; code, is one SSE3 instruction instead of two FPU mode switches around a
+; store (default; CPUs without SSE3 keep the old code). The results are
+; exactly the same. 0 = the game's own code.
+FastFtol=1
+
 ; Simd: 1 = mcm2fix's own per-frame work (converting vertices for the GPU,
 ; blending objects between simulation steps, 16-bit texture uploads, the
 ; pause menu's copy of the frame) uses SSE2 when the CPU has it (default).
@@ -836,6 +851,12 @@ FarTreeLog=0
 ; (every draw and terrain block there; Direct3D 11 only). 2 also looks for
 ; holes in the terrain every 2 seconds and logs the ones it finds. Default 0.
 TerrainLog=0
+
+; TerrainCheck: 1 = every 2 seconds, one frame runs the game's own terrain
+; code as well as FastTerrain's and logs any difference (there should be
+; none), with a summary every 5 seconds. Costs a few milliseconds every 2
+; seconds. Default 0.
+TerrainCheck=0
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by
 ; SoundMaxDistanceMute. Default 0.

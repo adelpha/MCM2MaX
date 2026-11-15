@@ -42,6 +42,7 @@ add_library(mcm2fix SHARED
   src/simd.cpp
   src/simd_plain.cpp
   src/simd_sse2.cpp
+  src/terrain_fast.cpp
   src/smooth.cpp
   src/smooth_parts.cpp
   src/xp_compat.cpp
@@ -95,6 +96,10 @@ target_compile_definitions(mcm2fix PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 # 32-bit Windows only keeps the stack 4-byte aligned.
 if(NOT MSVC)
   set_source_files_properties(src/simd_sse2.cpp PROPERTIES COMPILE_OPTIONS "-msse2;-mstackrealign")
+  # FastTerrain repeats the game's x87 maths exactly in SSE2 doubles: no
+  # contraction into fused multiply-adds, no reordering.
+  set_source_files_properties(src/terrain_fast.cpp PROPERTIES COMPILE_OPTIONS
+    "-msse2;-mfpmath=sse;-mstackrealign;-ffp-contract=off;-fno-strict-aliasing")
 endif()
 
 if(MSVC)

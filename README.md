@@ -177,6 +177,10 @@ Windows 10 and 11.
 - A few of the game's own loops that its 1999 compiler built badly are
   rewritten in place with identical maths (`FastGameCode`): so far the terrain
   texture coordinate loop, about 13x faster.
+- The game's per-frame terrain detail code is rewritten with bit-for-bit
+  identical results (`FastTerrain`), checked against the game's own code in
+  an x86 emulator and optionally in the game (`TerrainCheck`); its
+  float-to-integer conversion is one SSE3 instruction (`FastFtol`).
 - mcm2fix's own per-frame work uses SSE2 when the CPU has it (`Simd`):
   converting the game's vertices for the GPU, blending objects between
   simulation steps, 16-bit texture uploads, the pause menu's copy of the
@@ -472,7 +476,7 @@ The file has three parts:
 | `ViewDistance` | `1` | 0.25-10 | Multiplies how far the game draws. The far clip, the distance objects such as trees are drawn to, and the fog move out together, so the fog still hides the edge. Higher values cost frame rate. |
 | `FogDistance` | `1` | 0.1-20 | Multiplies the fog distances on top of `ViewDistance` (`2` = fog starts twice as far away). Above 1, the edge of the drawn world may show unless `ViewDistance` is raised too. |
 | `TerrainHoleFix` | `1` | `0`, `1` | Fixes holes in distant terrain (sky through hills, trees standing on nothing) that come and go as the camera turns, mostly with a high `ViewDistance`: the game forgot to refresh the smallest terrain pieces of a block that was wholly in view. `0` = the game's own behaviour. |
-| `TerrainDetail` | `1` | 0.25-8 | How finely the terrain is built. Above 1, hills keep more of their shape further away, at some cost in frame rate; below 1, less. |
+| `TerrainDetail` | `2` | 0.25-8 | How finely the terrain is built (`1` is the game's own). Above 1, hills keep more of their shape further away and change shape less as you ride towards them, at some cost in frame rate; below 1, less. |
 | `TerrainLodFix` | `1` | `0`, `1` | One of the game's terrain detail numbers stops at its top value (65535) instead of wrapping round to a small one, as its other ones already do. It has not been seen to reach the top so far, even with `ViewDistance=10`. |
 | `ModelLod` | `1` | 0.25-10 | Detailed models stay this many times further away before the game switches to simpler versions. |
 | `TreeDetailDistance` | `1` | `0`, `1` | `0` makes every tree use its sparse close-up version at any distance. It looks sparse and is for fun only. |
@@ -592,6 +596,8 @@ troubleshooting.
 | `DpiAware` | `1` | `0`, `1` | Tells Windows the game handles display scaling itself, so with scaling above 100% it runs at your screen's real resolution instead of being stretched (blurry, with a drifting menu mouse). `0` = Windows scales the game as before. |
 | `RacePower` | `1` | `0`, `1`, `2` | Keeps the CPU at full speed while racing. The game needs so little CPU that on the Balanced power plan Windows lowers the clock while it waits for VSync, and some frames then run late (regular stutter, mostly on older CPUs). `1` = switch Windows to the High performance power plan when a race starts and back to your plan afterwards (if the game crashes, it is put back at the next start). `2` = High performance the whole time the game runs. `0` = off. Nothing is changed on battery or when the plan is already High performance. |
 | `RacePowerAsync` | `1` | `0`, `1` | `1` = the power plan switches run on their own thread, so the game doesn't freeze while Windows changes plan (switching back to Balanced can take about 2 seconds, which froze the countdown and the menus after a race). `0` = on the game thread, as before. |
+| `FastTerrain` | `1` | `0`, `1` | The game's per-frame terrain code (how detailed each block is, which of its points are used, and the walk that draws it) runs as mcm2fix's own rewrite: exactly the same results, bit for bit, but it reads ahead in memory and avoids the old maths' slow spots. At long view distances this was the biggest part of the game's own work per frame. Ctrl+F8 switches it on and off while racing (shown on screen). `0` = the game's own code. |
+| `FastFtol` | `1` | `0`, `1` | The game's float-to-integer conversion, used all over its code, is one SSE3 instruction instead of two FPU mode switches around a store. Exactly the same results. CPUs without SSE3 keep the old code. |
 | `FastGameCode` | `1` | `0`, `1` | A few of the game's own loops that its 1999 compiler built badly are rewritten in place with the same maths, so results are exactly the same, only faster. So far: the terrain texture coordinate loop, which ran every frame and stalled the CPU, and the per-frame tree cache scan, which now reads ahead instead of waiting on memory. |
 | `FastSort` | `1` | `0`, `1` | The game's sorting uses a merge sort instead of the old C library qsort, which slows to a crawl when many items are equal. On tree-heavy maps that froze the game for 35-125 ms when turning the camera. Being stable, it also stops distant riders' engine sounds retriggering as quiet looping snippets. |
 | `TreeCacheMB` | `32` | `0`, 1-512 | The game's cache of built trees is only emptied when more than this many MB of it are unused (the original 256 KB emptied it constantly while turning, and the trees were then rebuilt). `0` = the original. |
@@ -628,6 +634,7 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `SortLog` | `0` | The game's sorts per calling code every 10 s (count, largest, time). Sorts over 2 ms are always logged. |
 | `WalkLog` | `0` | With `FastObjectWalk`, every 5 seconds how many object lists were made and reused, and now and then a check of a reused list against a fresh walk (costs frame rate). |
 | `FarTreeLog` | `0` | With `FarTrees`, every 5 seconds how many trees the graphics card drew and how many were left to the game, plus checks of the game's billboards against the far-tree numbers. `2` also tints GPU-drawn trees red. |
+| `TerrainCheck` | `0` | With `FastTerrain`, every 2 seconds one frame also runs the game's own terrain code and logs any difference from the rewrite (there should be none), with a summary every 5 seconds. Costs a few milliseconds every 2 seconds. |
 | `TerrainLog` | `0` | Terrain statistics every 5 seconds, with debug keys: Ctrl+F9 switches `TerrainHoleFix` on and off, Ctrl+F10 steps `TerrainDetail` (shown on screen), Ctrl+F11 writes the terrain to the log and probes the point under the cursor (Direct3D 11). `2` also looks for holes in the terrain every 2 seconds. |
 | `SoundLog` | `0` | 3D sound buffers, and when `SoundMaxDistanceMute` mutes or unmutes them. |
 | `SoundPauseLog` | `0` | When a race is paused and unpaused: every DirectSound call for a few seconds, failed calls, and the state of every sound buffer and of the window DirectSound follows. |

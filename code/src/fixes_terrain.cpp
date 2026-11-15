@@ -1,6 +1,7 @@
 // Terrain: TerrainHoleFix (the game bug behind holes in distant terrain at
-// long view distances), TerrainDetail, TerrainLodFix and TerrainLog
-// diagnostics.
+// long view distances), TerrainDetail, TerrainLodFix, FastTerrain's hooks
+// and TerrainCheck (the rewrites themselves are in terrain_fast.cpp), the
+// Profile=1 terrain zones, and TerrainLog diagnostics.
 //
 // TerrainHoleFix: see TerrainVisFix below. Children of a split node that
 // Setup found wholly in view were never refreshed by Eval, so pieces that
@@ -33,6 +34,7 @@
 //    (0x482990, box from the sub-block table at data+0x17c) sets the bit in
 //    data+0x178 the draw pass (0x4818b0 / 0x481a40 / 0x481c00) reads.
 //
+// Ctrl+F8 (FastTerrain=1, game window in front): FastTerrain on / off.
 // Debug keys (TerrainLog=1, game window in front):
 //   Ctrl+F9   TerrainHoleFix on / off
 //   Ctrl+F10  TerrainDetail: ini value, x2, x4, x0.5, x0.25 of it (leaf culling
@@ -56,10 +58,16 @@
 #include <cstdio>
 #include <cstring>
 
+#include <cstdarg>
+#include <vector>
+
 #include "config.h"
 #include "dd/probe.h"
 #include "dd/racetitle.h"
 #include "patch.h"
+#include "prof.h"
+#include "simd.h"
+#include "terrain_fast.h"
 
 // TerrainLodFix state, shared with the stub below (C names for the asm).
 extern "C" {
@@ -668,10 +676,12 @@ void Report() {
   g_st.start = now;
 }
 
+int __fastcall BlocksZone(void* root, void*);
+
 int __fastcall RenderHook(void* root, void*) {
   LARGE_INTEGER t0, t1, fq;
   QueryPerformanceCounter(&t0);
-  const int r = reinterpret_cast<ThisVoid>(kRender)(root, nullptr);
+  const int r = BlocksZone(root, nullptr);
   QueryPerformanceCounter(&t1);
   QueryPerformanceFrequency(&fq);
   const double ms = 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(fq.QuadPart);
@@ -691,6 +701,380 @@ int __fastcall RenderHook(void* root, void*) {
   Report();
   (void)r;
   return r;
+}
+
+
+// ---- FastTerrain (terrain_fast.cpp) ----------------------------------------
+//
+// The game's Detail (0x482550), Eval (0x4836e0) and draw walk (0x4818b0)
+// entry points jump to the exact rewrites. TerrainCheck=1: every 2 seconds
+// one frame runs each of them twice, the game's own code first (state saved
+// and put back), and compares: Detail's return value and bytes per call, all
+// node and terrain bytes after Eval, the list of draw calls of the walk.
+// Ctrl+F8 switches FastTerrain on and off while racing (shown on screen).
+constexpr uintptr_t kDetailFn = 0x482550;
+constexpr uintptr_t kEvalFn = 0x4836E0;
+constexpr uintptr_t kDrawWalkFn = 0x4818B0;
+constexpr uintptr_t kDrawFn = 0x481C00;
+constexpr uintptr_t kDrawAltFn = 0x481F20;
+
+struct Hook {
+  uintptr_t at = 0;
+  uint8_t orig[6] = {};
+  uint8_t ours[6] = {};
+  bool in = false;
+  void Install(const void* target) {
+    std::memcpy(orig, reinterpret_cast<const void*>(at), 6);
+    patch::Jump(at, reinterpret_cast<uintptr_t>(target), 6);
+    std::memcpy(ours, reinterpret_cast<const void*>(at), 6);
+    in = true;
+  }
+  void Off() {
+    if (in) patch::Write(at, orig, 6);
+    in = false;
+  }
+  void On() {
+    if (!in) patch::Write(at, ours, 6);
+    in = true;
+  }
+};
+Hook g_h_detail, g_h_eval, g_h_draw;
+bool g_fast_hooked = false;
+bool g_fast_on = false;
+uint8_t* g_detail_tramp = nullptr;  // the game's Detail: its first 6 bytes, then jmp 0x482556
+
+using DetailFn = float(__fastcall*)(void* n, void* edx, int flag);
+using EvalFn = void(__fastcall*)(void* n, void* edx);
+using DrawWalkFn = int(__fastcall*)(void* n, void* edx, int a1, int x, int y, int size, int q, int a6);
+
+struct CheckStats {
+  unsigned detail = 0, detail_bad = 0;
+  unsigned eval = 0, eval_bad_nodes = 0, eval_nodes = 0, eval_bad_terrain = 0;
+  unsigned draw = 0, draw_calls = 0, draw_bad = 0;
+  unsigned logged = 0;
+  double eval_ms = 0;
+} g_chk;
+bool g_check_detail = false;  // this frame's Setup compares Detail
+bool g_check_draw = false;    // this frame's draw walk is compared
+DWORD g_check_last = 0;
+
+void SyncFastOptions() {
+  tf::g_opt.lod_fix = g_lod_hooked && g_lod_fix;
+  tf::g_opt.hole_fix_hooked = g_hole_hooked;
+  tf::g_opt.hole_fix = g_hole_fix != 0;
+}
+
+void CheckLog(const char* fmt, ...) {
+  if (g_chk.logged >= 40) return;
+  ++g_chk.logged;
+  char buf[512];
+  va_list ap;
+  va_start(ap, fmt);
+  std::vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  patch::Log("terrain check: %s%s", buf, g_chk.logged == 40 ? " (no more mismatch lines)" : "");
+}
+
+float CheckDetail(uint8_t* n, int flag) {
+  uint8_t* d = At<uint8_t*>(n, 0x38);
+  uint8_t* t = At<uint8_t*>(n, 0x34);
+  uint8_t sd[8], st[4], gd[8], gt[4];
+  std::memcpy(sd, d + 0x122, 8);
+  std::memcpy(st, t + 0x98, 4);
+  const float rg = reinterpret_cast<DetailFn>(g_detail_tramp)(n, nullptr, flag);
+  std::memcpy(gd, d + 0x122, 8);
+  std::memcpy(gt, t + 0x98, 4);
+  std::memcpy(d + 0x122, sd, 8);
+  std::memcpy(t + 0x98, st, 4);
+  const float ro = tf::Detail(reinterpret_cast<tf::Node*>(n), flag);
+  ++g_chk.detail;
+  if (std::memcmp(&rg, &ro, 4) != 0 || std::memcmp(gd, d + 0x122, 8) != 0 || std::memcmp(gt, t + 0x98, 4) != 0) {
+    ++g_chk.detail_bad;
+    CheckLog("Detail differs: node L%u @%u,%u flag %d: return %.9g / %.9g, lo/hi %u/%u ours %u/%u", At<uint8_t>(n, 0x28),
+             At<uint16_t>(n, 0x24), At<uint16_t>(n, 0x26), flag, rg, ro, At<uint16_t>(gd, 0), At<uint16_t>(gd, 2),
+             At<uint16_t>(d, 0x122), At<uint16_t>(d, 0x124));
+  }
+  return ro;
+}
+
+float __fastcall DetailHook(uint8_t* n, void*, int flag) {
+  if (g_check_detail) return CheckDetail(n, flag);
+  return tf::Detail(reinterpret_cast<tf::Node*>(n), flag);
+}
+
+// Every node of the tree (any state).
+void CollectNodes(uint8_t* n, std::vector<uint8_t*>& out, int depth) {
+  if (!n || depth > 12) return;
+  out.push_back(n);
+  uint8_t** kids = At<uint8_t**>(n, 4);
+  if (!kids) return;
+  for (int i = 0; i < 256; ++i)
+    if (kids[i]) CollectNodes(kids[i], out, depth + 1);
+}
+
+constexpr size_t kNodeSnap = 4 + 0x134;  // vis + data bytes 0..0x133
+constexpr size_t kTerrSnapOff = 0x90, kTerrSnapLen = 0x540 - 0x90;
+
+void Snap(const std::vector<uint8_t*>& nodes, const uint8_t* t, std::vector<uint8_t>& buf) {
+  buf.resize(nodes.size() * kNodeSnap + kTerrSnapLen);
+  uint8_t* p = buf.data();
+  for (uint8_t* n : nodes) {
+    std::memcpy(p, n + 0x40, 4);
+    std::memcpy(p + 4, At<uint8_t*>(n, 0x38), 0x134);
+    p += kNodeSnap;
+  }
+  std::memcpy(p, t + kTerrSnapOff, kTerrSnapLen);
+}
+
+void Restore(const std::vector<uint8_t*>& nodes, uint8_t* t, const std::vector<uint8_t>& buf) {
+  const uint8_t* p = buf.data();
+  for (uint8_t* n : nodes) {
+    std::memcpy(n + 0x40, p, 4);
+    std::memcpy(At<uint8_t*>(n, 0x38), p + 4, 0x134);
+    p += kNodeSnap;
+  }
+  std::memcpy(t + kTerrSnapOff, p, kTerrSnapLen);
+}
+
+void CheckEval(uint8_t* root) {
+  LARGE_INTEGER t0, t1, fq;
+  QueryPerformanceCounter(&t0);
+  static std::vector<uint8_t*> nodes;
+  static std::vector<uint8_t> pre, game, ours;
+  nodes.clear();
+  CollectNodes(root, nodes, 0);
+  uint8_t* t = At<uint8_t*>(root, 0x34);
+  Snap(nodes, t, pre);
+  g_h_eval.Off();
+  reinterpret_cast<EvalFn>(kEvalFn)(root, nullptr);
+  g_h_eval.On();
+  Snap(nodes, t, game);
+  Restore(nodes, t, pre);
+  tf::Eval(reinterpret_cast<tf::Node*>(root));
+  Snap(nodes, t, ours);
+  ++g_chk.eval;
+  g_chk.eval_nodes += static_cast<unsigned>(nodes.size());
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    const uint8_t* a = game.data() + i * kNodeSnap;
+    const uint8_t* b = ours.data() + i * kNodeSnap;
+    if (std::memcmp(a, b, kNodeSnap) == 0) continue;
+    ++g_chk.eval_bad_nodes;
+    size_t o = 0;
+    while (a[o] == b[o]) ++o;
+    const uint8_t* n = nodes[i];
+    CheckLog("Eval differs: node L%u @%u,%u %s+%03x game %02x ours %02x", At<uint8_t>(n, 0x28), At<uint16_t>(n, 0x24),
+             At<uint16_t>(n, 0x26), o < 4 ? "vis" : "data", static_cast<unsigned>(o < 4 ? o : o - 4), a[o], b[o]);
+  }
+  const uint8_t* ga = game.data() + nodes.size() * kNodeSnap;
+  const uint8_t* ob = ours.data() + nodes.size() * kNodeSnap;
+  if (std::memcmp(ga, ob, kTerrSnapLen) != 0) {
+    ++g_chk.eval_bad_terrain;
+    size_t o = 0;
+    while (ga[o] == ob[o]) ++o;
+    CheckLog("Eval differs: terrain +%03x game %02x ours %02x", static_cast<unsigned>(o + kTerrSnapOff), ga[o], ob[o]);
+  }
+  QueryPerformanceCounter(&t1);
+  QueryPerformanceFrequency(&fq);
+  g_chk.eval_ms += 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(fq.QuadPart);
+}
+
+struct DrawRec {
+  int fn;
+  void* n;
+  int a1;
+  void* verts;
+  int vc;
+  void* idx;
+  int ic;
+  int sub;
+  bool operator==(const DrawRec& o) const {
+    return fn == o.fn && n == o.n && a1 == o.a1 && verts == o.verts && vc == o.vc && idx == o.idx && ic == o.ic &&
+           sub == o.sub;
+  }
+};
+std::vector<DrawRec> g_rec;
+int __fastcall RecDraw(void* n, void*, int a1, void* v, int vc, void* idx, int ic, int sub) {
+  g_rec.push_back({0, n, a1, v, vc, idx, ic, sub});
+  return 1;
+}
+int __fastcall RecDrawAlt(void* n, void*, int a1, void* v, int vc, void* idx, int ic, int sub) {
+  g_rec.push_back({1, n, a1, v, vc, idx, ic, sub});
+  return 1;
+}
+
+void CheckDraw(uint8_t* n, int a1, int x, int y, int size, int q, int a6) {
+  Hook r1, r2;
+  r1.at = kDrawFn;
+  r2.at = kDrawAltFn;
+  r1.Install(reinterpret_cast<const void*>(&RecDraw));
+  r2.Install(reinterpret_cast<const void*>(&RecDrawAlt));
+  g_rec.clear();
+  g_h_draw.Off();
+  reinterpret_cast<DrawWalkFn>(kDrawWalkFn)(n, nullptr, a1, x, y, size, q, a6);
+  g_h_draw.On();
+  std::vector<DrawRec> game;
+  game.swap(g_rec);
+  tf::DrawWalk(reinterpret_cast<tf::Node*>(n), a1, x, y, size, q, a6);
+  r1.Off();
+  r2.Off();
+  ++g_chk.draw;
+  g_chk.draw_calls += static_cast<unsigned>(game.size());
+  if (!(game == g_rec)) {
+    ++g_chk.draw_bad;
+    size_t i = 0;
+    while (i < game.size() && i < g_rec.size() && game[i] == g_rec[i]) ++i;
+    CheckLog("draw walk differs: game %u calls, ours %u, first difference at %u", static_cast<unsigned>(game.size()),
+             static_cast<unsigned>(g_rec.size()), static_cast<unsigned>(i));
+  }
+  g_rec.clear();
+}
+
+int __fastcall DrawHook(uint8_t* n, void*, int a1, int x, int y, int size, int q, int a6) {
+  prof::Scope z(prof::kTerrDraw);
+  if (g_check_draw) {
+    g_check_draw = false;
+    CheckDraw(n, a1, x, y, size, q, a6);
+  }
+  return tf::DrawWalk(reinterpret_cast<tf::Node*>(n), a1, x, y, size, q, a6);
+}
+
+void SetFast(bool on) {
+  if (on) {
+    g_h_detail.On();
+    g_h_draw.On();
+  } else {
+    g_h_detail.Off();
+    g_h_draw.Off();
+  }
+  g_fast_on = on;
+}
+
+bool KeyPressed(int vk, bool& was);
+bool OurWindowInFront();
+
+void FastReport();
+
+void __fastcall EvalHook(uint8_t* root, void*) {
+  static bool f8 = false;
+  if (KeyPressed(VK_F8, f8) && g_fast_hooked && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && OurWindowInFront()) {
+    SetFast(!g_fast_on);
+    patch::Log("terrain: FastTerrain %s (Ctrl+F8)", g_fast_on ? "ON" : "off");
+    dd::DebugNotice(g_fast_on ? "FastTerrain ON" : "FastTerrain off");
+  }
+  prof::Scope z(prof::kTerrEval);
+  if (!g_fast_on || !tf::FpuIs53()) {
+    if (g_fast_on) {
+      patch::Log("terrain: FastTerrain: the FPU is not at 53-bit precision; switched off");
+      SetFast(false);
+    }
+    g_h_eval.Off();
+    reinterpret_cast<EvalFn>(kEvalFn)(root, nullptr);
+    g_h_eval.On();
+    return;
+  }
+  SyncFastOptions();
+  g_check_detail = false;  // Detail was compared during this frame's Setup
+  const Config& c = GetConfig();
+  bool check = false;
+  if (c.terrain_check) {
+    const DWORD now = GetTickCount();
+    if (now - g_check_last >= 2000) {
+      g_check_last = now;
+      check = true;
+    }
+  }
+  if (check) {
+    CheckEval(root);
+    g_check_draw = true;    // this frame's draw walk
+    g_check_detail = true;  // next frame's Setup
+  } else {
+    tf::Eval(reinterpret_cast<tf::Node*>(root));
+  }
+  FastReport();
+}
+
+void FastReport() {
+  static DWORD last = 0;
+  static unsigned frames = 0;
+  ++frames;
+  const DWORD now = GetTickCount();
+  if (!last) last = now;
+  if (now - last < 5000) return;
+  const Config& c = GetConfig();
+  if (c.terrain_check || c.terrain_log) {
+    const double f = frames ? frames : 1;
+    patch::Log("terrain fast 5s: %u frames; per frame: nodes evaluated %.0f, vertices tested %.0f, sub-blocks walked "
+               "%.0f, draw calls %.0f; detail numbers clamped %u",
+               frames, tf::g_stats.eval_nodes / f, tf::g_stats.eval_tests / f, tf::g_stats.draw_blocks / f,
+               tf::g_stats.draw_calls / f, tf::g_stats.lod_over);
+  }
+  if (c.terrain_check)
+    patch::Log("terrain check 5s: Detail %u calls, %u differ; Eval %u frames (%u nodes), %u nodes and %u terrains differ "
+               "(%.1f ms per check); draw walk %u walks (%u calls), %u differ",
+               g_chk.detail, g_chk.detail_bad, g_chk.eval, g_chk.eval_nodes, g_chk.eval_bad_nodes,
+               g_chk.eval_bad_terrain, g_chk.eval ? g_chk.eval_ms / g_chk.eval : 0.0, g_chk.draw, g_chk.draw_calls,
+               g_chk.draw_bad);
+  const unsigned logged = g_chk.logged;
+  g_chk = CheckStats();
+  g_chk.logged = logged;
+  g_hole_parents += tf::g_stats.hole_parents;
+  g_hole_fixed += tf::g_stats.hole_fixed;
+  g_lod_calls += tf::g_stats.lod_calls;
+  g_lod_over += tf::g_stats.lod_over;
+  tf::g_stats = tf::Stats();
+  frames = 0;
+  last = now;
+}
+
+void InstallFastTerrain() {
+  if (!GetConfig().fast_terrain) {
+    patch::Log("terrain: FastTerrain=0, the game's terrain code runs as it is");
+    return;
+  }
+  if (!simd::CpuHasSse2()) {
+    patch::Log("terrain: FastTerrain needs SSE2; the game's terrain code runs as it is");
+    return;
+  }
+  static const uint8_t detail0[] = {0x83, 0xEC, 0x1C, 0x56, 0x8B, 0xF1};  // sub esp,1ch / push esi / mov esi,ecx
+  static const uint8_t eval0[] = {0x83, 0xEC, 0x0C, 0x56, 0x8B, 0xF1};    // sub esp,0ch / push esi / mov esi,ecx
+  static const uint8_t draw0[] = {0x53, 0x55, 0x56, 0x8B, 0xF1, 0x57};    // push ebx/ebp/esi / mov esi,ecx / push edi
+  if (!patch::Matches(kDetailFn, detail0, 6) || !patch::Matches(kEvalFn, eval0, 6) ||
+      !patch::Matches(kDrawWalkFn, draw0, 6)) {
+    patch::Log("terrain: FastTerrain: code differs, not applied");
+    return;
+  }
+  g_detail_tramp = static_cast<uint8_t*>(VirtualAlloc(nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+  if (!g_detail_tramp) return;
+  std::memcpy(g_detail_tramp, detail0, 6);
+  g_detail_tramp[6] = 0xE9;
+  const int32_t rel = static_cast<int32_t>((kDetailFn + 6) - (reinterpret_cast<uintptr_t>(g_detail_tramp) + 11));
+  std::memcpy(g_detail_tramp + 7, &rel, 4);
+  g_h_detail.at = kDetailFn;
+  g_h_eval.at = kEvalFn;
+  g_h_draw.at = kDrawWalkFn;
+  g_h_detail.Install(reinterpret_cast<const void*>(&DetailHook));
+  g_h_eval.Install(reinterpret_cast<const void*>(&EvalHook));
+  g_h_draw.Install(reinterpret_cast<const void*>(&DrawHook));
+  g_fast_hooked = g_fast_on = true;
+  SyncFastOptions();
+  patch::Log("terrain: FastTerrain on (detail numbers 482550, Eval 4836e0, draw walk 4818b0 rewritten; Ctrl+F8 "
+             "switches it)%s",
+             GetConfig().terrain_check ? "; TerrainCheck=1: compared with the game's code every 2 s" : "");
+}
+
+// Profile=1: time the terrain phases the rewrites leave to the game.
+using SetupFn = int(__fastcall*)(void* root, void* edx, int a, int b);
+int __fastcall SetupZone(void* root, void*, int a, int b) {
+  prof::Scope z(prof::kTerrSetup);
+  return reinterpret_cast<SetupFn>(0x482D20)(root, nullptr, a, b);
+}
+int __fastcall MeshZone(void* root, void*) {
+  prof::Scope z(prof::kTerrMesh);
+  return reinterpret_cast<ThisVoid>(0x47FEC0)(root, nullptr);
+}
+int __fastcall BlocksZone(void* root, void*) {
+  prof::Scope z(prof::kTerrBlocks);
+  return reinterpret_cast<ThisVoid>(kRender)(root, nullptr);
 }
 
 }  // namespace
@@ -732,6 +1116,25 @@ void ApplyTerrainFixes() {
     } else {
       patch::Log("terrain: TerrainDetail: code differs, not applied");
     }
+  }
+  InstallFastTerrain();
+  if (c.profile) {
+    const uint8_t call_setup[] = {0xE8, 0x0F, 0x5D, 0xF7, 0xFF};   // call 482d20
+    const uint8_t call_mesh[] = {0xE8, 0x44, 0x2E, 0xF7, 0xFF};    // call 47fec0
+    const uint8_t call_blocks[] = {0xE8, 0x4B, 0x50, 0xF7, 0xFF};  // call 4820e0
+    if (patch::Matches(0x50D00C, call_setup, 5)) patch::Call(0x50D00C, reinterpret_cast<const void*>(&SetupZone), 5);
+    if (patch::Matches(0x50D077, call_mesh, 5)) patch::Call(0x50D077, reinterpret_cast<const void*>(&MeshZone), 5);
+    if (!c.terrain_log && patch::Matches(0x50D090, call_blocks, 5))
+      patch::Call(0x50D090, reinterpret_cast<const void*>(&BlocksZone), 5);
+    // Without FastTerrain, Eval and the draw walk get their zones here.
+    if (!g_fast_hooked) {
+      static const uint8_t eval0[] = {0x83, 0xEC, 0x0C, 0x56, 0x8B, 0xF1};
+      if (patch::Matches(kEvalFn, eval0, 6)) {
+        g_h_eval.at = kEvalFn;
+        g_h_eval.Install(reinterpret_cast<const void*>(&EvalHook));
+      }
+    }
+    patch::Log("terrain: Profile=1, terrain phases timed (zones tsetup, teval, tmesh, tblocks, tdraw)");
   }
   if (!c.terrain_log) return;
   const uint8_t call_render[] = {0xE8, 0x4B, 0x50, 0xF7, 0xFF};  // call 4820e0

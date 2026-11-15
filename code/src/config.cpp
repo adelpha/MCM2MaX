@@ -105,6 +105,7 @@ void LoadConfig() {
   g_config.profile = GetPrivateProfileIntA("mcm2fix", "Profile", 0, ini) != 0;
   g_config.profile_sample_us = GetPrivateProfileIntA("mcm2fix", "ProfileSampleUs", 1000, ini);
   g_config.fast_crt = GetPrivateProfileIntA("mcm2fix", "FastCrt", 1, ini) != 0;
+  g_config.fast_ftol = GetPrivateProfileIntA("mcm2fix", "FastFtol", 1, ini) != 0;
   g_config.simd = GetPrivateProfileIntA("mcm2fix", "Simd", 1, ini) != 0;
   g_config.simd_log = GetPrivateProfileIntA("mcm2fix", "SimdLog", 0, ini) != 0;
   g_config.pause_on_focus_loss = GetPrivateProfileIntA("mcm2fix", "PauseOnFocusLoss", 1, ini) != 0;
@@ -150,6 +151,8 @@ void LoadConfig() {
   g_config.terrain_lod_fix = GetPrivateProfileIntA("mcm2fix", "TerrainLodFix", 1, ini) != 0;
   g_config.terrain_hole_fix = GetPrivateProfileIntA("mcm2fix", "TerrainHoleFix", 1, ini) != 0;
   g_config.terrain_log = GetPrivateProfileIntA("mcm2fix", "TerrainLog", 0, ini);
+  g_config.fast_terrain = GetPrivateProfileIntA("mcm2fix", "FastTerrain", 1, ini) != 0;
+  g_config.terrain_check = GetPrivateProfileIntA("mcm2fix", "TerrainCheck", 0, ini);
   g_config.batch_log = GetPrivateProfileIntA("mcm2fix", "BatchLog", 0, ini) != 0;
   g_config.draw_log = GetPrivateProfileIntA("mcm2fix", "DrawLog", 0, ini) != 0;
   {
@@ -217,8 +220,8 @@ void LoadConfig() {
   g_config.fog_scale = fog >= 0.1f && fog <= 20.0f ? fog : 1.0f;
   float view = ReadFloat("ViewDistance", 1.0f, ini);
   g_config.view_distance = view >= 0.25f && view <= 10.0f ? view : 1.0f;
-  float tdet = ReadFloat("TerrainDetail", 1.0f, ini);
-  g_config.terrain_detail = tdet >= 0.25f && tdet <= 8.0f ? tdet : 1.0f;
+  float tdet = ReadFloat("TerrainDetail", 2.0f, ini);
+  g_config.terrain_detail = tdet >= 0.25f && tdet <= 8.0f ? tdet : 2.0f;
   g_config.tree_always_near = ReadFloat("TreeDetailDistance", 1.0f, ini) == 0.0f;
   float lod = ReadFloat("ModelLod", 1.0f, ini);
   g_config.model_lod = lod >= 0.25f && lod <= 10.0f ? lod : 1.0f;

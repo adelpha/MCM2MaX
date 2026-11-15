@@ -12,6 +12,7 @@ struct Config {
   bool profile = false;       // Profile: performance profiling (see prof.cpp)
   int profile_sample_us = 1000;  // ProfileSampleUs: sampling profiler interval (0 = off)
   bool fast_crt = true;
+  bool fast_ftol = true;      // FastFtol: the C runtime's float-to-integer call done with one instruction (SSE3)
   bool simd = true;           // Simd: SSE2 fast paths for mcm2fix's own pixel and vertex work, when the CPU has SSE2 (simd.cpp)
   bool simd_log = false;      // SimdLog: time the SSE2 and plain paths at start-up, and log their use every 5 s
   bool pause_on_focus_loss = true;  // PauseOnFocusLoss: alt-tabbing out of a race opens the pause menu (diagnostics.cpp)
@@ -34,7 +35,9 @@ struct Config {
   float far_tree_distance = 0;  // FarTreeDistance: from how far (0 = automatic)
   bool terrain_lod_fix = true;  // TerrainLodFix: clamp the far-block detail number (fixes_terrain.cpp)
   bool terrain_hole_fix = true;  // TerrainHoleFix: refresh children of wholly-visible split nodes (fixes_terrain.cpp)
-  float terrain_detail = 1.0f;  // TerrainDetail: terrain mesh detail multiplier (fixes_terrain.cpp)
+  float terrain_detail = 2.0f;  // TerrainDetail: terrain mesh detail multiplier (fixes_terrain.cpp)
+  bool fast_terrain = true;   // FastTerrain: exact rewrites of the per-frame terrain code (terrain_fast.cpp)
+  int terrain_check = 0;      // TerrainCheck: compare FastTerrain with the game's own code every 2 s
   int terrain_log = 0;  // TerrainLog: terrain statistics, hole checks and debug keys (fixes_terrain.cpp)
   int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)
