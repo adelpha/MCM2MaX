@@ -238,6 +238,19 @@ bool AfterCall(uintptr_t a) {
   return false;
 }
 
+// Whether the byte at `a` (and the rest of its page) can be read now.
+bool Readable(uintptr_t a) {
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (!VirtualQuery(reinterpret_cast<void*>(a), &mbi, sizeof(mbi))) return false;
+  if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
+  if (!(mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_READONLY | PAGE_READWRITE |
+                       PAGE_EXECUTE_WRITECOPY | PAGE_WRITECOPY)))
+    return false;
+  // AfterCall reads [a, a + 8): the next page too if it crosses.
+  const uintptr_t end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+  return a + 8 <= end || Readable(end);
+}
+
 uint32_t Normalize(uintptr_t eip) {
   if (InExe(eip) || InDll(eip)) return static_cast<uint32_t>(eip);
   MEMORY_BASIC_INFORMATION mbi{};
@@ -425,7 +438,9 @@ void TakeSample() {
         continue;
       }
       const ModRange* m = FindCode(v);
-      if (!m || v < m->lo + 8 || !AfterCall(v)) continue;
+      // The module list is taken once; a module unloaded since (the driver's
+      // shader compiler comes and goes) must not be read (gterr-16 crash).
+      if (!m || v < m->lo + 8 || !Readable(v - 8) || !AfterCall(v)) continue;
       // Within one module keep only the outermost-but-first frames: the first
       // return address per module run is enough to see who called whom.
       if (g_mods[m->mod].name == last_mod) continue;
