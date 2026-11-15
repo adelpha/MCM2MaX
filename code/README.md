@@ -897,10 +897,10 @@ GpuTerrainLog=1
 ; camera, for screenshots from the same spot. Mouse or arrow keys look,
 ; W/A/S/D move, Space/E up, C/Q down, Shift faster, Z slower; Ctrl+F6 again
 ; and the race carries on. FreeCamSpeed is in feet per second (default 60),
-; FreeCamMouse the mouse sensitivity (default 25). Default 1.
+; FreeCamMouse the mouse sensitivity (default 15). Default 1.
 FreeCam=1
 FreeCamSpeed=60
-FreeCamMouse=25
+FreeCamMouse=15
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by
 ; SoundMaxDistanceMute. Default 0.

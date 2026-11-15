@@ -160,7 +160,7 @@ void LoadConfig() {
   g_config.gpu_terrain_log = GetPrivateProfileIntA("mcm2fix", "GpuTerrainLog", 1, ini);
   g_config.free_cam = GetPrivateProfileIntA("mcm2fix", "FreeCam", 1, ini);
   g_config.free_cam_speed = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "FreeCamSpeed", 60, ini));
-  g_config.free_cam_mouse = GetPrivateProfileIntA("mcm2fix", "FreeCamMouse", 25, ini);
+  g_config.free_cam_mouse = GetPrivateProfileIntA("mcm2fix", "FreeCamMouse", 15, ini);
   g_config.batch_log = GetPrivateProfileIntA("mcm2fix", "BatchLog", 0, ini) != 0;
   g_config.draw_log = GetPrivateProfileIntA("mcm2fix", "DrawLog", 0, ini) != 0;
   {

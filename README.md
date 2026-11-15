@@ -640,7 +640,7 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `GpuTerrainLog` | `1` | With `GpuTerrain`, how the terrain was built and every 5 seconds what was drawn. `2` also tints the terrain by detail level. |
 | `FreeCam` | `1` | Ctrl+F6 during a race freezes it and gives a free camera for screenshots: mouse or arrow keys look, W/A/S/D move, Space/E up, C/Q down, Shift faster, Z slower. Ctrl+F6 again and the race carries on. |
 | `FreeCamSpeed` | `60` | Free camera speed in feet per second. |
-| `FreeCamMouse` | `25` | Free camera mouse sensitivity. |
+| `FreeCamMouse` | `15` | Free camera mouse sensitivity. |
 | `TerrainLog` | `0` | Terrain statistics every 5 seconds, with debug keys: Ctrl+F9 switches `TerrainHoleFix` on and off, Ctrl+F10 steps `TerrainDetail` (shown on screen), Ctrl+F11 writes the terrain to the log and probes the point under the cursor (Direct3D 11). `2` also looks for holes in the terrain every 2 seconds. |
 | `SoundLog` | `0` | 3D sound buffers, and when `SoundMaxDistanceMute` mutes or unmutes them. |
 | `SoundPauseLog` | `0` | When a race is paused and unpaused: every DirectSound call for a few seconds, failed calls, and the state of every sound buffer and of the window DirectSound follows. |

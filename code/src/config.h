@@ -44,7 +44,7 @@ struct Config {
   float gpu_terrain_detail_reach = 0;  // GpuTerrainDetailReach: how far the detail texture reaches, 0 = the game's
   int free_cam = 1;             // FreeCam: Ctrl+F6 in a race freezes it and gives a fly camera
   float free_cam_speed = 60.0f; // FreeCamSpeed: feet per second (Shift x5, Z x0.2)
-  int free_cam_mouse = 25;      // FreeCamMouse: mouse look sensitivity
+  int free_cam_mouse = 15;      // FreeCamMouse: mouse look sensitivity
   int gpu_terrain_log = 1;    // GpuTerrainLog: 0 off, 1 build and 5 s lines, 2 also tint by node level
   int terrain_log = 0;  // TerrainLog: terrain statistics, hole checks and debug keys (fixes_terrain.cpp)
   int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees
