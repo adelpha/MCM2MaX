@@ -75,6 +75,7 @@ Windows 10 and 11.
 | Coming back to the game after switching away mid-race, it stalled for seconds and then ran fast to catch up: its clock kept running while it was in the background. | The clock stops while the game is in the background, and leaving mid-race opens the pause menu (`PauseOnFocusLoss`). |
 | With DSOAL, alt-tabbing out leaves the last fraction of a second of each sound repeating: the game stops while in the background, and only Windows' own DirectSound silences a background game. | While the game is in the background, mcm2fix silences it (`BackgroundMute`). |
 | DSOAL ignores the game's "mute at max distance" flag, so riders out of earshot can still be heard quietly. | With a replacement DirectSound such as DSOAL, mcm2fix mutes 3D sounds past their max distance itself (`SoundMaxDistanceMute`). |
+| With a long view distance, distant terrain has holes (sky through hills, trees standing on nothing) that come and go as the camera turns. The game only refreshes the small pieces of a terrain block that is wholly in view when its visibility value is exactly one number, but blocks found wholly in view get a different value with the same "wholly in view" bit. | The bit is tested instead, so those pieces are always refreshed (`TerrainHoleFix`). |
 
 ## Features
 
@@ -197,6 +198,11 @@ Windows 10 and 11.
   Windows slows the CPU down while the game waits for VSync, and some frames
   then run late. While racing, mcm2fix switches to the High performance plan
   and puts yours back afterwards (not on battery).
+- **Long view distances run faster**: distant trees are drawn by the
+  graphics card in one go (`FarTrees`, `FarTreeCells`), the game's object
+  walks share one list (`FastObjectWalk`), still scenery skips the smoothing
+  checks (`StillScenery`), and the bike reflections leave out far scenery and
+  redraw at most 60 sides a second (`ReflectMaxRange`, `ReflectFaceRate`).
 - A built-in profiler for finding hitches (`Profile`).
 
 ### Other
@@ -465,6 +471,9 @@ The file has three parts:
 | `MipBias` | `0` | -4 to 4 | Texture sharpness at a distance. Negative values are sharper but may shimmer (e.g. `-0.5`); positive values are softer. |
 | `ViewDistance` | `1` | 0.25-10 | Multiplies how far the game draws. The far clip, the distance objects such as trees are drawn to, and the fog move out together, so the fog still hides the edge. Higher values cost frame rate. |
 | `FogDistance` | `1` | 0.1-20 | Multiplies the fog distances on top of `ViewDistance` (`2` = fog starts twice as far away). Above 1, the edge of the drawn world may show unless `ViewDistance` is raised too. |
+| `TerrainHoleFix` | `1` | `0`, `1` | Fixes holes in distant terrain (sky through hills, trees standing on nothing) that come and go as the camera turns, mostly with a high `ViewDistance`: the game forgot to refresh the smallest terrain pieces of a block that was wholly in view. `0` = the game's own behaviour. |
+| `TerrainDetail` | `1` | 0.25-8 | How finely the terrain is built. Above 1, hills keep more of their shape further away, at some cost in frame rate; below 1, less. |
+| `TerrainLodFix` | `1` | `0`, `1` | One of the game's terrain detail numbers stops at its top value (65535) instead of wrapping round to a small one, as its other ones already do. It has not been seen to reach the top so far, even with `ViewDistance=10`. |
 | `ModelLod` | `1` | 0.25-10 | Detailed models stay this many times further away before the game switches to simpler versions. |
 | `TreeDetailDistance` | `1` | `0`, `1` | `0` makes every tree use its sparse close-up version at any distance. It looks sparse and is for fun only. |
 | `AlphaCut` | `128` | 0-255 | For trees, flags and other cut-out pictures, pixels less opaque than this aren't drawn. This removes the stair-step fringe where tree edges hide what's behind them, a flaw of the original. `0` = the original look. Soft see-through layers (shadows, ground detail, supercross ground) are never affected. With `AlphaToCoverage` on, this is where the smoothed edge sits instead. |
@@ -478,6 +487,8 @@ The file has three parts:
 | `ReflectSize` | `128` | 16-1024 | Reflection cube side in pixels. |
 | `ReflectLiveFaces` | `1` | 1-6 | With `Reflections=2`, cube sides redrawn per frame. |
 | `ReflectCache` | `1` | `0`, `1` | With `Reflections=2`, terrain, trees and track objects drawn in recent frames are kept on the graphics card, so the reflection also shows what is around the bike behind the camera, not just sky. `ReflectCacheMB` (default `32`) is its memory, `ReflectCacheSecs` (default `20`) how long something no longer drawn is kept, `ReflectCacheRadius` (default `0` = as far as the fog ends) how far from the bike kept things are reflected. |
+| `ReflectMaxRange` | `1024` | `0`, world units | The reflection leaves out terrain and scenery further than this from the bike, whatever `ViewDistance` is (`1024` is a little past the fog at `ViewDistance=1`; `0` = no limit). Far scenery is too small to see in the reflection, and with a long view distance drawing it all again costs frame rate. |
+| `ReflectFaceRate` | `60` | `0`, sides/s | How many of the reflection's six sides are redrawn per second, at most (so the whole reflection about 10 times a second). Frames that redraw no side skip the work. `0` = one side every frame. |
 | `ReflectGround` | `1` | 0-2 | Brightness of the ground below the horizon in the reflection, as a share of the fog colour. |
 | `ReflectBikeTextures` / `ReflectHelmetFrames` / `ReflectRiderFrames` / `ReflectExclude` / `ReflectTextures` / `ReflectFrames` | see ini | names | Which parts reflect: bike textures by name pattern (`*` matches anything), model parts by frame name (the rider's `Head` is the helmet; `ReflectRiderFrames` lists the body parts), textures that never reflect (`tire*`), and extra `name:strength` entries. |
 | `ReflectSkipObjects` | `SIGN*, FLAG*` | frame names | Models with any of these parts get no reflections: the board man at the start line (`SIGN01`) and the flag man (`FLAG01`-`FLAG03`) are the rider model with extra parts, so their bare heads would shine like helmets. |
@@ -586,6 +597,10 @@ troubleshooting.
 | `TreeCacheMB` | `32` | `0`, 1-512 | The game's cache of built trees is only emptied when more than this many MB of it are unused (the original 256 KB emptied it constantly while turning, and the trees were then rebuilt). `0` = the original. |
 | `StateCache` | `1` | `0`, `1` | Direct3D 11 only: renderer state that's already set isn't sent again for every draw. `0` is slower and is for troubleshooting rendering problems. |
 | `DrawBatch` | `1` | `0`, `1` | 3D draws in a row with nothing changed between them (trees, terrain, scenery) are sent as one draw. `0` sends each draw on its own, for troubleshooting. |
+| `StillScenery` | `1` | `0`, `1` | Terrain and close-up tree draws skip the high frame rate smoothing's checks: the game never moves them, but the checks compared every point of them every frame, which added up at long view distances. |
+| `FastObjectWalk` | `1` | `0`, `1` | The game's two walks over the objects in view (trees, then fences, signs and buildings) share one list made by the first walk, so the second no longer visits every tree just to skip it. Same objects in the same order. Helps most with a long `ViewDistance`. |
+| `FarTrees` | `1` | `0`, `1` | Distant trees are drawn by the graphics card in one go, from numbers written down once per tree, instead of the game building every billboard again each frame. They look the same; the game still draws the trees near the camera. Needs `FastObjectWalk=1` and Direct3D 11. `FarTreeDistance` (default `0` = automatic, one and a half times the distance of the 3D trees) sets from how far. |
+| `FarTreeCells` | `1` | `0`, `1` | With `FarTrees`, parts of the map holding nothing but far trees are left out of the game's per-frame walk over the objects in view (the graphics card draws their trees anyway). |
 
 ### 3. Logging
 
@@ -611,6 +626,9 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `TextureLog` | `0` | The format of each texture the game creates. |
 | `InputLog` | `0` | With `InputTiming`, the keyboard and joystick input each race step gets: events given out early or held for a later step, held taps, joystick samples, and a summary every 10 s. |
 | `SortLog` | `0` | The game's sorts per calling code every 10 s (count, largest, time). Sorts over 2 ms are always logged. |
+| `WalkLog` | `0` | With `FastObjectWalk`, every 5 seconds how many object lists were made and reused, and now and then a check of a reused list against a fresh walk (costs frame rate). |
+| `FarTreeLog` | `0` | With `FarTrees`, every 5 seconds how many trees the graphics card drew and how many were left to the game, plus checks of the game's billboards against the far-tree numbers. `2` also tints GPU-drawn trees red. |
+| `TerrainLog` | `0` | Terrain statistics every 5 seconds, with debug keys: Ctrl+F9 switches `TerrainHoleFix` on and off, Ctrl+F10 steps `TerrainDetail` (shown on screen), Ctrl+F11 writes the terrain to the log and probes the point under the cursor (Direct3D 11). `2` also looks for holes in the terrain every 2 seconds. |
 | `SoundLog` | `0` | 3D sound buffers, and when `SoundMaxDistanceMute` mutes or unmutes them. |
 | `SoundPauseLog` | `0` | When a race is paused and unpaused: every DirectSound call for a few seconds, failed calls, and the state of every sound buffer and of the window DirectSound follows. |
 | `RaceTitleLog` | `0` | The countdown race title: name and lap count found, timing and placement. |

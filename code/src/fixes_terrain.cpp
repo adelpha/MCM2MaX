@@ -1,19 +1,21 @@
-// Terrain: TerrainLodFix (a game bug behind gaps in distant terrain at long
-// view distances) and TerrainLog diagnostics.
+// Terrain: TerrainHoleFix (the game bug behind holes in distant terrain at
+// long view distances), TerrainDetail, TerrainLodFix and TerrainLog
+// diagnostics.
+//
+// TerrainHoleFix: see TerrainVisFix below. Children of a split node that
+// Setup found wholly in view were never refreshed by Eval, so pieces that
+// were off screen earlier stayed invisible: holes with sky behind them.
 //
 // TerrainLodFix: per node and frame, 0x482550 works out two detail numbers
 // from the camera's distance to the node's box (data+0x122 and +0x124,
 // 16 bits each; last frame's copies at +0x126 / +0x128). Eval (0x4836e0)
-// turns them into vertex counts through the byte table 0x66b3ec and
-// switches the vertices in between on or off. Most paths clamp the number
-// at 65535 (compare with 65535.0 at 0x556148), but one (0x4827f8, used when
-// the camera is level with or inside the box on one axis) converts with
-// 0x53a0f8 and stores the low 16 bits; its clamp (0x482820, cmp word,0xffff
-// / jbe) can never fire. With the game's 768-unit view the number stays
-// small; with ViewDistance=10 far blocks pass 65535, wrap round to a small
-// number and get the wrong vertices, which shows up as missing pieces of
-// distant hills. The fix replaces that conversion call (0x48280f) with one
-// that stops at 65535, as the other paths do.
+// turns them into vertex counts through the byte table 0x66b3ec. Most paths
+// clamp the number at 65535 (compare with 65535.0 at 0x556148), but one
+// (0x4827f8) converts with 0x53a0f8 and stores the low 16 bits; its clamp
+// (0x482820, cmp word,0xffff / jbe) can never fire. The fix replaces that
+// conversion call (0x48280f) with one that stops at 65535, as the other
+// paths do. It was a suspect for the holes, but the number has not been seen
+// to pass 65535 even at ViewDistance=10; kept as a safety net.
 //
 // The game's terrain (object at the terrain manager, per-frame update
 // 0x50cdc0) is a tree of nodes. Each node is a 16x16-cell block with up to
@@ -43,10 +45,11 @@
 //             and probe the point under the mouse cursor: the next frames
 //             log every draw with a triangle over it (dd/probe.cpp) and
 //             every node whose box covers it
-// Ruled out on the way (terr-1..3, StOo's tests): culling, the far plane, the
+// Ruled out on the way (StOo's tests): culling, the far plane, the
 // one-colour far terrain, the terrain caches' trim limits, re-meshing empty
 // collapsed blocks (75% of collapsed blocks are empty normally), mcm2fix's
-// renderer (the gaps showed on Direct3D 9 with batching off too).
+// renderer (the gaps showed on Direct3D 9 with batching off too), the
+// detail-number overflow, the detail level.
 #include <windows.h>
 
 #include <cstdint>
@@ -284,13 +287,12 @@ struct Stats {
 
 // Leaf culling (Setup 0x482d50, call at 0x483281): a node with no children
 // of its own is frustum-tested on its own box when its parent's region is
-// only partly in view. Ctrl+F10 (TerrainLog=1) treats every leaf as visible,
-// to see whether this test is what drops pieces of distant terrain.
+// only partly in view. TerrainLog counts the tests (turning the test off did
+// not fill the holes).
 constexpr uintptr_t kLeafCullCall = 0x483281;
 constexpr uintptr_t kFrustumTest = 0x534BE0;
 using FrustumFn = int(__fastcall*)(void* self, void* edx, void* m, void* cam, const float* c, const float* h, int a5,
                                    int a6, int* inside);
-bool g_leaf_cull_off = false;
 unsigned g_leaf_tests = 0, g_leaf_culled = 0;
 
 int __fastcall LeafCull(void* self, void* edx, void* m, void* cam, const float* c, const float* h, int a5, int a6,
@@ -298,10 +300,6 @@ int __fastcall LeafCull(void* self, void* edx, void* m, void* cam, const float* 
   const int r = reinterpret_cast<FrustumFn>(kFrustumTest)(self, edx, m, cam, c, h, a5, a6, inside);
   ++g_leaf_tests;
   if (!r) ++g_leaf_culled;
-  if (g_leaf_cull_off && !r) {
-    if (inside) *inside = 0;
-    return 1;
-  }
   return r;
 }
 
@@ -653,14 +651,15 @@ void Report() {
       "terrain 5s: %u frames; per frame: nodes %.0f visible %.0f (max %u) collapsed %.0f, sub-blocks drawn %.0f "
       "culled %.0f, children %.0f, meshed %.1f (max %u); render step %.3f ms (max %.2f); vertex buffers %d "
       "(%d KB); empty collapsed blocks %.0f; detail number: %u conversions on the unclamped path, %u over 65535 "
-      "(largest %u), TerrainLodFix %s; leaf tests %.0f culled %.0f, leaf culling %s; tolerance %d focal %d "
-      "TerrainDetail %.2f; TerrainHoleFix %s: wholly-in-view split nodes %.1f, children it marked %.1f",
+      "(largest %u), TerrainLodFix %s",
       g_st.frames, g_st.nodes / f, g_st.visible / f, g_st.max_visible, g_st.collapsed / f, g_st.subs_drawn / f,
       g_st.subs_culled / f, g_st.children_drawn / f, g_st.meshes / f, g_st.max_meshes, g_st.render_ms / f,
       g_st.max_render_ms, *reinterpret_cast<int*>(kVbCount), *reinterpret_cast<int*>(kVbBytes) / 1024,
-      g_st.holes_collapsed / f, g_lod_calls, g_lod_over, g_lod_max, !g_lod_hooked ? "not installed" : g_lod_fix ? "on" : "off", g_leaf_tests / f, g_leaf_culled / f,
-      g_leaf_cull_off ? "OFF" : "on", g_last_tol, g_last_focal, g_detail,
-      !g_hole_hooked ? "not installed" : g_hole_fix ? "on" : "off", g_hole_parents / f, g_hole_fixed / f);
+      g_st.holes_collapsed / f, g_lod_calls, g_lod_over, g_lod_max, !g_lod_hooked ? "not installed" : g_lod_fix ? "on" : "off");
+  patch::Log("terrain 5s: leaf tests %.0f culled %.0f; tolerance %d focal %d TerrainDetail %.2f; TerrainHoleFix %s: "
+             "wholly-in-view split nodes %.1f, children it marked visible %.1f",
+             g_leaf_tests / f, g_leaf_culled / f, g_last_tol, g_last_focal, g_detail,
+             !g_hole_hooked ? "not installed" : g_hole_fix ? "on" : "off", g_hole_parents / f, g_hole_fixed / f);
   g_hole_parents = g_hole_fixed = 0;
   g_leaf_tests = g_leaf_culled = 0;
   ReportOverNodes();
