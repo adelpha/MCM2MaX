@@ -210,8 +210,8 @@ GpuTerrain=0
 GpuTerrainDetail=1
 
 ; GpuTerrainDetailReach: how far from the camera the detail texture reaches,
-; in the game's units (it fades out over the last quarter). 0 = as far as
-; the game draws it (default).
+; in the game's units (it fades out over the last quarter). 0 = all the
+; way, as the game shows it (default).
 GpuTerrainDetailReach=0
 
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20

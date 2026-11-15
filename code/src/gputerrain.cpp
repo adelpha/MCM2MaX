@@ -259,10 +259,14 @@ struct Builder {
                                : 0xFFFFFFFFu;
           v.t0[0] = static_cast<float>(((x - x0) * uscale + uoff) * 0.9375 + 0.03125);
           v.t0[1] = static_cast<float>(((y - y0) * uscale + voff) * 0.9375 + 0.03125);
-          // Detail texture (T+0xc3c), second uv: one repeat per 12 cells of
-          // the finest level (0x481cc2: grid position / 12).
-          v.t1[0] = static_cast<float>(static_cast<double>(static_cast<uint32_t>(ni.gx + x) << (ni.shift & 31)) / 12.0);
-          v.t1[1] = static_cast<float>(static_cast<double>(static_cast<uint32_t>(ni.gy + y) << (ni.shift & 31)) / 12.0);
+          // Detail texture (T+0xc3c), second uv. The game (mesh builder
+          // 0x47f22c packs the vertex's cell index within its block, from the
+          // block's own corner; 0x481cc2 multiplies by 1/12, 16/12 on level
+          // 1 nodes) restarts the pattern at every block, so it is the same
+          // size in the world on levels 0 and 1.
+          const double ds = (ni.level == 1 ? 16.0 : 1.0) / 12.0;
+          v.t1[0] = static_cast<float>((x - x0) * ds);
+          v.t1[1] = static_cast<float>((y - y0) * ds);
         } else {
           v.diffuse = Shade(N[y][x][0], N[y][x][1], N[y][x][2], ni.level, log);
         }
@@ -560,14 +564,17 @@ bool Build(uint8_t* root) {
     // texture) is above T+0xca4: out to T+0x70 * 64 / ca4.
     const float t70 = static_cast<float>(Rd<int32_t>(b.T, 0x70));
     const float ca4 = static_cast<float>(Rd<int32_t>(b.T, 0xCA4));
-    float reach = (t70 > 0 && ca4 > 0) ? t70 * 64.0f / ca4 : 0;
-    if (GetConfig().gpu_terrain_detail_reach > 0) reach = GetConfig().gpu_terrain_detail_reach;
-    if (!(reach > 0)) reach = 400;
+    const float game_reach = (t70 > 0 && ca4 > 0) ? t70 * 64.0f / ca4 : 0;  // logged only
+    // That test doesn't match what the game shows: its detail covers the
+    // terrain as far as level 0 and 1 blocks are drawn (StOo, gterr-6
+    // screenshots), which with full detail everywhere is all of it. No fade
+    // unless the ini sets a reach.
+    const float reach = GetConfig().gpu_terrain_detail_reach > 0 ? GetConfig().gpu_terrain_detail_reach : 0.0f;
     m.detail_fade[0] = reach * 0.75f;
     m.detail_fade[1] = reach;
-    patch::Log("gpu terrain: detail reach %.0f (T+70 %d, ca4 %d, ini %.0f), faded from %.0f", reach,
-               Rd<int32_t>(b.T, 0x70), Rd<int32_t>(b.T, 0xCA4), GetConfig().gpu_terrain_detail_reach,
-               m.detail_fade[0]);
+    patch::Log("gpu terrain: detail reach %.0f (0 = everywhere; ini %.0f; the game's texel test would give %.0f from "
+               "T+70 %d, ca4 %d); detail uv restarts per block, 1/12 per cell (16/12 on level 1)",
+               reach, GetConfig().gpu_terrain_detail_reach, game_reach, Rd<int32_t>(b.T, 0x70), Rd<int32_t>(b.T, 0xCA4));
     char d[160];
     dd::GpuTerrainDescribeTexture(dsurf, d, sizeof(d));
     patch::Log("gpu terrain: detail texture object %p surface %s, game's detail switch %d, game's mode %s; %s",
