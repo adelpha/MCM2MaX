@@ -282,6 +282,14 @@ void LoadConfig() {
   g_config.input_timing = GetPrivateProfileIntA(sec, "InputTiming", 1, ini) != 0;
   g_config.alt_tab_fix = GetPrivateProfileIntA(sec, "AltTabFix", 1, ini) != 0;
   g_config.input_log = GetPrivateProfileIntA(sec, "InputLog", 0, ini) != 0;
+  g_config.xinput = GetPrivateProfileIntA(sec, "XInput", 1, ini) != 0;
+  g_config.xinput_rumble = GetPrivateProfileIntA(sec, "XInputRumble", 100, ini);
+  if (g_config.xinput_rumble < 0) g_config.xinput_rumble = 0;
+  if (g_config.xinput_rumble > 200) g_config.xinput_rumble = 200;
+  g_config.xinput_deadzone = GetPrivateProfileIntA(sec, "XInputDeadzone", 15, ini);
+  if (g_config.xinput_deadzone < 0) g_config.xinput_deadzone = 0;
+  if (g_config.xinput_deadzone > 50) g_config.xinput_deadzone = 50;
+  g_config.xinput_log = GetPrivateProfileIntA(sec, "XInputLog", 0, ini) != 0;
   g_config.sound_log = GetPrivateProfileIntA(sec, "SoundLog", 0, ini) != 0;
   {
     // Event numbers as in game+0x2d74/0x2d78: 0 Quarry, 1 Baja, 2 Nationals, 3 Supercross, 4 Moto-Tag, 5 Enduro.

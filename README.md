@@ -94,6 +94,7 @@ Windows 10 and 11.
 | After alt-tabbing out of a race, keys let go while away stay held (the bike keeps steering or accelerating), and the keyboard can stop responding until restart: the game only re-acquires it after one kind of DirectInput error. | Keys and buttons let go while away are released, and the keyboard and joysticks are acquired again when the game is back in front (`AltTabFix`). |
 | Computer riders never pick the last bike or rider in the lists: the game's random pick is one short. | Every bike and rider can be picked (`AiPickFix`). |
 | Coming back to the game after switching away mid-race, it stalled for seconds and then ran fast to catch up: its clock kept running while it was in the background. | The clock stops while the game is in the background, and leaving mid-race opens the pause menu (`PauseOnFocusLoss`). |
+| Xbox controllers steer digitally: Windows reports them to the game as gamepads, and the game turns a gamepad's sticks into on/off presses. Both triggers share one axis, so throttle and brake cancel out, and there is no rumble. | Xbox (XInput) controllers are analog joysticks with separate trigger axes and rumble from the game's force feedback (`XInput`). |
 | With DSOAL, alt-tabbing out leaves the last fraction of a second of each sound repeating: the game stops while in the background, and only Windows' own DirectSound silences a background game. | While the game is in the background, MCM2MaX silences it (`BackgroundMute`). |
 | DSOAL ignores the game's "mute at max distance" flag, so riders out of earshot can still be heard quietly. | With a replacement DirectSound such as DSOAL, MCM2MaX mutes 3D sounds past their max distance itself (`SoundMaxDistanceMute`). |
 | With a long view distance, distant terrain has holes (sky through hills, trees standing on nothing) that come and go as the camera turns. The game only refreshes the small pieces of a terrain block that is wholly in view when its visibility value is exactly one number, but blocks found wholly in view get a different value with the same "wholly in view" bit. | The bit is tested instead, so those pieces are always refreshed (`TerrainHoleFix`). |
@@ -238,6 +239,9 @@ Windows 10 and 11.
 - A built-in profiler for finding hitches (`Profile`).
 
 ### Other
+- **Xbox controllers**: XInput controllers show up as "Xbox Controller 1"
+  and so on, with analog sticks, separate trigger axes and rumble
+  (`XInput`).
 - **Easier Easy**: on Easy, computer riders accelerate less hard and have a
   slightly lower top speed than in the original, where Easy was barely easier
   than Normal. Tunable per difficulty (`AiAccel*`, `AiTopSpeed*`).
@@ -611,6 +615,14 @@ The file has three parts:
 | `AiAccelEasy`, `AiAccelNormal`, `AiAccelHard` | `80`, `130`, `150` | 10-400, percent | How hard computer riders can accelerate on each difficulty, in percent of the game's base curve. Lower values make them pull away more slowly out of corners and after landings. The original game uses `110` for Easy, which is barely easier than Normal, especially in Supercross. |
 | `AiTopSpeedEasy`, `AiTopSpeedNormal`, `AiTopSpeedHard` | `90`, `100`, `100` | 50-150, percent | Computer riders' top speed on each difficulty. The original game uses `100` for all three. |
 
+#### Controllers
+
+| Setting | Default | Values | Description |
+|---|---|---|---|
+| `XInput` | `1` | `0`, `1` | Xbox (XInput) controllers connected when the game starts are listed as "Xbox Controller 1" to "Xbox Controller 4", in place of the copies Windows makes of them for older games. The sticks are analog: left stick X and Y, right stick X Rotation and Y Rotation. The right trigger is the Z axis and the left trigger the Z Rotation axis, each reading zero when let go, so they work for throttle and brake. The d-pad is the point-of-view hat, A B X Y LB RB Back Start and the stick clicks are buttons 1 to 10, and the triggers are also buttons 11 (LT) and 12 (RT). The game's force feedback becomes rumble. A controller unplugged mid-game reads as centred and works again when plugged back in. `0` = the original: Windows' DirectInput copy, which the game treats as a gamepad (sticks act as on/off presses), with both triggers on one axis and no rumble. Needs Windows Vista or later (or the DirectX XInput DLL). |
+| `XInputRumble` | `100` | 0-200, percent | Rumble strength. `0` = no rumble, and the controller doesn't offer force feedback to the game. |
+| `XInputDeadzone` | `15` | 0-50, percent | How far either stick has to move from the centre before it counts. Raise it if the bike steers by itself. |
+
 ### 2. Advanced: changing these is not recommended
 
 These settings keep the game starting, saving and playing correctly on modern
@@ -695,6 +707,7 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `GdiLog` | `0` | The GDI calls (text, boxes, lines) the game draws onto the screen with. |
 | `TextureLog` | `0` | The format of each texture the game creates. |
 | `InputLog` | `0` | With `InputTiming`, the keyboard and joystick input each race step gets: events given out early or held for a later step, held taps, joystick samples, and a summary every 10 s. |
+| `XInputLog` | `0` | With `XInput`, the game's calls to the Xbox controllers (properties, force feedback effects), button presses, and every 10 s a summary per controller (axes, events, rumble). |
 | `SortLog` | `0` | The game's sorts per calling code every 10 s (count, largest, time). Sorts over 2 ms are always logged. |
 | `WalkLog` | `0` | With `FastObjectWalk`, every 5 seconds how many object lists were made and reused, and now and then a check of a reused list against a fresh walk (costs frame rate). |
 | `FarTreeLog` | `0` | With `FarTrees`, every 5 seconds how many trees the graphics card drew and how many were left to the game, plus checks of the game's billboards against the far-tree numbers. `2` also tints GPU-drawn trees red. |

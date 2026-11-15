@@ -39,6 +39,7 @@ void ApplyFarTreeFixes();
 void ApplyTerrainFixes();
 void ApplyAiFixes();
 namespace input { void Apply(); }
+namespace xpad { void Apply(); }
 void LogTextureSummary();
 namespace crash { void Apply(); }
 namespace dd { void InstallGpuShadows(); }
@@ -112,6 +113,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
       ApplyTerrainFixes();
       ApplyAiFixes();
       dd::InstallGpuShadows();  // after the smoothing and restart hooks it chains
+      xpad::Apply();  // before input::Apply: InputTiming wraps the pads too
       input::Apply();
       video::ApplyVideoPlayer();
       ApplyDiagnostics();  // WM_ACTIVATEAPP hook: logs focus changes, tells input and sound

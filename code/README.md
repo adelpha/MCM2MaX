@@ -675,6 +675,25 @@ InputTiming=1
 ; after alt-tab.
 AltTabFix=1
 
+; XInput: 1 = Xbox (XInput) controllers connected when the game starts are
+; listed as "Xbox Controller 1" to 4 with analog sticks (left stick X/Y,
+; right stick X/Y Rotation), the right trigger on the Z axis and the left
+; trigger on the Z Rotation axis (each zero when let go), the d-pad as the
+; hat, buttons 1-10 A B X Y LB RB Back Start and the stick clicks, 11 LT and
+; 12 RT, and the game's force feedback as rumble (default). Windows' own
+; DirectInput copies of these controllers are left out of the list. 0 = the
+; original: Windows' copy, which the game treats as a gamepad (sticks act as
+; on/off presses), with both triggers on one axis and no rumble.
+XInput=1
+
+; XInputRumble: rumble strength in percent, 0-200. 0 = no rumble, and the
+; controller doesn't offer force feedback to the game. Default 100.
+XInputRumble=100
+
+; XInputDeadzone: how far either stick has to move from the centre before it
+; counts, in percent, 0-50. Default 15.
+XInputDeadzone=15
+
 ; PreciseTimer: 1 = the game's frame time is measured with the precise
 ; QueryPerformanceCounter instead of whole milliseconds (default). Only used
 ; with SimRate=0; with SimRate the precise timer is always used.
@@ -941,6 +960,11 @@ TextureLog=0
 ; gets: events given out early or held for a later step, held taps, joystick
 ; samples, plus a summary every 10 s. Default 0.
 InputLog=0
+
+; XInputLog: with XInput, the game's calls to the Xbox controllers
+; (properties, force feedback effects), button presses, and every 10 s a
+; summary per controller (axes, events, rumble). Default 0.
+XInputLog=0
 
 ; SortLog: the game's sorts per calling code every 10 s (count, largest,
 ; time). Sorts over 2 ms are always logged. Default 0.
