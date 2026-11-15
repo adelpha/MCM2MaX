@@ -112,6 +112,9 @@ class DllMap:
         return self.syms[i][1] if i >= 0 else f"+{off:x}"
 
 
+ZONES = []
+
+
 def report_samples(path, exe, dll):
     em, dm = ExeMap(exe), DllMap(dll)
     zones = {}
@@ -168,6 +171,15 @@ def report_samples(path, exe, dll):
         agg[(zone, label(where))] += n
     for (z, k), n in sorted(agg.items(), key=lambda kv: -kv[1])[:80]:
         print(f"   {100 * n / total:5.1f}% {z:14s} {k}")
+    for zname in ZONES:
+        agg = defaultdict(int)
+        for zone, where, n in rows["self"]:
+            if zone == zname:
+                agg[label(where)] += n
+        zt = sum(agg.values()) or 1
+        print(f"\n== self in zone {zname} ({zt} samples)")
+        for k, n in sorted(agg.items(), key=lambda kv: -kv[1])[:40]:
+            print(f"   {100 * n / zt:5.1f}% {n:6d}  {k}")
     print("\n== game call sites that called into DLLs (execall), by calling function")
     agg = defaultdict(int)
     for zone, where, n in rows["execall"]:
@@ -215,7 +227,9 @@ def main():
     ap.add_argument("samples", nargs="?")
     ap.add_argument("--exe")
     ap.add_argument("--dll")
+    ap.add_argument("--zone", action="append", default=[], help="also list self samples inside this zone")
     a = ap.parse_args()
+    ZONES.extend(a.zone)
     report_csv(a.csv)
     if a.samples:
         report_samples(a.samples, a.exe, a.dll)
