@@ -20,6 +20,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -489,6 +490,48 @@ struct Builder {
   }
 };
 
+// ---- the game's own near/far split (GpuTerrainLog, game terrain drawn)
+// For each visible node of the game's tree: its texel measure (texture data
+// +0x34, 0x47d9f0) against T+0xca4 decides whether the game draws it "near"
+// (white, detail texture) or "far" (colours T+0xc9c / T+0xca0, no detail).
+// Logs, per level, how far from the camera each kind reaches.
+struct ProbeLevel {
+  unsigned near_n = 0, far_n = 0;
+  float near_max = 0, far_min = 1e30f;
+  std::vector<float> k;  // measure * distance
+  unsigned scale_n[4] = {};
+};
+void ProbeWalk(uint8_t* n, const float* eye, float ca4, ProbeLevel* lv, int depth) {
+  if (!n || depth > 6) return;
+  const uint32_t vis = Rd<uint32_t>(n, 0x40);
+  if (!(vis & 1)) return;
+  const int level = Rd<uint8_t>(n, 0x28);
+  const uint8_t* tex = Rd<const uint8_t*>(n, 0x3C);
+  const uint8_t* D = Rd<const uint8_t*>(n, 0x38);
+  if (tex && level < 4) {
+    const float m = Rd<float>(tex, 0x34);
+    const float cx = Rd<float>(n, 0x44) - eye[0], cy = Rd<float>(n, 0x48) - eye[1], cz = Rd<float>(n, 0x4C) - eye[2];
+    const float d = std::sqrt(cx * cx + cy * cy + cz * cz);
+    ProbeLevel& L = lv[level];
+    if (ca4 >= m) {
+      ++L.far_n;
+      if (d < L.far_min) L.far_min = d;
+    } else {
+      ++L.near_n;
+      if (d > L.near_max) L.near_max = d;
+    }
+    if (L.k.size() < 8192) L.k.push_back(m * d);
+    if (D) {
+      const float sc = Rd<float>(D, 0x160);
+      L.scale_n[sc < 0.005f ? 0 : sc < 0.03f ? 1 : sc < 0.5f ? 2 : 3]++;
+    }
+  }
+  uint8_t* const* kids = Rd<uint8_t* const*>(n, 0x04);
+  if (kids)
+    for (int i = 0; i < 256; ++i)
+      if (kids[i]) ProbeWalk(kids[i], eye, ca4, lv, depth + 1);
+}
+
 // ---- state
 
 gt::Mesh g_mesh;
@@ -719,4 +762,27 @@ bool GpuTerrainDraw(void* root_v) {
   if (ms > g_dl.max_ms) g_dl.max_ms = ms;
   Report(true);
   return true;
+}
+
+void GpuTerrainProbeGame(void* root_v, const float* eye) {
+  uint8_t* root = static_cast<uint8_t*>(root_v);
+  if (!root || !eye) return;
+  uint8_t* T = Rd<uint8_t*>(root, 0x34);
+  if (!T) return;
+  const float ca4 = static_cast<float>(Rd<int32_t>(T, 0xCA4));
+  ProbeLevel lv[4];
+  ProbeWalk(root, eye, ca4, lv, 0);
+  patch::Log("gpu terrain: game's terrain near/far split: eye (%.0f %.0f %.0f), ca4 %.0f, T+70 %d, c9c %08x ca0 %08x",
+             eye[0], eye[1], eye[2], ca4, Rd<int32_t>(T, 0x70), Rd<uint32_t>(T, 0xC9C), Rd<uint32_t>(T, 0xCA0));
+  for (int l = 0; l < 4; ++l) {
+    ProbeLevel& L = lv[l];
+    if (!L.near_n && !L.far_n) continue;
+    std::sort(L.k.begin(), L.k.end());
+    const float kmed = L.k.empty() ? 0 : L.k[L.k.size() / 2];
+    const float kmin = L.k.empty() ? 0 : L.k.front(), kmax = L.k.empty() ? 0 : L.k.back();
+    patch::Log("gpu terrain:   level %d: %u near (out to %.0f), %u far (from %.0f); measure*distance min %.0f median "
+               "%.0f max %.0f; texture scale 1/256 %u, 1/64 %u, 1/16 %u, 1 %u",
+               l, L.near_n, L.near_max, L.far_n, L.far_n ? L.far_min : 0.0f, kmin, kmed, kmax, L.scale_n[0],
+               L.scale_n[1], L.scale_n[2], L.scale_n[3]);
+  }
 }

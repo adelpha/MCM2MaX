@@ -62,6 +62,7 @@
 #include <vector>
 
 #include "config.h"
+#include "freecam.h"
 #include "dd/probe.h"
 #include "dd/racetitle.h"
 #include "patch.h"
@@ -1375,6 +1376,14 @@ void __fastcall TerrainDrawSite(void* root, void*, void* dev) {
   if (GetConfig().gpu_terrain) dd::GpuTerrainCaptureState(0, ProbeDue(0));
   if (GpuTerrainDraw(root)) return;
   reinterpret_cast<TerrainDrawFn>(0x481870)(root, nullptr, dev);
+  // GpuTerrainLog: every 2 s while the game draws its own terrain, where it
+  // draws it near and far (to match GpuTerrain to it).
+  static DWORD last = 0;
+  float eye[3];
+  if (GetConfig().gpu_terrain && GetConfig().gpu_terrain_log && GetTickCount() - last > 2000 && FreeCamEye(eye)) {
+    last = GetTickCount();
+    GpuTerrainProbeGame(root, eye);
+  }
 }
 
 // 0x481890 (thiscall root; device wrapper, texture; ret 8) walks the game's

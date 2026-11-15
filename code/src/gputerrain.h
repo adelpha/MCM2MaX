@@ -84,6 +84,8 @@ void GpuTerrainCaptureState(int site, bool log);
 // are skipped). GpuTerrainDraw (where the game draws its terrain, 0x481870's
 // call sites): draws it; false = the game draws its own.
 bool GpuTerrainPrepare(void* root);
+// GpuTerrainLog: logs where the game draws its terrain "near" and "far".
+void GpuTerrainProbeGame(void* root, const float* eye);
 bool GpuTerrainDraw(void* root);
 bool GpuTerrainActive();
 void GpuTerrainKeys();  // Ctrl+F7 switches between it and the game's terrain

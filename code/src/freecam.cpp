@@ -162,6 +162,12 @@ void Stop(const char* why) {
 
 bool FreeCamActive() { return g_on; }
 
+bool FreeCamEye(float* out) {
+  if (!g_cam || GetTickCount() - g_cam_stamp > 2000) return false;
+  for (int i = 0; i < 3; ++i) out[i] = F(g_cam, 0x170)[i];
+  return true;
+}
+
 void __stdcall FreeCamApply(uintptr_t cam) {
   const int w = *reinterpret_cast<int*>(cam + 0x1a8);
   const int h = *reinterpret_cast<int*>(cam + 0x1ac);
@@ -172,6 +178,7 @@ void __stdcall FreeCamApply(uintptr_t cam) {
     return;
   }
   if (cam != g_cam) return;
+  g_cam_stamp = GetTickCount();
   float f[3];
   Forward(f);
   float* eye = F(cam, 0x170);

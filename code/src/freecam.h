@@ -8,3 +8,5 @@ bool FreeCamActive();
 bool FreeCamFrame(bool racing, double dt);
 // From the camera update hook (0x42fd50), before the game builds the view.
 void __stdcall FreeCamApply(uintptr_t cam);
+// The main camera's eye (the last one seen); false if none yet.
+bool FreeCamEye(float* out);
