@@ -75,6 +75,7 @@ Windows 10 and 11.
 | Coming back to the game after switching away mid-race, it stalled for seconds and then ran fast to catch up: its clock kept running while it was in the background. | The clock stops while the game is in the background, and leaving mid-race opens the pause menu (`PauseOnFocusLoss`). |
 | With DSOAL, alt-tabbing out leaves the last fraction of a second of each sound repeating: the game stops while in the background, and only Windows' own DirectSound silences a background game. | While the game is in the background, mcm2fix silences it (`BackgroundMute`). |
 | DSOAL ignores the game's "mute at max distance" flag, so riders out of earshot can still be heard quietly. | With a replacement DirectSound such as DSOAL, mcm2fix mutes 3D sounds past their max distance itself (`SoundMaxDistanceMute`). |
+| With a long view distance, distant terrain has holes (sky through hills, trees standing on nothing) that come and go as the camera turns. The game only refreshes the small pieces of a terrain block that is wholly in view when its visibility value is exactly one number, but blocks found wholly in view get a different value with the same "wholly in view" bit. | The bit is tested instead, so those pieces are always refreshed (`TerrainHoleFix`). |
 
 ## Features
 
@@ -120,7 +121,7 @@ Windows 10 and 11.
   Strength, softness and shine are tunable per material (`ReflectBike*`,
   `ReflectHelmet*`, `ReflectRider*`). `LiquidMetal=1` turns every bike and
   rider into liquid chrome. Direct3D 11.
-- **Texture dumping and replacement** by name with PNG, JPEG or BMP files of
+- **Texture dumping and replacement** by name with PNG, TGA, JPEG or BMP files of
   any size (`TextureDump`, `TextureReplace`). See
   [below](#texture-dumping-and-replacement).
 - **Sharp text**. The game draws its menu and HUD text with GDI on 640x480
@@ -176,6 +177,10 @@ Windows 10 and 11.
 - A few of the game's own loops that its 1999 compiler built badly are
   rewritten in place with identical maths (`FastGameCode`): so far the terrain
   texture coordinate loop, about 13x faster.
+- The game's per-frame terrain detail code is rewritten with bit-for-bit
+  identical results (`FastTerrain`), checked against the game's own code in
+  an x86 emulator and optionally in the game (`TerrainCheck`); its
+  float-to-integer conversion is one SSE3 instruction (`FastFtol`).
 - mcm2fix's own per-frame work uses SSE2 when the CPU has it (`Simd`):
   converting the game's vertices for the GPU, blending objects between
   simulation steps, 16-bit texture uploads, the pause menu's copy of the
@@ -197,6 +202,11 @@ Windows 10 and 11.
   Windows slows the CPU down while the game waits for VSync, and some frames
   then run late. While racing, mcm2fix switches to the High performance plan
   and puts yours back afterwards (not on battery).
+- **Long view distances run faster**: distant trees are drawn by the
+  graphics card in one go (`FarTrees`, `FarTreeCells`), the game's object
+  walks share one list (`FastObjectWalk`), still scenery skips the smoothing
+  checks (`StillScenery`), and the bike reflections leave out far scenery and
+  update at most 60 times a second (`ReflectMaxRange`, `ReflectFaceRate`).
 - A built-in profiler for finding hitches (`Profile`).
 
 ### Other
@@ -331,9 +341,6 @@ built with MinGW, and CI checks that it imports nothing XP lacks.
 - Without a desktop compositor, windowed Direct3D 9 often ignores VSync, so
   mcm2fix waits for the vertical blank itself (`VSync=1`).
   `Fullscreen=Exclusive` avoids the issue entirely.
-- Texture dump/replacement uses WIC, which XP has only with .NET 3.0+ or the
-  WIC redistributable. Without it those features log a failure and do
-  nothing.
 
 Details: [docs/windows-xp.md](docs/windows-xp.md).
 
@@ -465,19 +472,24 @@ The file has three parts:
 | `MipBias` | `0` | -4 to 4 | Texture sharpness at a distance. Negative values are sharper but may shimmer (e.g. `-0.5`); positive values are softer. |
 | `ViewDistance` | `1` | 0.25-10 | Multiplies how far the game draws. The far clip, the distance objects such as trees are drawn to, and the fog move out together, so the fog still hides the edge. Higher values cost frame rate. |
 | `FogDistance` | `1` | 0.1-20 | Multiplies the fog distances on top of `ViewDistance` (`2` = fog starts twice as far away). Above 1, the edge of the drawn world may show unless `ViewDistance` is raised too. |
+| `TerrainHoleFix` | `1` | `0`, `1` | Fixes holes in distant terrain (sky through hills, trees standing on nothing) that come and go as the camera turns, mostly with a high `ViewDistance`: the game forgot to refresh the smallest terrain pieces of a block that was wholly in view. `0` = the game's own behaviour. |
+| `TerrainDetail` | `2` | 0.25-8 | How finely the terrain is built (`1` is the game's own). Above 1, hills keep more of their shape further away and change shape less as you ride towards them, at some cost in frame rate; below 1, less. |
+| `TerrainLodFix` | `1` | `0`, `1` | One of the game's terrain detail numbers stops at its top value (65535) instead of wrapping round to a small one, as its other ones already do. It has not been seen to reach the top so far, even with `ViewDistance=10`. |
 | `ModelLod` | `1` | 0.25-10 | Detailed models stay this many times further away before the game switches to simpler versions. |
 | `TreeDetailDistance` | `1` | `0`, `1` | `0` makes every tree use its sparse close-up version at any distance. It looks sparse and is for fun only. |
 | `AlphaCut` | `128` | 0-255 | For trees, flags and other cut-out pictures, pixels less opaque than this aren't drawn. This removes the stair-step fringe where tree edges hide what's behind them, a flaw of the original. `0` = the original look. Soft see-through layers (shadows, ground detail, supercross ground) are never affected. With `AlphaToCoverage` on, this is where the smoothed edge sits instead. |
 | `AlphaToCoverage` | `2` | `0`, `1`, `2` | Smooth, antialiased edges on cut-out pictures (tree leaves, flags, fences, metal arches, tents, desert plants) by turning their transparency into MSAA coverage. Only works while `Antialiasing` is 2 or more. `2` = soft: leaves and flags use their transparency as is, so distant trees look fuller and fade smoothly between their far-away and close-up versions; edges are softer (fences and solid models are always sharpened). `1` = sharpened: crisp edges about one pixel wide, but trees switch abruptly between versions. `0` = off. Direct3D 11 only; the Direct3D 9 renderer uses `AlphaCut`. |
-| `Reflections` | `2` | `0`, `1`, `2` | A soft reflection on the bikes' bodywork, the riders' helmets and, more faintly, their suits. `1` = the track's sky (cheap: redrawn only when a new piece of sky comes into view). `2` = live: the sky plus the terrain, trees and track objects around the player's bike, redrawn from the bike's position (`ReflectLiveFaces` cube sides per frame). Behind the camera it shows what was drawn there recently (`ReflectCache`). Direct3D 11 only. |
+| `Reflections` | `2` | `0`, `1`, `2` | A soft reflection on the bikes' bodywork, the riders' helmets and, more faintly, their suits. `1` = the track's sky (cheap: redrawn only when a new piece of sky comes into view). `2` = live: the sky plus the terrain, trees and track objects around the player's bike, redrawn from the bike's position up to `ReflectFaceRate` times a second. Behind the camera it shows what was drawn there recently (`ReflectCache`). Direct3D 11 only. |
 | `ReflectBike` / `ReflectHelmet` / `ReflectRider` | `1` / `1` / `0.25` | 0-1 | How strongly bike bodywork, helmets and the rider's suit, gloves and boots reflect, seen edge-on. `ReflectStrength` (default `1`) multiplies all three. |
 | `ReflectBikeFresnel` / `ReflectHelmetFresnel` / `ReflectRiderFresnel` | `0.25` / `0.25` / `0.1` | 0-1 | Share of the strength seen when you look straight at the surface; real paint and plastic shine mostly at the edges, higher values look more like chrome. |
 | `ReflectBikeBlur` / `ReflectHelmetBlur` / `ReflectRiderBlur` | `4` / `4` / `4` | 0-8 | How soft the reflection is; `0` = mirror-sharp. Small curved parts like the helmet squeeze the whole sky into a few pixels, so low values show a hard horizon line there. |
 | `ReflectBikeSun` / `ReflectHelmetSun` / `ReflectRiderSun` | `0.6` / `0.7` / `0.15` | 0-4 | Brightness of the sun's highlight (the light that sets the riders' shadows) on bodywork, helmets and suits. `ReflectSun` (default `1`, `0` = none) multiplies all three. Tracks without a sun have none. |
 | `ReflectBikeShine` / `ReflectHelmetShine` / `ReflectRiderShine` | `40` / `40` / `8` | 1-2000 | How small and sharp the sun's highlight is; higher looks glossier. |
 | `ReflectSize` | `128` | 16-1024 | Reflection cube side in pixels. |
-| `ReflectLiveFaces` | `1` | 1-6 | With `Reflections=2`, cube sides redrawn per frame. |
-| `ReflectCache` | `1` | `0`, `1` | With `Reflections=2`, terrain, trees and track objects drawn in recent frames are kept on the graphics card, so the reflection also shows what is around the bike behind the camera, not just sky. `ReflectCacheMB` (default `32`) is its memory, `ReflectCacheSecs` (default `20`) how long something no longer drawn is kept, `ReflectCacheRadius` (default `0` = as far as the fog ends) how far from the bike kept things are reflected. |
+| `ReflectLiveFaces` | `6` | 1-6 | With `Reflections=2`, how many of the reflection's six cube sides each update redraws (`6` = all of it; fewer spreads the work over several updates). |
+| `ReflectCache` | `1` | `0`, `1` | With `Reflections=2`, terrain, trees and track objects drawn in recent frames are kept on the graphics card, so the reflection also shows what is around the bike behind the camera, not just sky. `ReflectCacheMB` (default `128`) is its memory (with a long view distance, less forgets things soon after they leave view), `ReflectCacheSecs` (default `20`) how long something no longer drawn is kept, `ReflectCacheRadius` (default `0` = as far as the fog ends) how far from the bike kept things are reflected. |
+| `ReflectMaxRange` | `1024` | `0`, world units | The reflection leaves out terrain and scenery further than this from the bike, whatever `ViewDistance` is (`1024` is a little past the fog at `ViewDistance=1`; `0` = no limit). Far scenery is too small to see in the reflection, and with a long view distance drawing it all again costs frame rate. |
+| `ReflectFaceRate` | `60` | `0`, updates/s | How many times a second, at most, the reflection is updated; each update redraws `ReflectLiveFaces` sides. Frames between updates skip the work. `0` = every frame. |
 | `ReflectGround` | `1` | 0-2 | Brightness of the ground below the horizon in the reflection, as a share of the fog colour. |
 | `ReflectBikeTextures` / `ReflectHelmetFrames` / `ReflectRiderFrames` / `ReflectExclude` / `ReflectTextures` / `ReflectFrames` | see ini | names | Which parts reflect: bike textures by name pattern (`*` matches anything), model parts by frame name (the rider's `Head` is the helmet; `ReflectRiderFrames` lists the body parts), textures that never reflect (`tire*`), and extra `name:strength` entries. |
 | `ReflectSkipObjects` | `SIGN*, FLAG*` | frame names | Models with any of these parts get no reflections: the board man at the start line (`SIGN01`) and the flag man (`FLAG01`-`FLAG03`) are the rider model with extra parts, so their bare heads would shine like helmets. |
@@ -490,6 +502,8 @@ The file has three parts:
 | `TrueColorTextures` | `1` | `0`, `1` | Loads textures in full colour (24-bit, or 32-bit with alpha) wherever the picture has more than 16 bits; a bug made the game always use 16-bit. Most of the game's art is stored in 16-bit, so only a few textures change. Changing it renames unnamed dumped textures. |
 | `TextureReplace` | `1` | `0`, `1` | Uses replacement pictures from `textures\` in the game folder or in `%LOCALAPPDATA%\Motocross Madness 2\textures\` (the per-user folder wins). See [Texture dumping and replacement](#texture-dumping-and-replacement). |
 | `TextureDump` | `0` | `0`, `1` | Saves every texture the game loads as a PNG in `%LOCALAPPDATA%\Motocross Madness 2\textures_dump`, to start replacements from. Loading is slower while it's on. |
+| `TextureDecodeThread` | `1` | `0`, `1` | Reads replacement pictures on a separate thread, so a big picture never holds up the game; the game's own texture shows until the picture is ready, a few frames later. `0` reads each picture when the game loads the texture. |
+| `TexturePreload` | `1` | `0`, `1` | Reads every replacement picture in the textures folders while the game starts up (on the decoding thread, then a few each frame onto the graphics card), so a replacement is already there when the game first loads its texture instead of showing the original for a few frames. `TexturePreloadMB` (default `256`) caps the picture memory read this way; the rest load when needed. Needs `TextureDecodeThread=1`. |
 | `RiderShadows` | `2` | `0`, `1`, `2` | `2`: every rider and bike casts a shadow, drawn by the graphics card at high resolution with soft edges, following the riders smoothly between simulation steps. `1`: only the rider the camera follows has one, as in the original game, but drawn the same new way. `0`: the game's own shadow (one rider, drawn into a small picture on the CPU). Direct3D 11 only; the Direct3D 9 renderer always uses the game's shadow. Tracks where the game draws no shadow (no sun) still have none. |
 | `ShadowStrength` | `0` | `0`, 1-100 | How dark the `RiderShadows` shadows are, in percent. `0` = as dark as the game's own shadow. |
 | `ShadowSoftness` | `100` | 0-400 | How much the `RiderShadows` shadows blur and fade with the rider's height above the ground, in percent. Crisp where the wheels touch the ground, wide and faint under a high jump. `0` = always sharp. |
@@ -581,11 +595,19 @@ troubleshooting.
 | `DpiAware` | `1` | `0`, `1` | Tells Windows the game handles display scaling itself, so with scaling above 100% it runs at your screen's real resolution instead of being stretched (blurry, with a drifting menu mouse). `0` = Windows scales the game as before. |
 | `RacePower` | `1` | `0`, `1`, `2` | Keeps the CPU at full speed while racing. The game needs so little CPU that on the Balanced power plan Windows lowers the clock while it waits for VSync, and some frames then run late (regular stutter, mostly on older CPUs). `1` = switch Windows to the High performance power plan when a race starts and back to your plan afterwards (if the game crashes, it is put back at the next start). `2` = High performance the whole time the game runs. `0` = off. Nothing is changed on battery or when the plan is already High performance. |
 | `RacePowerAsync` | `1` | `0`, `1` | `1` = the power plan switches run on their own thread, so the game doesn't freeze while Windows changes plan (switching back to Balanced can take about 2 seconds, which froze the countdown and the menus after a race). `0` = on the game thread, as before. |
+| `FastTerrain` | `1` | `0`, `1` | The game's per-frame terrain code (how detailed each block is, which of its points are used, building its triangles when that changes, and the walk that draws it) runs as mcm2fix's own rewrite: exactly the same results, bit for bit, but it reads ahead in memory and avoids the old maths' slow spots. At long view distances this was the biggest part of the game's own work per frame. Ctrl+F8 switches it on and off while racing (shown on screen). `0` = the game's own code. |
+| `TerrainMeshCache` | `32768` | `256`-`1048576` | Memory in KB the game may keep for terrain triangles it has built. The game kept only 1 MB, so at long view distances it threw away and rebuilt hundreds of terrain blocks every frame. `1024` = the game's own limit. |
+| `GpuTerrain` | `0` | `0`, `1` | Experimental, Direct3D 11 only, not textured yet: the whole track's terrain is built once at full detail and kept on the graphics card, in place of the game's per-frame terrain. The ground you ride on is unchanged (the game's collision already uses the full-detail heights). Ctrl+F7 switches between it and the game's terrain while racing. |
+| `FastFtol` | `1` | `0`, `1` | The game's float-to-integer conversion, used all over its code, is one SSE3 instruction instead of two FPU mode switches around a store. Exactly the same results. CPUs without SSE3 keep the old code. |
 | `FastGameCode` | `1` | `0`, `1` | A few of the game's own loops that its 1999 compiler built badly are rewritten in place with the same maths, so results are exactly the same, only faster. So far: the terrain texture coordinate loop, which ran every frame and stalled the CPU, and the per-frame tree cache scan, which now reads ahead instead of waiting on memory. |
 | `FastSort` | `1` | `0`, `1` | The game's sorting uses a merge sort instead of the old C library qsort, which slows to a crawl when many items are equal. On tree-heavy maps that froze the game for 35-125 ms when turning the camera. Being stable, it also stops distant riders' engine sounds retriggering as quiet looping snippets. |
 | `TreeCacheMB` | `32` | `0`, 1-512 | The game's cache of built trees is only emptied when more than this many MB of it are unused (the original 256 KB emptied it constantly while turning, and the trees were then rebuilt). `0` = the original. |
 | `StateCache` | `1` | `0`, `1` | Direct3D 11 only: renderer state that's already set isn't sent again for every draw. `0` is slower and is for troubleshooting rendering problems. |
 | `DrawBatch` | `1` | `0`, `1` | 3D draws in a row with nothing changed between them (trees, terrain, scenery) are sent as one draw. `0` sends each draw on its own, for troubleshooting. |
+| `StillScenery` | `1` | `0`, `1` | Terrain and close-up tree draws skip the high frame rate smoothing's checks: the game never moves them, but the checks compared every point of them every frame, which added up at long view distances. |
+| `FastObjectWalk` | `1` | `0`, `1` | The game's two walks over the objects in view (trees, then fences, signs and buildings) share one list made by the first walk, so the second no longer visits every tree just to skip it. Same objects in the same order. Helps most with a long `ViewDistance`. |
+| `FarTrees` | `1` | `0`, `1` | Distant trees are drawn by the graphics card in one go, from numbers written down once per tree, instead of the game building every billboard again each frame. They look the same; the game still draws the trees near the camera. Needs `FastObjectWalk=1` and Direct3D 11. `FarTreeDistance` (default `0` = automatic, one and a half times the distance of the 3D trees) sets from how far. |
+| `FarTreeCells` | `1` | `0`, `1` | With `FarTrees`, parts of the map holding nothing but far trees are left out of the game's per-frame walk over the objects in view (the graphics card draws their trees anyway). |
 
 ### 3. Logging
 
@@ -611,6 +633,17 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `TextureLog` | `0` | The format of each texture the game creates. |
 | `InputLog` | `0` | With `InputTiming`, the keyboard and joystick input each race step gets: events given out early or held for a later step, held taps, joystick samples, and a summary every 10 s. |
 | `SortLog` | `0` | The game's sorts per calling code every 10 s (count, largest, time). Sorts over 2 ms are always logged. |
+| `WalkLog` | `0` | With `FastObjectWalk`, every 5 seconds how many object lists were made and reused, and now and then a check of a reused list against a fresh walk (costs frame rate). |
+| `FarTreeLog` | `0` | With `FarTrees`, every 5 seconds how many trees the graphics card drew and how many were left to the game, plus checks of the game's billboards against the far-tree numbers. `2` also tints GPU-drawn trees red. |
+| `TerrainCheck` | `0` | With `FastTerrain`, every 2 seconds one frame also runs the game's own terrain code and logs any difference from the rewrite (there should be none), with a summary every 5 seconds. Costs a few milliseconds every 2 seconds. |
+| `GpuTerrainDetail` | `1` | With `GpuTerrain`, the game's fine detail texture is laid over the terrain, as the game does close up. `0` = without it. |
+| `GpuTerrainDetailReach` | `0` | How far from the camera the detail texture reaches (it fades out over the last quarter). `0` = all the way, as the game shows it. |
+| `GpuTerrainFar` | `1` | With `GpuTerrain`, terrain beyond the distance where the game switches its blocks to "far" is drawn as the game draws it there: without the detail texture, in the game's far colours. `0` = the near look all the way. |
+| `GpuTerrainLog` | `1` | With `GpuTerrain`, how the terrain was built and every 5 seconds what was drawn. `2` also tints the terrain by detail level. |
+| `FreeCam` | `1` | Ctrl+F6 during a race freezes it and gives a free camera for screenshots: mouse or arrow keys look, W/A/S/D move, Space/E up, C/Q down, Shift faster, Z slower. Ctrl+F6 again and the race carries on. |
+| `FreeCamSpeed` | `60` | Free camera speed in feet per second. |
+| `FreeCamMouse` | `15` | Free camera mouse sensitivity. |
+| `TerrainLog` | `0` | Terrain statistics every 5 seconds, with debug keys: Ctrl+F9 switches `TerrainHoleFix` on and off, Ctrl+F10 steps `TerrainDetail` (shown on screen), Ctrl+F11 writes the terrain to the log and probes the point under the cursor (Direct3D 11). `2` also looks for holes in the terrain every 2 seconds. |
 | `SoundLog` | `0` | 3D sound buffers, and when `SoundMaxDistanceMute` mutes or unmutes them. |
 | `SoundPauseLog` | `0` | When a race is paused and unpaused: every DirectSound call for a few seconds, failed calls, and the state of every sound buffer and of the window DirectSound follows. |
 | `RaceTitleLog` | `0` | The countdown race title: name and lap count found, timing and placement. |
@@ -660,7 +693,7 @@ The shipped `mcm2fix.ini` is generated from the block in
 2. Edit or upscale a file and keep its name. Put it in `textures\` in the
    game folder, or in `%LOCALAPPDATA%\Motocross Madness 2\textures\`.
 3. With `TextureReplace=1` (the default) the file replaces that texture at
-   every size. PNG, JPEG and BMP of any size work, at full 32-bit colour,
+   every size. PNG, TGA, JPEG and BMP of any size work, at full 32-bit colour,
    and mipmaps are generated on the GPU. Keep alpha where the original has
    it.
 

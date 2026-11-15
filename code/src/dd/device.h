@@ -14,6 +14,14 @@
 #include "backend.h"
 #include "d3d7.h"
 
+struct FarTreeFrame;
+namespace gt {
+struct Mesh;
+struct Range;
+struct Chunk;
+struct DrawStats;
+}  // namespace gt
+
 namespace dd {
 struct ReflectReplay;
 
@@ -195,6 +203,36 @@ class Device : public d3d7::IDirect3DDevice7 {
     const uint8_t* game_verts = nullptr;  // the game's own vertex array (before SimSmooth), if known
   };
   void Submit(const Draw& d);
+ public:
+  // FarTrees (fartrees.cpp): draws the far trees with the current state.
+  bool DrawFarTrees(const ::FarTreeFrame& f);
+  // GpuTerrain (gputerrain.cpp): the whole terrain from its own buffers.
+  bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st);
+  Surface* Texture0() const { return tex_[0]; }
+  void CaptureTerrainState(int site, bool log);
+ private:
+  // GpuTerrain: the game's sampler settings for its terrain base and detail
+  // textures (MIN/MAG/MIPFILTER, MIPMAPLODBIAS, MAXMIPLEVEL), and draws of
+  // the game's terrain passes still to log.
+  DWORD terr_samp_[2][5] = {};
+  bool terr_samp_ok_[2] = {false, false};
+  int terr_probe_left_ = 0;
+  int terr_probe_site_ = 0;
+  void LogTerrainProbe(const Draw& d);
+  ID3D11Buffer* terr_vb_ = nullptr;
+  ID3D11Buffer* terr_ib_ = nullptr;
+  unsigned terr_gen_ = 0;
+  float detail_fade_[2] = {0, 0};
+  float terr_far_[4] = {0, 0, 0, 0}, terr_fard_[4] = {1, 1, 1, 1}, terr_fars_[4] = {0, 0, 0, 0};
+  std::vector<const gt::Range*> terr_todo_;
+  std::vector<int32_t> terr_todo_base_;
+  std::vector<const gt::Chunk*> terr_todo_chunk_;
+  std::vector<uint32_t> terr_order_;
+  ID3D11Buffer* tree_buf_ = nullptr;
+  ID3D11ShaderResourceView* tree_srv_ = nullptr;
+  ID3D11Buffer* tree_cb_ = nullptr;
+  size_t tree_cap_ = 0;   // trees the buffer holds
+  size_t tree_sent_ = 0;  // trees uploaded so far
   bool BatchAdd(const Draw& d);
   bool StageStateUnused(DWORD stage, DWORD type) const;
   HRESULT SetTransformNow(DWORD type, d3d7::D3DMATRIX* m);
@@ -308,6 +346,7 @@ class Device : public d3d7::IDirect3DDevice7 {
     std::vector<ReflectSub> subs;  // the game's draws in it (reflection cache)
   };
   Batch batch_, batch_out_;
+  std::vector<unsigned> range_starts_, range_counts_;  // ReflectMaxRange scratch
   bool flushing_ = false;
   std::vector<uint8_t> scratch_;
   std::vector<WORD> scratch_idx_;

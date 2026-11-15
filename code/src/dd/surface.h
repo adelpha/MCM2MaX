@@ -105,6 +105,7 @@ class Surface : public IDirectDrawSurface7 {
   // A temporary copy of a surface from the system DirectDraw (caller releases).
   static Surface* CopyForeign(DirectDraw* dd, IUnknown* s);
   UINT Width() const { return desc_.dwWidth; }
+  UINT MipLevels() const { return static_cast<UINT>(1 + mips_.size()); }
   UINT Height() const { return desc_.dwHeight; }
   DWORD Caps() const { return desc_.ddsCaps.dwCaps; }
   bool IsDepth() const { return layout_.depth; }
@@ -199,6 +200,8 @@ class Surface : public IDirectDrawSurface7 {
 
   GpuTexture gpu_;
   GpuTexture replaced_;    // replacement picture, if one matches
+  bool replace_pending_ = false;  // its picture is still being decoded
+  unsigned replace_gen_ = 0;      // ReplacementGeneration() when last looked
   GpuTexture keyed_;       // D3D9 colour-keyed copy (KeyedTex)
   uint64_t keyed_stamp_ = 0;
   uint32_t cpu_version_ = 0;  // bumped whenever the CPU copy changes
@@ -206,6 +209,7 @@ class Surface : public IDirectDrawSurface7 {
   uint64_t name_src_hash_ = 0;  // RawHash at this staging surface's first named copy
   std::string tex_name_;   // the game's name for this texture (TextureKey), if known
   void MatchReplacement(const uint8_t* bgra, UINT w, UINT h);
+  void PollReplacement();
   enum Sync { kInSync, kCpuNewer, kGpuNewer } sync_ = kCpuNewer;
 
   // GetDC state.

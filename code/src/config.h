@@ -12,6 +12,7 @@ struct Config {
   bool profile = false;       // Profile: performance profiling (see prof.cpp)
   int profile_sample_us = 1000;  // ProfileSampleUs: sampling profiler interval (0 = off)
   bool fast_crt = true;
+  bool fast_ftol = true;      // FastFtol: the C runtime's float-to-integer call done with one instruction (SSE3)
   bool simd = true;           // Simd: SSE2 fast paths for mcm2fix's own pixel and vertex work, when the CPU has SSE2 (simd.cpp)
   bool simd_log = false;      // SimdLog: time the SSE2 and plain paths at start-up, and log their use every 5 s
   bool pause_on_focus_loss = true;  // PauseOnFocusLoss: alt-tabbing out of a race opens the pause menu (diagnostics.cpp)
@@ -26,6 +27,28 @@ struct Config {
   bool sound_log = false;     // SoundLog: log 3D sound buffers, mutes and unmutes
   bool sound_pause_log = false;  // SoundPauseLog: trace DirectSound calls and buffer states around race pause/unpause
   bool state_cache = true;    // StateCache: skip D3D11 state the device already has bound (device.cpp)       // FastCrt: QPC game clock and table-driven _stricmp (fixes_perf.cpp)
+  bool still_scenery = true;  // StillScenery: terrain and tree draws skip the SimSmooth vertex checks (device.cpp)
+  bool fast_object_walk = true;  // FastObjectWalk: the scene's object passes walk a flat list (fixes_walk.cpp)
+  bool walk_log = false;      // WalkLog: FastObjectWalk statistics every 5 s
+  bool far_trees = true;      // FarTrees: far tree billboards drawn on the GPU (fartrees.cpp)
+  bool far_tree_cells = true;  // FarTreeCells: grid cells holding only far trees are left out of the walk
+  float far_tree_distance = 0;  // FarTreeDistance: from how far (0 = automatic)
+  bool terrain_lod_fix = true;  // TerrainLodFix: clamp the far-block detail number (fixes_terrain.cpp)
+  bool terrain_hole_fix = true;  // TerrainHoleFix: refresh children of wholly-visible split nodes (fixes_terrain.cpp)
+  float terrain_detail = 2.0f;  // TerrainDetail: terrain mesh detail multiplier (fixes_terrain.cpp)
+  bool fast_terrain = true;   // FastTerrain: exact rewrites of the per-frame terrain code (terrain_fast.cpp)
+  int terrain_check = 0;      // TerrainCheck: compare FastTerrain with the game's own code every 2 s
+  int terrain_mesh_cache_kb = 32768;  // TerrainMeshCache: KB of terrain meshes kept when not drawn (game: 1024)
+  bool gpu_terrain = false;   // GpuTerrain: whole terrain built once at full detail on the GPU (gputerrain.cpp)
+  bool gpu_terrain_detail = true;
+  int gpu_terrain_far = 1;  // GpuTerrainFar: far terrain coloured and without detail, as the game's far blocks
+  float gpu_terrain_detail_reach = 0;  // GpuTerrainDetailReach: how far the detail texture reaches, 0 = the game's
+  int free_cam = 1;             // FreeCam: Ctrl+F6 in a race freezes it and gives a fly camera
+  float free_cam_speed = 60.0f; // FreeCamSpeed: feet per second (Shift x5, Z x0.2)
+  int free_cam_mouse = 15;      // FreeCamMouse: mouse look sensitivity
+  int gpu_terrain_log = 1;    // GpuTerrainLog: 0 off, 1 build and 5 s lines, 2 also tint by node level
+  int terrain_log = 0;  // TerrainLog: terrain statistics, hole checks and debug keys (fixes_terrain.cpp)
+  int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)
   bool batch_log = false;     // BatchLog: log draw batching every 5 s
   bool draw_log = false;      // DrawLog: measure which draw calls could be merged (dd/drawlog.cpp)
@@ -104,6 +127,9 @@ struct Config {
   float model_lod = 1.0f;     // ModelLod: detailed models are kept this many times further away
   bool texture_replace = true;  // TextureReplace: load replacement textures from textures\ folder
   bool texture_dump = false;    // TextureDump: save every texture the game uploads as PNG
+  bool texture_decode_thread = true;  // TextureDecodeThread: decode replacement pictures off the game thread
+  bool texture_preload = true;        // TexturePreload: decode every replacement picture at startup
+  int texture_preload_mb = 256;       // TexturePreloadMB: most decoded picture memory preloaded
   bool true_color_textures = true;  // TrueColorTextures: load textures as 24/32-bit instead of 16-bit
   bool texture_log = false;         // TextureLog: log the format of each texture the game creates
 };

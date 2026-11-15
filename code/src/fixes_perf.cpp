@@ -10,6 +10,11 @@
 //    from the CRT's own tolower, rebuilt if the locale changes.
 #include <windows.h>
 #include <mmsystem.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#else
+#include <cpuid.h>
+#endif
 
 #include <cstdint>
 #include <cstdio>
@@ -398,7 +403,48 @@ void PatchTerrainUv() {
     patch::Log("perf: FastGameCode=1, terrain texture coordinate loop at 481cc2 rewritten (same results, no store stalls)");
 }
 
+// FastFtol: the C runtime's float-to-integer conversion (_ftol, 0x53a0f8)
+// switches the FPU to truncation, stores, and switches back: two fldcw, each
+// a pipeline stall, on every (int)float in the game (terrain detail numbers,
+// physics, AI ...). SSE3's fisttp truncates whatever the rounding mode is,
+// with the same result in every case (including out-of-range values, which
+// give the same "integer indefinite"), so the call becomes
+// sub esp,8 / fisttp qword [esp] / pop eax / pop edx / ret in place.
+static bool CpuHasSse3() {
+  int r[4] = {};
+#if defined(_MSC_VER)
+  __cpuid(r, 1);
+#else
+  unsigned a, b, c, d;
+  if (!__get_cpuid(1, &a, &b, &c, &d)) return false;
+  r[2] = static_cast<int>(c);
+#endif
+  return (r[2] & 1) != 0;
+}
+
+static void PatchFtol() {
+  if (!GetConfig().fast_ftol) {
+    patch::Log("perf: FastFtol=0, _ftol left as it is");
+    return;
+  }
+  if (!CpuHasSse3()) {
+    patch::Log("perf: FastFtol: no SSE3 on this CPU, _ftol left as it is");
+    return;
+  }
+  static const uint8_t orig[] = {0x55, 0x8B, 0xEC, 0x83, 0xC4, 0xF4, 0x9B, 0xD9, 0x7D, 0xFE, 0x9B, 0x66, 0x8B,
+                                 0x45, 0xFE, 0x80, 0xCC, 0x0C, 0x66, 0x89, 0x45, 0xFC, 0xD9, 0x6D, 0xFC, 0xDF,
+                                 0x7D, 0xF4, 0xD9, 0x6D, 0xFE, 0x8B, 0x45, 0xF4, 0x8B, 0x55, 0xF8, 0xC9, 0xC3};
+  static const uint8_t code[] = {0x83, 0xEC, 0x08,  // sub esp, 8
+                                 0xDD, 0x0C, 0x24,  // fisttp qword [esp]
+                                 0x58,              // pop eax
+                                 0x5A,              // pop edx
+                                 0xC3};             // ret
+  if (patch::Replace("perf: _ftol", 0x53A0F8, orig, sizeof(orig), code, sizeof(code)))
+    patch::Log("perf: FastFtol=1, _ftol (53a0f8) is one fisttp (same results, no FPU mode switches)");
+}
+
 void ApplyPerfFixes() {
+  PatchFtol();
   if (GetConfig().async_sound) PatchSoundCommit();
   else patch::Log("perf: AsyncSound=0, 3D sound committed on the game thread");
   if (GetConfig().fast_game_code) PatchTerrainUv();

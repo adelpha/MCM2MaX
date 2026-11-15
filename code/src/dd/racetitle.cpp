@@ -10,6 +10,7 @@
 #include "../music.h"
 #include "../patch.h"
 #include "backend.h"
+#include "gpushadow.h"
 #include "gdihook.h"
 #include "gputext.h"
 #include "hudtext.h"
@@ -288,6 +289,7 @@ void __fastcall RaceDtorHook(uintptr_t race, void* edx) {
     g.vtable = 0;
   }
   music::RaceEnd(race);
+  ShadowRaceGone(race);
   reinterpret_cast<InitFn>(kRaceDtor)(race, edx);
 }
 
@@ -544,8 +546,8 @@ void InstallRaceTitleHooks() {
   const Config& c = GetConfig();
   if (!c.race_title && !c.announcer) {
     Log("race title: off (RaceTitle=0, Announcer=0), the game's corner text stays");
-    if (music::Enabled()) {
-      // Music still needs to know when races start and end.
+    if (music::Enabled() || c.rider_shadows > 0) {
+      // Music and the GPU rider shadows still need to know when races start and end.
       int calls = 0;
       for (uintptr_t site : kCountdownCalls)
         calls += PatchCall(site, kCountdownInit, reinterpret_cast<const void*>(&CountdownInitHook)) ? 1 : 0;
@@ -792,10 +794,53 @@ void AnnouncerTick() {
 
 }  // namespace
 
+namespace {
+CRITICAL_SECTION* NoticeLock() {
+  static CRITICAL_SECTION cs;
+  static bool init = [] {
+    InitializeCriticalSection(&cs);
+    return true;
+  }();
+  (void)init;
+  return &cs;
+}
+char g_notice[96];
+DWORD g_notice_until = 0;
+
+void DrawNotice(Surface* rt) {
+  char text[96];
+  EnterCriticalSection(NoticeLock());
+  const bool on = g_notice[0] && static_cast<LONG>(g_notice_until - GetTickCount()) > 0;
+  std::snprintf(text, sizeof(text), "%s", g_notice);
+  LeaveCriticalSection(NoticeLock());
+  if (!on || !GpuTextActive()) return;
+  HDC dc = rt->BeginGpuText();
+  if (!dc) return;
+  const UINT W = rt->Width(), H = rt->Height();
+  GpuTextSelectFont(dc, TitleFont(std::max<LONG>(12, std::lround(H * 0.04f))));
+  SetBkMode(dc, TRANSPARENT);
+  SetTextAlign(dc, TA_CENTER | TA_TOP | TA_NOUPDATECP);
+  const std::string s(text);
+  const LONG y = std::lround(H * 0.12f);
+  Text(dc, s, static_cast<LONG>(W / 2) + 2, y + 2, RGB(0, 0, 0));
+  Text(dc, s, static_cast<LONG>(W / 2), y, RGB(255, 255, 80));
+  GpuTextSelectFont(dc, GetStockObject(SYSTEM_FONT));
+  GpuTextEndDC(dc);
+}
+}  // namespace
+
+void DebugNotice(const char* text) {
+  EnterCriticalSection(NoticeLock());
+  std::snprintf(g_notice, sizeof(g_notice), "%s", text ? text : "");
+  g_notice_until = GetTickCount() + 3000;
+  LeaveCriticalSection(NoticeLock());
+}
+
 void RaceTitleDraw(Surface* rt) {
   if (!rt || g.drawn_this_frame) return;
   if (rt->Width() < 320 || rt->Height() < 200) return;  // not the screen
   g.drawn_this_frame = true;
+  DrawNotice(rt);
   PodiumWatch();
   AnnouncerTick();
   PodiumSoundTick();

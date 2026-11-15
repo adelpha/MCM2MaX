@@ -164,6 +164,62 @@ MipBias=0
 ; 2 = twice as far. Higher values cost frame rate.
 ViewDistance=1
 
+; TerrainLodFix: 1 = one of the game's terrain detail numbers stops at its
+; top value (65535) instead of wrapping round to a small one, as the game's
+; other ones already do (default). 0 = the game's own behaviour. (The
+; number has not been seen to reach the top so far, even with ViewDistance=10.)
+TerrainLodFix=1
+
+; TerrainHoleFix: 1 = fixes holes in distant terrain (sky showing through
+; hills, trees standing on nothing) that come and go as the camera turns,
+; mostly with a high ViewDistance (default). The game forgot to refresh the
+; smallest terrain pieces of a block that was wholly in view. 0 = the game's
+; own behaviour.
+TerrainHoleFix=1
+
+; TerrainDetail: how finely the terrain is built, 0.25 to 8 (default 2;
+; 1 is the game's own). Above 1, hills keep more of their shape further away
+; and change shape less as you ride towards them, at some cost in frame rate;
+; below 1, less.
+TerrainDetail=2
+
+; FastTerrain: 1 = the game's per-frame terrain code (how detailed each
+; block is, which of its points are used, building its triangles when that
+; changes, and the walk that draws it) runs
+; as mcm2fix's own rewrite, which gives exactly the same results, bit for
+; bit, but reads ahead in memory and avoids the old maths' slow spots
+; (default). Ctrl+F8 switches it on and off while racing (shown on screen).
+; 0 = the game's own code.
+FastTerrain=1
+
+; TerrainMeshCache: memory in KB the game may keep for terrain triangles it
+; has built (default 32768). The game kept only 1 MB, so at long view
+; distances it threw away and rebuilt hundreds of blocks every frame.
+; 1024 = the game's own limit.
+TerrainMeshCache=32768
+
+; GpuTerrain: 1 = the whole track's terrain is built once at full detail and
+; kept on the graphics card, in place of the game's per-frame terrain
+; (Direct3D 11 only; experimental, not textured yet). The ground you ride on
+; is unchanged. Ctrl+F7 switches between it and the game's terrain while
+; racing. Default 0.
+GpuTerrain=0
+
+; GpuTerrainDetail: with GpuTerrain, the game's fine detail texture is laid
+; over the terrain, as the game does close up (default 1). 0 = without it.
+GpuTerrainDetail=1
+
+; GpuTerrainDetailReach: how far from the camera the detail texture reaches,
+; in the game's units (it fades out over the last quarter). 0 = all the
+; way, as the game shows it (default).
+GpuTerrainDetailReach=0
+
+; GpuTerrainFar: with GpuTerrain, terrain beyond the distance where the game
+; switches its terrain blocks to "far" is drawn as the game draws them there:
+; without the detail texture and in the game's far colours (default 1).
+; 0 = the near look all the way.
+GpuTerrainFar=1
+
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
 ; (default 1). 2 = fog starts twice as far away. Above 1, the edge of the
 ; drawn world may show through the fog unless ViewDistance is raised too.
@@ -245,25 +301,36 @@ ReflectSun=1
 
 ; ReflectSize: the reflection picture's size per cube side in pixels
 ; (default 128; bigger only matters with a low blur).
-; ReflectLiveFaces: Reflections=2 redraws this many of the six cube sides
-; per frame, 1 to 6 (default 1: the whole reflection is fresh every six
-; frames). ReflectGround: brightness of the ground below the horizon in the
+; ReflectLiveFaces: how many of the reflection's six cube sides each
+; update redraws, 1 to 6 (default 6: the whole reflection; fewer spreads
+; the work over several updates). How often updates happen is
+; ReflectFaceRate, below. ReflectGround: brightness of the ground below the horizon in the
 ; reflection, as a share of the fog colour (default 1).
 ReflectSize=128
-ReflectLiveFaces=1
+ReflectLiveFaces=6
 ReflectGround=1
 
 ; ReflectCache: with Reflections=2, terrain, trees and track objects drawn
 ; in recent frames are kept on the graphics card, so the reflection also
 ; shows what is around the bike behind the camera (1, default), not just sky
-; (0). ReflectCacheMB: memory for it (default 32). ReflectCacheSecs: how long
+; (0). ReflectCacheMB: memory for it (default 128; with a long view
+; distance less than that forgets things soon after they leave view). ReflectCacheSecs: how long
 ; something not drawn any more is kept (default 20). ReflectCacheRadius: how
 ; far from the bike kept things are reflected (0 = as far as the fog ends,
-; the default).
+; the default). ReflectMaxRange: the reflection leaves out terrain and
+; scenery further than this from the bike, whatever ViewDistance is (default
+; 1024, a little past the fog at ViewDistance=1; 0 = no limit). Far scenery
+; is too small to see in the reflection, and with a long view distance
+; drawing all of it again for the reflection costs frame rate.
+; ReflectFaceRate: how many times a second, at most, the reflection is
+; updated (default 60; 0 = every frame). Each update redraws
+; ReflectLiveFaces sides. Frames between updates skip the work.
 ReflectCache=1
-ReflectCacheMB=32
+ReflectCacheMB=128
 ReflectCacheSecs=20
 ReflectCacheRadius=0
+ReflectMaxRange=1024
+ReflectFaceRate=60
 
 ; Which parts reflect. ReflectBikeTextures: bike textures (name patterns, *
 ; matches anything) that reflect at ReflectBike. ReflectHelmetFrames: model
@@ -320,7 +387,7 @@ TrueColorTextures=1
 ; if there is one (default). Replacements go in the "textures" folder in the
 ; game folder or in %LOCALAPPDATA%\Motocross Madness 2\textures (that one wins
 ; when both have the same picture). Name each file like the dumped texture
-; (see TextureDump). PNG, JPEG or BMP, any size, full colour with alpha.
+; (see TextureDump). PNG, TGA, JPEG or BMP, any size, full colour with alpha.
 ; 0 = always use the game's own textures.
 TextureReplace=1
 
@@ -330,6 +397,23 @@ TextureReplace=1
 ; are saved as <name>.png, others as <16 hex digits>.png. 0 = off (default).
 ; Slows loading while on.
 TextureDump=0
+
+; TextureDecodeThread: 1 = read replacement pictures on a separate thread
+; (default). The game keeps its own texture until the picture is ready, a few
+; frames later, so loading a big picture never holds up the game. 0 = read
+; each picture when the game loads the texture, which pauses the game for as
+; long as that takes.
+TextureDecodeThread=1
+
+; TexturePreload: 1 = read every replacement picture in the textures folders
+; while the game starts up (default), on the decoding thread, then put a few
+; on the graphics card each frame, so a replacement is already there when
+; the game first loads its texture instead of the game's own showing for a
+; few frames. 0 = read each picture when the game first needs it. Needs
+; TextureDecodeThread=1. TexturePreloadMB: most picture memory read this way
+; (default 256); pictures past it are read when needed.
+TexturePreload=1
+TexturePreloadMB=256
 
 ; RiderShadows: how the riders' shadows are drawn. The game drew one shadow,
 ; for the rider the camera follows, into a small picture on the CPU.
@@ -612,6 +696,12 @@ TagReverb=Default
 ; measurable slowdowns. 0 = the game's own code.
 FastCrt=1
 
+; FastFtol: 1 = the game's float-to-integer conversion, used all over its
+; code, is one SSE3 instruction instead of two FPU mode switches around a
+; store (default; CPUs without SSE3 keep the old code). The results are
+; exactly the same. 0 = the game's own code.
+FastFtol=1
+
 ; Simd: 1 = mcm2fix's own per-frame work (converting vertices for the GPU,
 ; blending objects between simulation steps, 16-bit texture uploads, the
 ; pause menu's copy of the frame) uses SSE2 when the CPU has it (default).
@@ -683,6 +773,36 @@ StateCache=1
 ; terrain, scenery) are sent to the graphics card as one draw (default). 0 =
 ; send each draw the game makes on its own (for troubleshooting).
 DrawBatch=1
+
+; StillScenery: 1 = terrain and close-up tree draws skip the high frame rate
+; smoothing's checks (default). The game places them in the world once and
+; never moves them, so there is nothing to smooth, but the checks compared
+; every point of them every frame, which added up at long view distances.
+; 0 = check them like everything else.
+StillScenery=1
+
+; FastObjectWalk: 1 = the game's two walks over the objects in view (trees,
+; then fences, signs and buildings) share one list made by the first walk,
+; so the second no longer visits every tree just to skip it (default). Same
+; objects in the same order. Helps most with a long ViewDistance. 0 = the
+; game's own walks.
+FastObjectWalk=1
+
+; FarTrees: 1 = distant trees are drawn by the graphics card in one go,
+; from numbers written down once per tree, instead of the game building
+; every billboard again each frame (default). They look the same; the game
+; still draws the trees near the camera. Needs FastObjectWalk=1 and the
+; Direct3D 11 renderer. FarTreeDistance: from how far (in the game's depth
+; units; 0 = automatic, one and a half times the distance of the 3D trees,
+; and never closer than that). 0 = the game builds them all.
+FarTrees=1
+FarTreeDistance=0
+
+; FarTreeCells: with FarTrees, parts of the map that hold nothing but far
+; trees are left out of the game's per-frame walk over the objects in view
+; (their trees are drawn by the graphics card anyway). 0 = every tree is
+; still walked each frame. Default 1.
+FarTreeCells=1
 
 ; =============================================================================
 ; 3. LOGGING
@@ -757,6 +877,48 @@ InputLog=0
 ; SortLog: the game's sorts per calling code every 10 s (count, largest,
 ; time). Sorts over 2 ms are always logged. Default 0.
 SortLog=0
+
+; WalkLog: with FastObjectWalk, every 5 seconds how many object lists were
+; made and reused, their size, and now and then a check of a reused list
+; against a fresh walk. Default 0.
+WalkLog=0
+
+; FarTreeLog: with FarTrees, every 5 seconds how many trees are drawn by the
+; graphics card and how many are left to the game, and now and then a check
+; of the game's own billboards against the numbers far trees are drawn
+; from. 2 also tints the trees drawn by the graphics card red, to see which
+; they are. Default 0.
+FarTreeLog=0
+
+; TerrainLog: terrain statistics every 5 seconds, including how often the
+; terrain detail number overflowed (see TerrainLodFix). Also turns on debug
+; keys: Ctrl+F9 switches TerrainHoleFix on and off, Ctrl+F10 steps
+; TerrainDetail through 2, 4, 0.5 and 0.25 times its value and back (shown
+; on screen), Ctrl+F11 writes the
+; terrain and camera to the log and probes the point under the mouse cursor
+; (every draw and terrain block there; Direct3D 11 only). 2 also looks for
+; holes in the terrain every 2 seconds and logs the ones it finds. Default 0.
+TerrainLog=0
+
+; TerrainCheck: 1 = every 2 seconds, one frame runs the game's own terrain
+; code as well as FastTerrain's and logs any difference (there should be
+; none), with a summary every 5 seconds. Costs a few milliseconds every 2
+; seconds. Default 0.
+TerrainCheck=0
+
+; GpuTerrainLog: with GpuTerrain, logs how the terrain was built and every
+; 5 seconds what was drawn (default 1). 2 also tints the terrain by detail
+; level.
+GpuTerrainLog=1
+
+; FreeCam: 1 = Ctrl+F6 during a race freezes it and gives a free (fly)
+; camera, for screenshots from the same spot. Mouse or arrow keys look,
+; W/A/S/D move, Space/E up, C/Q down, Shift faster, Z slower; Ctrl+F6 again
+; and the race carries on. FreeCamSpeed is in feet per second (default 60),
+; FreeCamMouse the mouse sensitivity (default 15). Default 1.
+FreeCam=1
+FreeCamSpeed=60
+FreeCamMouse=15
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by
 ; SoundMaxDistanceMute. Default 0.
@@ -904,7 +1066,7 @@ it in `textures\` in the game folder or in
 at every size. Textures without a name are dumped as `<hash>.png` instead
 (16 hex digits of the texture's size and pixels; anything after the 16
 digits and a `_` is ignored) and replaced only when the game loads exactly
-those pixels. PNG, JPEG and BMP of any size work, at full 32-bit colour;
+those pixels. PNG, TGA, JPEG and BMP of any size work, at full 32-bit colour;
 mipmaps are generated on the GPU. Keep alpha where the original has it.
 Textures that change every frame (videos) are never replaced, and menu
 screens, the cursor and fonts are not textures, so they can't be replaced.

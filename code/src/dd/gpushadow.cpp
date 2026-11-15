@@ -312,6 +312,7 @@ struct ShadowStats {
   unsigned bad_vtable = 0, empty_groups = 0, dropped = 0, too_many_verts = 0, bad_index = 0;
   double collect_ms = 0, render_ms = 0;
   unsigned recv_shadowed = 0, recv_multiply = 0, recv_inactive = 0, recv_patches = 0;
+  unsigned ensured = 0, ensure_failed = 0;  // ShadowEnsureFrame (GPU terrain)
   unsigned game_draw_skipped = 0, recv_draw_skipped = 0, self_draw_skipped = 0;
   float half_min = 1e9f, half_max = 0;
   double last_log = 0;
@@ -704,6 +705,7 @@ bool GpuFrame(uintptr_t ps) {
 // ---------------------------------------------------------------- hooks
 
 int __fastcall PreDrawHook(void* self, void* edx) {
+  if (g_f.active) return 1;  // already drawn this frame (for GPU terrain)
   if (GpuFrame(reinterpret_cast<uintptr_t>(self))) return 1;
   ++g_st.game;
   return g_prev_predraw(self, edx);
@@ -797,6 +799,30 @@ bool PatchCallSite(uintptr_t site, uintptr_t original, const void* hook) {
 
 }  // namespace
 
+bool ShadowEnsureFrame() {
+  if (g_f.active) return true;
+  if (!g_race) return false;
+  // GPU terrain: the game's shadow pre-draw is not reached while the game's
+  // terrain is skipped (gterr-14), so the frame's shadows are drawn here.
+  const uintptr_t ps = Rd<uintptr_t>(g_race + kRaceShadow);
+  if (!ps || Rd<uintptr_t>(ps) != kPsVtable) return false;
+  const bool ok = GpuFrame(ps);
+  ++(ok ? g_st.ensured : g_st.ensure_failed);
+  static int logged = 0;
+  if (logged < 3) {
+    ++logged;
+    Log("rider shadows: frame's shadows drawn for GPU terrain (the game's pre-draw had not run): %s",
+        ok ? "drawn" : "not drawn");
+  }
+  return ok;
+}
+
+void ShadowRaceGone(uintptr_t race) {
+  if (!race || race != g_race) return;
+  Log("rider shadows: race %08x destroyed, forgotten", static_cast<unsigned>(race));
+  g_race = 0;
+}
+
 void InstallGpuShadows() {
   const Config& c = GetConfig();
   // The race update hook only notes which race runs; reflections use it for
@@ -826,6 +852,11 @@ void InstallGpuShadows() {
 }
 
 bool ShadowReceiverNow() { return g_receiver > 0; }
+void ShadowReceiverEnter() {
+  ++g_receiver;
+  ++g_st.recv_patches;
+}
+void ShadowReceiverLeave() { --g_receiver; }
 
 bool ShadowSunDirection(float to_sun[3]) {
   // Noted at the race's update (the race's memory may be gone by now, so it
@@ -898,10 +929,10 @@ void ShadowFrameEnd() {
     Log("rider shadows:   terrain: %.1f patch draws/frame, %.1f draws shadowed, %.1f left alone as multiplying "
         "layers, %u outside GPU frames; skipped game draws: texture %u, receiver %u, self-shadow %u; race not found "
         "%u, race/shadow mismatch %u, non-model casters %u, empty bikes %u, over %d bikes %u, vertex cap %u, bad "
-        "indices %u",
+        "indices %u; drawn for GPU terrain %u (failed %u)",
         g_st.recv_patches / n, g_st.recv_shadowed / n, g_st.recv_multiply / n, g_st.recv_inactive,
         g_st.game_draw_skipped, g_st.recv_draw_skipped, g_st.self_draw_skipped, g_st.no_race, g_st.race_mismatch,
-        g_st.bad_vtable, g_st.empty_groups, kTiles, g_st.dropped, g_st.too_many_verts, g_st.bad_index);
+        g_st.bad_vtable, g_st.empty_groups, kTiles, g_st.dropped, g_st.too_many_verts, g_st.bad_index, g_st.ensured, g_st.ensure_failed);
   }
   const double last = now;
   g_st = ShadowStats{};

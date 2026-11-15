@@ -331,7 +331,45 @@ constexpr float kMaxBend = 4.0f;
 // Up to this, each vertex is blended on its own; beyond, the shape moves as a whole.
 constexpr float kMaxPointBlend = 0.5f;
 
+// StillScenery checks (sampled): same draw source seen again at a later step,
+// positions the same or not.
+struct SceneryRec {
+  uint64_t hash = 0;
+  unsigned tick = 0;
+};
+std::unordered_map<uint64_t, SceneryRec> g_scenery;
+unsigned g_scen_draws = 0, g_scen_checked = 0, g_scen_same = 0, g_scen_moved = 0, g_scen_sample = 0;
+
 }  // namespace
+
+void SmoothNoteScenery(const uint8_t* verts, uint32_t stride, uint32_t count) {
+  ++g_scen_draws;
+  if (++g_scen_sample % 61 != 0 || !verts || stride < 12 || !count) return;
+  unsigned tick;
+  float alpha;
+  if (!SimDrawPoint(&tick, &alpha)) return;
+  // The game fills one scratch buffer for many pieces: told apart by size and
+  // where their first point is across the ground (x, z), which a piece
+  // that changes its heights keeps.
+  uint32_t xz[2];
+  std::memcpy(&xz[0], verts, 4);
+  std::memcpy(&xz[1], verts + 8, 4);
+  uint64_t key = (static_cast<uint64_t>(xz[0]) * 0x9E3779B97F4A7C15ull ^ xz[1]) * 0x9E3779B97F4A7C15ull ^ count;
+  uint64_t h = 1469598103934665603ull;
+  for (uint32_t i = 0; i < count; ++i) {
+    uint32_t p[3];
+    std::memcpy(p, verts + static_cast<size_t>(i) * stride, 12);
+    for (uint32_t v : p) h = (h ^ v) * 1099511628211ull;
+  }
+  SceneryRec& r = g_scenery[key];
+  if (r.tick && r.tick != tick) {
+    ++g_scen_checked;
+    if (r.hash == h) ++g_scen_same;
+    else ++g_scen_moved;
+  }
+  r.hash = h;
+  r.tick = tick;
+}
 
 const uint8_t* SmoothVertices(const uint8_t* verts, uint32_t stride, uint32_t count,
                               const void* idx) {
@@ -636,6 +674,13 @@ void SmoothFrameEnd() {
                  g_blended, g_total, g_vblended, g_vtotal, static_cast<unsigned>(g_recs.size()),
                  static_cast<unsigned>(g_vrecs.size()), g_vstill, g_vstill_fast, g_vstill_changed);
     }
+    if (on && g_scen_draws) {
+      patch::Log("smoothing: StillScenery: %u terrain/tree draws not smoothed over 600 frames; sampled again at a "
+                 "later step: %u, positions the same %u, changed %u",
+                 g_scen_draws, g_scen_checked, g_scen_same, g_scen_moved);
+    }
+    g_scen_draws = g_scen_checked = g_scen_same = g_scen_moved = 0;
+    if (g_scenery.size() > 20000) g_scenery.clear();
     if (on) {
       patch::Log("smoothing: %u shadow draws rebuilt (calls %u, no meshes %u, no previous %u, jumped %u, off %u)",
                  g_shadow_blends, g_shadow_why[0], g_shadow_why[1], g_shadow_why[2], g_shadow_why[3],

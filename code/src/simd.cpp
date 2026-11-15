@@ -370,6 +370,10 @@ void Init() {
 }
 
 bool Sse2() { return g_sse2; }
+bool CpuHasSse2() {
+  static const bool has = DetectCpu().sse2;
+  return has;
+}
 const char* PathName() { return g_sse2 ? "SSE2" : "plain"; }
 
 void ReportStats() {

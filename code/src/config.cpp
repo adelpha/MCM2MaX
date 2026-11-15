@@ -105,6 +105,7 @@ void LoadConfig() {
   g_config.profile = GetPrivateProfileIntA("mcm2fix", "Profile", 0, ini) != 0;
   g_config.profile_sample_us = GetPrivateProfileIntA("mcm2fix", "ProfileSampleUs", 1000, ini);
   g_config.fast_crt = GetPrivateProfileIntA("mcm2fix", "FastCrt", 1, ini) != 0;
+  g_config.fast_ftol = GetPrivateProfileIntA("mcm2fix", "FastFtol", 1, ini) != 0;
   g_config.simd = GetPrivateProfileIntA("mcm2fix", "Simd", 1, ini) != 0;
   g_config.simd_log = GetPrivateProfileIntA("mcm2fix", "SimdLog", 0, ini) != 0;
   g_config.pause_on_focus_loss = GetPrivateProfileIntA("mcm2fix", "PauseOnFocusLoss", 1, ini) != 0;
@@ -139,6 +140,28 @@ void LoadConfig() {
   g_config.state_cache = GetPrivateProfileIntA("mcm2fix", "StateCache", 1, ini) != 0;
   g_config.dd_stats = GetPrivateProfileIntA("mcm2fix", "DDStats", 0, ini) != 0;
   g_config.draw_batch = GetPrivateProfileIntA("mcm2fix", "DrawBatch", 1, ini) != 0;
+  g_config.still_scenery = GetPrivateProfileIntA("mcm2fix", "StillScenery", 1, ini) != 0;
+  g_config.fast_object_walk = GetPrivateProfileIntA("mcm2fix", "FastObjectWalk", 1, ini) != 0;
+  g_config.walk_log = GetPrivateProfileIntA("mcm2fix", "WalkLog", 0, ini) != 0;
+  g_config.far_trees = GetPrivateProfileIntA("mcm2fix", "FarTrees", 1, ini) != 0;
+  g_config.far_tree_cells = GetPrivateProfileIntA("mcm2fix", "FarTreeCells", 1, ini) != 0;
+  g_config.far_tree_distance = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "FarTreeDistance", 0, ini));
+  if (g_config.far_tree_distance < 0) g_config.far_tree_distance = 0;
+  g_config.far_tree_log = GetPrivateProfileIntA("mcm2fix", "FarTreeLog", 0, ini);
+  g_config.terrain_lod_fix = GetPrivateProfileIntA("mcm2fix", "TerrainLodFix", 1, ini) != 0;
+  g_config.terrain_hole_fix = GetPrivateProfileIntA("mcm2fix", "TerrainHoleFix", 1, ini) != 0;
+  g_config.terrain_log = GetPrivateProfileIntA("mcm2fix", "TerrainLog", 0, ini);
+  g_config.fast_terrain = GetPrivateProfileIntA("mcm2fix", "FastTerrain", 1, ini) != 0;
+  g_config.terrain_check = GetPrivateProfileIntA("mcm2fix", "TerrainCheck", 0, ini);
+  g_config.terrain_mesh_cache_kb = GetPrivateProfileIntA("mcm2fix", "TerrainMeshCache", 32768, ini);
+  g_config.gpu_terrain = GetPrivateProfileIntA("mcm2fix", "GpuTerrain", 0, ini) != 0;
+  g_config.gpu_terrain_detail = GetPrivateProfileIntA("mcm2fix", "GpuTerrainDetail", 1, ini) != 0;
+  g_config.gpu_terrain_detail_reach = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "GpuTerrainDetailReach", 0, ini));
+  g_config.gpu_terrain_far = GetPrivateProfileIntA("mcm2fix", "GpuTerrainFar", 1, ini);
+  g_config.gpu_terrain_log = GetPrivateProfileIntA("mcm2fix", "GpuTerrainLog", 1, ini);
+  g_config.free_cam = GetPrivateProfileIntA("mcm2fix", "FreeCam", 1, ini);
+  g_config.free_cam_speed = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "FreeCamSpeed", 60, ini));
+  g_config.free_cam_mouse = GetPrivateProfileIntA("mcm2fix", "FreeCamMouse", 15, ini);
   g_config.batch_log = GetPrivateProfileIntA("mcm2fix", "BatchLog", 0, ini) != 0;
   g_config.draw_log = GetPrivateProfileIntA("mcm2fix", "DrawLog", 0, ini) != 0;
   {
@@ -206,11 +229,18 @@ void LoadConfig() {
   g_config.fog_scale = fog >= 0.1f && fog <= 20.0f ? fog : 1.0f;
   float view = ReadFloat("ViewDistance", 1.0f, ini);
   g_config.view_distance = view >= 0.25f && view <= 10.0f ? view : 1.0f;
+  float tdet = ReadFloat("TerrainDetail", 2.0f, ini);
+  g_config.terrain_detail = tdet >= 0.25f && tdet <= 8.0f ? tdet : 2.0f;
   g_config.tree_always_near = ReadFloat("TreeDetailDistance", 1.0f, ini) == 0.0f;
   float lod = ReadFloat("ModelLod", 1.0f, ini);
   g_config.model_lod = lod >= 0.25f && lod <= 10.0f ? lod : 1.0f;
   g_config.texture_replace = GetPrivateProfileIntA("mcm2fix", "TextureReplace", 1, ini) != 0;
   g_config.texture_dump = GetPrivateProfileIntA("mcm2fix", "TextureDump", 0, ini) != 0;
+  g_config.texture_decode_thread = GetPrivateProfileIntA("mcm2fix", "TextureDecodeThread", 1, ini) != 0;
+  g_config.texture_preload = GetPrivateProfileIntA("mcm2fix", "TexturePreload", 1, ini) != 0;
+  g_config.texture_preload_mb = GetPrivateProfileIntA("mcm2fix", "TexturePreloadMB", 256, ini);
+  if (g_config.texture_preload_mb < 0) g_config.texture_preload_mb = 0;
+  if (g_config.texture_preload_mb > 1024) g_config.texture_preload_mb = 1024;
   g_config.true_color_textures = GetPrivateProfileIntA("mcm2fix", "TrueColorTextures", 1, ini) != 0;
   g_config.texture_log = GetPrivateProfileIntA("mcm2fix", "TextureLog", 0, ini) != 0;
 }
