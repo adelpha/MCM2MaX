@@ -703,7 +703,11 @@ void Device::MotionBlurReplay() {
     d.count = k.count;
     d.idx = k.indexed ? k.idx.data() : nullptr;
     d.nidx = static_cast<DWORD>(k.idx.size());
+    // The arrow: not a world draw for the reflection cube (it was recorded
+    // here, outside its object's draw, and showed in reflections).
+    submitting_object_ = true;
     SubmitDraw(d);
+    submitting_object_ = false;
     if (g_dumping) DumpEventAdd(6, tex_[0]);
   }
   std::memcpy(rs_, s.rs, sizeof(rs_));

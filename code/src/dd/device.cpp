@@ -9,15 +9,23 @@
 #include "gputext.h"
 #include "hudtext.h"
 #include "racetitle.h"
+#include "probe.h"
 #include "reflect.h"
+#include "../fartrees.h"
+#include "../gputerrain.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <set>
 #include <string>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 #include "../config.h"
+
+void WalkSceneEnd();  // fixes_walk.cpp
 #include "directdraw.h"
 #include "msaa.h"
 #include "surface.h"
@@ -52,6 +60,9 @@ cbuffer PSParams : register(b1) {
   float4 key0;    // stage 0 colour key rgb, w = active
   float4 acut;    // x: discard alpha below this (blended draws that write depth)
                   // y: alpha-to-coverage, 1 sharpened at x, 2 alpha as is
+  float4 tfar;    // GpuTerrain near/far split: x distance (0 off), y focal (pixels), zw screen centre
+  float4 tfard;   // its far diffuse colour
+  float4 tfars;   // its far specular colour
 };
 #ifdef SHADOW
 // Rider shadows on the terrain (gpushadow.cpp): each pixel's light-space
@@ -95,6 +106,8 @@ Texture2D tex1 : register(t1);
 SamplerState smp0 : register(s0);
 SamplerState smp1 : register(s1);
 SamplerState keysmp : register(s2);
+Texture2D tex2 : register(t6);  // GpuTerrain: the parent's whole texture (far away)
+SamplerState smp2 : register(s4);
 struct VSIn {
   float4 pos : POSITION;
   float4 diff : COLOR0;
@@ -109,6 +122,7 @@ struct VSOut {
   float2 t0 : TEXCOORD0;
   float2 t1 : TEXCOORD1;
   float fogw : TEXCOORD2;
+  float pw : TEXCOORD4;
 #ifdef SHADOW
   float3 ls : TEXCOORD3;
 #endif
@@ -131,6 +145,7 @@ VSOut vs_main(VSIn i) {
   p.y -= p.w / vp.w;
   o.pos = p;
   o.fogw = p.w;
+  o.pw = i.pos.w;
   o.diff = i.diff;
   o.spec = i.spec;
   o.t0 = i.t0;
@@ -140,6 +155,48 @@ VSOut vs_main(VSIn i) {
 #endif
   return o;
 }
+#ifdef TREES
+// FarTrees (fartrees.cpp): the game's far tree billboards, made here from
+// each tree's fixed numbers and the frame's camera. Same quad, texture
+// coordinates, colour and culling as the game's builder (0x45be20).
+Buffer<float4> ftrees : register(t4);
+cbuffer TreeParams : register(b3) {
+  float4 tr0;  // right x, right z, view _13, view _33
+  float4 tr1;  // view _43, key scale, key unit, far depth (minus eps)
+  float4 tr2;  // max depth, focal, min size, six_ac
+  float4 tr3;  // six on, six_84, six near, eps
+  float4 tcol;
+  float4 tspec;
+};
+VSOut vs_tree(uint id : SV_VertexID) {
+  VSOut o;
+  uint t = id / 6, c = id % 6;
+  uint corner = c < 3 ? c : (c == 3 ? 0 : c - 2);  // (0 1 2) (0 2 3)
+  float4 a = ftrees.Load(t * 3);      // x, z, bottom y, top y
+  float4 b = ftrees.Load(t * 3 + 1);  // left, right, H, -
+  float4 u = ftrees.Load(t * 3 + 2);  // u right, u left, v top, v bottom
+  float v = a.x * tr0.z + a.y * tr0.w + tr1.x;
+  float key = v * tr1.y;
+  key = key < 0 ? 0 : min(floor(key), 65535);
+  float depth = key * tr1.z;
+  bool six = tr3.x != 0 && ((tr3.y != 0 && depth < tr3.z) || (depth + tr3.w) * tr2.w < b.z);
+  bool draw = depth > tr1.w && depth < tr2.x && b.z * tr2.y / max(depth, 1e-6) > tr2.z && !six;
+  bool rside = corner == 0 || corner == 3;
+  float side = rside ? b.y : -b.x;
+  float3 pos = float3(a.x + side * tr0.x, corner < 2 ? a.z : a.w, a.y - side * tr0.y);
+  float4 p = mul(float4(pos, 1), wvp);
+  p.x += p.w / vp.z;
+  p.y -= p.w / vp.w;
+  o.pos = draw ? p : float4(0, 0, -2, 1);
+  o.fogw = p.w;
+  o.pw = 0;
+  o.diff = tcol;
+  o.spec = tspec;
+  o.t0 = float2(rside ? u.x : u.y, corner < 2 ? u.w : u.z);
+  o.t1 = o.t0;
+  return o;
+}
+#endif
 float4 Arg(int a, float4 diff, float4 spec, float4 cur, float4 texc) {
   int sel = a & 15;
   float4 v = cur;
@@ -182,8 +239,30 @@ float4 ps_main(VSOut i) : SV_Target {
   float4 white = float4(1, 1, 1, 1);
   float4 tc0 = tex0.Sample(smp0, i.t0);
   float4 tc1 = tex1.Sample(smp1, i.t1);
+  // GpuTerrain's detail texture fades out between acut.z and acut.w (depth).
+  if (acut.w > 0) tc1.a *= saturate((acut.w - i.fogw) / max(acut.w - acut.z, 0.001));
   if (scol[0].w == 0) tc0 = white;
   if (scol[1].w == 0) tc1 = white;
+  // GpuTerrain: beyond the game's near/far distance (distance from the eye,
+  // from depth and the pixel's offset from the screen centre), as its far
+  // blocks: no detail, far diffuse and specular colours.
+  bool tfar_on = false;
+  if (tfar.x > 0) {
+    float2 off = (i.pos.xy - tfar.zw) / tfar.y;
+    float dist = i.fogw * sqrt(1 + dot(off, off));
+    // Sampled outside the varying branches below (gradients).
+    float k = max(round(i.pw) - 1, 0);
+    float2 place = float2(fmod(k, 16), floor(k / 16));
+    float4 tcw = tex2.Sample(smp2, (i.t1 * 12 / 256 + place / 16) * 0.9375 + 0.03125);
+    if (dist > tfar.x) {
+      tfar_on = true;
+      tc1.a = 0;
+      i.diff = tfard;
+      // Further still, level 0 blocks on their parent's whole texture
+      // (1/256 of it per cell; cell index from the detail uv, 1/12 per cell).
+      if (tfars.w > 0 && dist > tfars.w && i.pw > 0.5) tc0 = tcw;
+    }
+  }
   float4 cur = i.diff;
   if (scol[0].x != 1) {
     cur = Stage(0, i, cur, tc0);
@@ -200,6 +279,7 @@ float4 ps_main(VSOut i) : SV_Target {
   cur.rgb *= 1 - ShadowCover(i.ls) * sinfo.y;
 #endif
   if (atest.z != 0) cur.rgb = saturate(cur.rgb + i.spec.rgb);
+  if (tfar_on) cur.rgb = saturate(cur.rgb + tfars.rgb);
   if (fog.w != 0) {
     float d = i.fogw;
     float f = 1;
@@ -252,6 +332,9 @@ struct PSConstants {
   float atest[4];
   float key0[4];
   float cut[4];
+  float tfar[4];
+  float tfard[4];
+  float tfars[4];
 };
 
 // What the Device last bound on the D3D11 context (ini StateCache=1), so
@@ -328,6 +411,8 @@ struct Pipeline {
   ID3D11VertexShader* vs_shadow[2] = {};
   ID3D11PixelShader* ps_shadow[2] = {};
   bool shadow_ok = false;
+  // FarTrees, [flat].
+  ID3D11VertexShader* vs_tree[2] = {};
   ID3D11InputLayout* layout = nullptr;
   ID3D11VertexShader* clear_vs = nullptr;
   ID3D11PixelShader* clear_ps = nullptr;
@@ -381,6 +466,13 @@ bool InitPipeline() {
     if (!g_pipe.vs_shadow[flat] || !g_pipe.ps_shadow[flat]) g_pipe.shadow_ok = false;
   }
   Log("rider shadows: terrain shader variant %s", g_pipe.shadow_ok ? "ready" : "FAILED (no GPU shadows)");
+  for (int flat = 0; flat < 2; ++flat) {
+    std::string src = std::string("#define TREES\n") + (flat ? "#define FLAT\n" : "") + kShader;
+    ID3DBlob* vs = Compile(src.c_str(), "vs_tree", "vs_4_0");
+    if (vs) b.device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &g_pipe.vs_tree[flat]);
+    SafeRelease(vs);
+  }
+  Log("far trees: shader %s", g_pipe.vs_tree[0] && g_pipe.vs_tree[1] ? "ready" : "FAILED (FarTrees off)");
   ID3DBlob* cvs = Compile(kClearShader, "vs_main", "vs_4_0");
   ID3DBlob* cps = Compile(kClearShader, "ps_main", "ps_4_0");
   if (!cvs || !cps) {
@@ -666,7 +758,8 @@ HRESULT VertexBuffer::ProcessVerticesStrided(DWORD, DWORD, DWORD, D3DDRAWPRIMITI
 // --------------------------------------------------------------------- Device
 
 namespace {
-Device* g_batch_owner = nullptr;  // the device with merged draws waiting (DrawBatch)
+Device* g_batch_owner = nullptr;
+Device* g_tree_device = nullptr;  // FarTrees: the device of the latest scene  // the device with merged draws waiting (DrawBatch)
 }  // namespace
 
 // ------------------------------------------------------------ draw batching
@@ -948,6 +1041,12 @@ Device::~Device() {
   SafeRelease(ibuf_);
   SafeRelease(vs_cb_);
   SafeRelease(ps_cb_);
+  SafeRelease(tree_srv_);
+  SafeRelease(tree_buf_);
+  SafeRelease(tree_cb_);
+  SafeRelease(terr_vb_);
+  SafeRelease(terr_ib_);
+  if (g_tree_device == this) g_tree_device = nullptr;
   if (g_bound.owner == this) g_bound = Bound{};
   dd_->Release();
 }
@@ -1068,11 +1167,17 @@ HRESULT Device::EnumTextureFormats(LPD3DENUMPIXELFORMATSCALLBACK cb, void* ctx) 
 
 HRESULT Device::BeginScene() {
   FlushBatch(kBreakScene);
+  g_tree_device = this;
   return D3D_OK;
 }
 HRESULT Device::EndScene() {
   FlushBatch(kBreakScene);
-  if (ReflectMode() && !IsD3D9()) ReflectEndScene(g_pipe.layout, sizeof(GpuVertex));
+  ProbeEndScene();
+  WalkSceneEnd();  // FastObjectWalk: the scene's object list is done
+  if (ReflectMode() && !IsD3D9()) {
+    PROF_ZONE(kReflect);
+    ReflectEndScene(g_pipe.layout, sizeof(GpuVertex));
+  }
   if (MotionBlurOn()) MotionBlurReplay();  // the arrow, if no HUD draw came after the scene
   RaceTitleDraw(rt_);  // countdown race title, under the HUD panels' text
   HudTextFlush();  // race HUD text goes over everything the scene drew
@@ -1360,6 +1465,11 @@ HRESULT Device::DrawPrimitive(DWORD prim, DWORD fvf, void* v, DWORD n, DWORD) {
   d.layout = FvfLayout::From(fvf);
   d.count = n;
   d.game_verts = d.verts;
+  if (ProbeStage())
+    ProbeDraw(0, prim, fvf, d.layout.tl, static_cast<const uint8_t*>(v), d.layout.stride, n, nullptr, 0,
+              &world_.m[0][0], &view_.m[0][0], &proj_.m[0][0], Wvp(), static_cast<float>(viewport_.dwX),
+              static_cast<float>(viewport_.dwY), static_cast<float>(viewport_.dwWidth),
+              static_cast<float>(viewport_.dwHeight), rs_[RS_ZENABLE] != 0);
   SmoothNoteDraw("draw", d.layout.tl, n);
   if (!d.layout.tl) {
     PROF_ZONE(kSmoothVerts);
@@ -1369,10 +1479,36 @@ HRESULT Device::DrawPrimitive(DWORD prim, DWORD fvf, void* v, DWORD n, DWORD) {
   return D3D_OK;
 }
 
+namespace {
+// The game's draw call this came from, when it came through the game's D3D
+// wrapper (0x4ca270, which returns to us at 0x4ca2ed): that wrapper pushes
+// four registers and passes on its seven arguments, so its own return address
+// is 0x34 bytes above ours. `ret` is where our return address is.
+uint32_t GameDrawSite(void* const* ret) {
+  if (reinterpret_cast<uintptr_t>(ret[0]) != 0x4CA2ED) return 0;
+  return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ret[0x34 / 4]));
+}
+// StillScenery: terrain patches (0x481c00: detail layer, ground; 0x481f20),
+// and close-up trees (0x457dc0): positions placed in the world once.
+bool IsSceneryDraw(uint32_t site) {
+  return site == 0x481D1E || site == 0x481DFE || site == 0x4820AF || site == 0x457E14;
+}
+}  // namespace
+
 HRESULT Device::DrawIndexedPrimitive(DWORD prim, DWORD fvf, void* v, DWORD nv, WORD* idx,
                                      DWORD ni, DWORD) {
+#ifdef _MSC_VER
+  void* const* ret_slot = static_cast<void* const*>(_AddressOfReturnAddress());
+#else
+  void* const* ret_slot = static_cast<void* const*>(__builtin_frame_address(0)) + 1;
+#endif
   DD_LOCK;
   if (!v || !nv || !idx || !ni) return D3D_OK;
+  const uint32_t site = GameDrawSite(ret_slot);
+  const bool scenery = GetConfig().still_scenery && IsSceneryDraw(site);
+  // FarTrees: the game's own tree billboards (FarTreeLog compares them with
+  // the numbers far trees are drawn from).
+  if (site == 0x45CB34 && fvf == 0x1E2) FarTreesCheckDraw(v, nv, idx, ni);
   Draw d;
   d.prim = prim;
   d.verts = static_cast<const uint8_t*>(v);
@@ -1381,10 +1517,16 @@ HRESULT Device::DrawIndexedPrimitive(DWORD prim, DWORD fvf, void* v, DWORD nv, W
   d.idx = idx;
   d.nidx = ni;
   d.game_verts = d.verts;
+  if (ProbeStage())
+    ProbeDraw(site, prim, fvf, d.layout.tl, static_cast<const uint8_t*>(v), d.layout.stride, nv, idx, ni,
+              &world_.m[0][0], &view_.m[0][0], &proj_.m[0][0], Wvp(), static_cast<float>(viewport_.dwX),
+              static_cast<float>(viewport_.dwY), static_cast<float>(viewport_.dwWidth),
+              static_cast<float>(viewport_.dwHeight), rs_[RS_ZENABLE] != 0);
   SmoothNoteDraw("drawidx", d.layout.tl, d.count);
   if (!d.layout.tl) {
     PROF_ZONE(kSmoothVerts);
-    d.verts = SmoothVertices(d.verts, d.layout.stride, nv, idx);
+    if (scenery) SmoothNoteScenery(d.verts, d.layout.stride, nv);
+    else d.verts = SmoothVertices(d.verts, d.layout.stride, nv, idx);
   }
   Submit(d);
   return D3D_OK;
@@ -1949,6 +2091,11 @@ void Device::ApplyState(bool tl, bool depth_clip, bool has_depth, bool shadow) {
       if (seen.insert(key).second) Log("alpha draw: %s", key);
     }
   }
+  pc.cut[2] = detail_fade_[0];
+  pc.cut[3] = detail_fade_[1];
+  std::memcpy(pc.tfar, terr_far_, sizeof(pc.tfar));
+  std::memcpy(pc.tfard, terr_fard_, sizeof(pc.tfard));
+  std::memcpy(pc.tfars, terr_fars_, sizeof(pc.tfars));
   if (!bd.pc_ok || std::memcmp(&bd.pc, &pc, sizeof(pc)) != 0) {
     b.ctx->UpdateSubresource(ps_cb_, 0, nullptr, &pc, 0, 0);
     bd.pc = pc;
@@ -2106,6 +2253,7 @@ void Device::Submit(const Draw& d) {
     prof::Count(prof::cIndices, d.nidx);
   }
   if (DrawLogOn()) NoteDrawLog(d);
+  if (terr_probe_left_ > 0 && !d.layout.tl) LogTerrainProbe(d);
   if (!d.layout.tl) {
     if (MotionBlurOn() && MotionBlurNote(d, false)) return;
     // Reflections: bike and rider draws go unbatched, reflective ones with
@@ -2339,7 +2487,9 @@ void Device::SubmitDraw(const Draw& d) {
   // Reflections=2: keep world draws (not bikes, riders or the sky) to draw
   // again into the reflection cube.
   if (mode == 0 && has_depth && !submitting_object_ && !ReflectCurrentObject() && ReflectRecording() &&
+      ReflectFrameDue() &&
       !(tex_[0] && IsSkyTextureName(tex_[0]->TextureName()))) {
+    prep_zone.Switch(prof::kReflectCache);
     ReflectReplay r{};
     r.blend = bd.blend;
     r.depth = bd.depth;
@@ -2366,6 +2516,28 @@ void Device::SubmitDraw(const Draw& d) {
     r.base_vertex = base_vertex;
     r.vgen = vgen_;
     r.igen = igen_;
+    // ReflectMaxRange: far scenery (long view distances) is left out of the
+    // cube; its bounds come from a sample of the positions.
+    bool in_range = true;
+    if (d.verts && d.layout.stride) {
+      if (flushing_) {
+        range_starts_.clear();
+        range_counts_.clear();
+        for (const ReflectSub& sb : batch_out_.subs) {
+          range_starts_.push_back(sb.vstart);
+          range_counts_.push_back(sb.nverts);
+        }
+        in_range = ReflectInRange(r, batch_out_.verts.data(), d.layout.stride, range_starts_.data(),
+                                  range_counts_.data(), range_starts_.size());
+      } else {
+        const unsigned start = 0, count = d.count;
+        in_range = ReflectInRange(r, d.verts + static_cast<size_t>(d.first) * d.layout.stride, d.layout.stride,
+                                  &start, &count, 1);
+      }
+    } else {
+      r.bounded = false;
+    }
+    if (!in_range) return;
     ReflectRecord(r);
     // Kept for later frames (behind the camera), when the draw writes depth.
     if (rs_[RS_ZWRITEENABLE] && d.verts && d.layout.stride) {
@@ -2381,4 +2553,541 @@ void Device::SubmitDraw(const Draw& d) {
   }
 }
 
+// ---- FarTrees (fartrees.cpp)
+
+namespace {
+struct TreeConstants {
+  float tr0[4], tr1[4], tr2[4], tr3[4], tcol[4], tspec[4];
+};
+}  // namespace
+
+bool FarTreesDrawable() {
+  if (!g_tree_device || IsD3D9()) return false;
+  return InitPipeline() && g_pipe.vs_tree[0] && g_pipe.vs_tree[1];
+}
+
+bool DrawFarTrees(const FarTreeFrame& f) {
+  if (!g_tree_device) return false;
+  return g_tree_device->DrawFarTrees(f);
+}
+
+bool Device::DrawFarTrees(const FarTreeFrame& f) {
+  if (IsD3D9() || !InitPipeline() || !g_pipe.vs_tree[0] || !g_pipe.vs_tree[1]) return false;
+  if (!f.count || !f.trees) return true;
+  FlushBatch(kBreakScreen);
+  Backend& b = B();
+  // The trees' numbers: a buffer that grows; only new trees are sent.
+  if (f.count > tree_cap_) {
+    {
+      size_t cap = tree_cap_ ? tree_cap_ : 4096;
+      while (cap < f.count) cap *= 2;
+      SafeRelease(tree_srv_);
+      SafeRelease(tree_buf_);
+      D3D11_BUFFER_DESC bd{};
+      bd.Usage = D3D11_USAGE_DEFAULT;
+      bd.ByteWidth = static_cast<UINT>(cap * 48);
+      bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+      if (FAILED(b.device->CreateBuffer(&bd, nullptr, &tree_buf_))) {
+        LogOnce("far trees: buffer of %zu trees failed", cap);
+        tree_cap_ = 0;
+        return false;
+      }
+      D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+      sd.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+      sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+      sd.Buffer.FirstElement = 0;
+      sd.Buffer.NumElements = static_cast<UINT>(cap * 3);
+      if (FAILED(b.device->CreateShaderResourceView(tree_buf_, &sd, &tree_srv_))) {
+        SafeRelease(tree_buf_);
+        tree_cap_ = 0;
+        return false;
+      }
+      tree_cap_ = cap;
+    }
+    tree_sent_ = 0;
+  }
+  if (f.dirty_from < tree_sent_) tree_sent_ = f.dirty_from;
+  if (tree_sent_ < f.count) {
+    D3D11_BOX box{static_cast<UINT>(tree_sent_ * 48), 0, 0, static_cast<UINT>(f.count * 48), 1, 1};
+    b.ctx->UpdateSubresource(tree_buf_, 0, &box, f.trees + tree_sent_ * 12, 0, 0);
+    tree_sent_ = f.count;
+  }
+  if (!tree_cb_) {
+    D3D11_BUFFER_DESC cb{};
+    cb.Usage = D3D11_USAGE_DEFAULT;
+    cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cb.ByteWidth = sizeof(TreeConstants);
+    if (FAILED(b.device->CreateBuffer(&cb, nullptr, &tree_cb_))) return false;
+  }
+  bool has_depth = false;
+  if (!BindTarget(has_depth)) return false;
+  TreeConstants tc{};
+  tc.tr0[0] = f.right[0];
+  tc.tr0[1] = f.right[1];
+  tc.tr0[2] = f.view[0];
+  tc.tr0[3] = f.view[1];
+  tc.tr1[0] = f.view[2];
+  tc.tr1[1] = f.key_scale;
+  tc.tr1[2] = f.key_unit;
+  tc.tr1[3] = f.far_depth - f.eps;
+  tc.tr2[0] = f.max_depth;
+  tc.tr2[1] = f.focal;
+  tc.tr2[2] = f.min_size;
+  tc.tr2[3] = f.six_ac;
+  tc.tr3[0] = f.six_a8 ? 1.0f : 0.0f;
+  tc.tr3[1] = f.six_84 ? 1.0f : 0.0f;
+  tc.tr3[2] = f.six_near;
+  tc.tr3[3] = f.eps;
+  ColorToFloat(f.diffuse, tc.tcol);
+  ColorToFloat(f.specular, tc.tspec);
+  b.ctx->UpdateSubresource(tree_cb_, 0, nullptr, &tc, 0, 0);
+
+  VSConstants vc{};
+  std::memcpy(vc.wvp, Wvp(), sizeof(vc.wvp));
+  vc.vp[0] = static_cast<float>(viewport_.dwX);
+  vc.vp[1] = static_cast<float>(viewport_.dwY);
+  vc.vp[2] = static_cast<float>(viewport_.dwWidth ? viewport_.dwWidth : 1);
+  vc.vp[3] = static_cast<float>(viewport_.dwHeight ? viewport_.dwHeight : 1);
+  vc.mode[0] = 0;
+  Bound& bd = Cache(this);
+  if (!bd.vc_ok || std::memcmp(&bd.vc, &vc, sizeof(vc)) != 0) {
+    b.ctx->UpdateSubresource(vs_cb_, 0, nullptr, &vc, 0, 0);
+    bd.vc = vc;
+    bd.vc_ok = true;
+  }
+  D3D11_VIEWPORT v{vc.vp[0], vc.vp[1], vc.vp[2], vc.vp[3], viewport_.dvMinZ, viewport_.dvMaxZ};
+  if (!bd.vp_ok || std::memcmp(&bd.vp, &v, sizeof(v)) != 0) {
+    b.ctx->RSSetViewports(1, &v);
+    bd.vp = v;
+    bd.vp_ok = true;
+  }
+  ApplyState(false, true, has_depth, false);
+  ID3D11VertexShader* vs = g_pipe.vs_tree[rs_[RS_SHADEMODE] == 1 ? 1 : 0];
+  if (bd.vs != vs) b.ctx->VSSetShader(bd.vs = vs, nullptr, 0);
+  b.ctx->VSSetShaderResources(4, 1, &tree_srv_);
+  b.ctx->VSSetConstantBuffers(3, 1, &tree_cb_);
+  if (bd.topo != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+    b.ctx->IASetPrimitiveTopology(bd.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  b.ctx->Draw(static_cast<UINT>(f.count * 6), 0);
+  ID3D11ShaderResourceView* none = nullptr;
+  b.ctx->VSSetShaderResources(4, 1, &none);
+  if (cur_msaa_) MsaaMarkDrawn();
+  if (has_depth) Note3DDraw();
+  rt_->MarkGpuWritten();
+  ++Counters().draws;
+  return true;
+}
+
+// ---- GpuTerrain (gputerrain.cpp)
+
+bool GpuTerrainDrawable() { return g_tree_device && !IsD3D9(); }
+
+bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
+  if (!g_tree_device) return false;
+  return g_tree_device->DrawGpuTerrain(m, st);
+}
+
+void* GpuTerrainCurrentTexture() {
+  if (!g_tree_device) return nullptr;
+  Surface* t = g_tree_device->Texture0();
+  if (t) t->AddRef();
+  return t;
+}
+
+void GpuTerrainReleaseTexture(void* t) {
+  if (t) static_cast<Surface*>(t)->Release();
+}
+
+void GpuTerrainAddRefTexture(void* t) {
+  if (t) static_cast<Surface*>(t)->AddRef();
+}
+
+void GpuTerrainCaptureState(int site, bool log) {
+  if (g_tree_device) g_tree_device->CaptureTerrainState(site, log);
+}
+
+void GpuTerrainDescribeTexture(void* t, char* out, size_t n) {
+  if (!t) {
+    std::snprintf(out, n, "no texture");
+    return;
+  }
+  Surface* s = static_cast<Surface*>(t);
+  std::snprintf(out, n, "%ux%u \"%s\"", s->Width(), s->Height(), s->TextureName().c_str());
+}
+
+namespace {
+const DWORD kSampKeys[5] = {TSS_MINFILTER, TSS_MAGFILTER, TSS_MIPFILTER, TSS_MIPMAPLODBIAS, TSS_MAXMIPLEVEL};
+std::string DescribeStage(const DWORD* t, Surface* tex) {
+  char b[400];
+  std::snprintf(b, sizeof(b),
+                "tex %s %ux%u mips %u | colorop %lu (%lu,%lu) alphaop %lu (%lu,%lu) uv %lu | min %lu mag %lu mip %lu "
+                "bias %.2f maxlevel %lu aniso %lu addr %lu/%lu",
+                tex ? ("\"" + tex->TextureName() + "\"").c_str() : "none", tex ? tex->Width() : 0,
+                tex ? tex->Height() : 0, tex ? tex->MipLevels() : 0, t[TSS_COLOROP], t[TSS_COLORARG1],
+                t[TSS_COLORARG2], t[TSS_ALPHAOP], t[TSS_ALPHAARG1], t[TSS_ALPHAARG2], t[TSS_TEXCOORDINDEX],
+                t[TSS_MINFILTER], t[TSS_MAGFILTER], t[TSS_MIPFILTER], AsFloat(t[TSS_MIPMAPLODBIAS]), t[TSS_MAXMIPLEVEL],
+                t[TSS_MAXANISOTROPY], t[TSS_ADDRESSU], t[TSS_ADDRESSV]);
+  return b;
+}
+const char* kSiteName[3] = {"base pass", "one-pass (base + detail)", "detail pass"};
+}  // namespace
+
+void Device::CaptureTerrainState(int site, bool log) {
+  // Which stage holds what at this site.
+  const int base_stage = site == 2 ? -1 : 0;
+  const int detail_stage = site == 1 ? 1 : site == 2 ? 0 : -1;
+  if (base_stage >= 0) {
+    for (int k = 0; k < 5; ++k) terr_samp_[0][k] = tss_[base_stage][kSampKeys[k]];
+    terr_samp_ok_[0] = true;
+  }
+  if (detail_stage >= 0) {
+    for (int k = 0; k < 5; ++k) terr_samp_[1][k] = tss_[detail_stage][kSampKeys[k]];
+    terr_samp_ok_[1] = true;
+  }
+  if (!log) return;
+  Log("gpu terrain: game's %s state: stage0 %s", kSiteName[site], DescribeStage(tss_[0], tex_[0]).c_str());
+  Log("gpu terrain: game's %s state: stage1 %s", kSiteName[site], DescribeStage(tss_[1], tex_[1]).c_str());
+  Log("gpu terrain: game's %s state: blend %lu src %lu dst %lu specular %lu fog %lu zfunc %lu zwrite %lu "
+             "tfactor %08lx; Anisotropy %d MipBias %.2f",
+             kSiteName[site], rs_[RS_ALPHABLENDENABLE], rs_[RS_SRCBLEND], rs_[RS_DESTBLEND], rs_[RS_SPECULARENABLE],
+             rs_[RS_FOGENABLE], rs_[RS_ZFUNC], rs_[RS_ZWRITEENABLE], rs_[RS_TEXTUREFACTOR], GetConfig().anisotropy,
+             GetConfig().mip_bias);
+  terr_probe_site_ = site;
+  terr_probe_left_ = 4;
+}
+
+void Device::LogTerrainProbe(const Draw& d) {
+  --terr_probe_left_;
+  uint32_t dif = 0, spec = 0;
+  float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+  const uint8_t* v = d.verts ? d.verts + static_cast<size_t>(d.first) * d.layout.stride : nullptr;
+  if (v && d.layout.diffuse >= 0) std::memcpy(&dif, v + d.layout.diffuse, 4);
+  if (v && d.layout.specular >= 0) std::memcpy(&spec, v + d.layout.specular, 4);
+  if (v && d.layout.ntex > 0) std::memcpy(&u0, v + d.layout.tex[0], 4), std::memcpy(&v0, v + d.layout.tex[0] + 4, 4);
+  if (v && d.layout.ntex > 1) std::memcpy(&u1, v + d.layout.tex[1], 4), std::memcpy(&v1, v + d.layout.tex[1] + 4, 4);
+  Log("gpu terrain: game's %s draw: stride %u, %lu verts, first vertex diffuse %08x specular %08x uv0 (%.3f %.3f) "
+             "uv1 (%.3f %.3f); stage0 %s; stage1 colorop %lu tex %s (mip %lu)",
+             kSiteName[terr_probe_site_], d.layout.stride, d.count, dif, spec, u0, v0, u1, v1,
+             DescribeStage(tss_[0], tex_[0]).c_str(), tss_[1][TSS_COLOROP],
+             tex_[1] ? tex_[1]->TextureName().c_str() : "none", tss_[1][TSS_MIPFILTER]);
+}
+
+namespace {
+// Outside the view: all 8 corners beyond one clip plane (row vectors, D3D
+// clip space 0 <= z <= w).
+bool BoxOutside(const float* lo, const float* hi, const float* M) {
+  float c[8][4];
+  for (int i = 0; i < 8; ++i) {
+    const float x = (i & 1) ? hi[0] : lo[0], y = (i & 2) ? hi[1] : lo[1], z = (i & 4) ? hi[2] : lo[2];
+    for (int k = 0; k < 4; ++k) c[i][k] = x * M[k] + y * M[4 + k] + z * M[8 + k] + M[12 + k];
+  }
+  int out[6] = {};
+  for (int i = 0; i < 8; ++i) {
+    const float w = c[i][3];
+    out[0] += c[i][0] < -w;
+    out[1] += c[i][0] > w;
+    out[2] += c[i][1] < -w;
+    out[3] += c[i][1] > w;
+    out[4] += c[i][2] < 0;
+    out[5] += c[i][2] > w;
+  }
+  for (int p = 0; p < 6; ++p)
+    if (out[p] == 8) return true;
+  return false;
+}
+}  // namespace
+
+bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
+  if (IsD3D9() || !InitPipeline()) return false;
+  if (m.verts.empty() || m.idx.empty()) return false;
+  Backend& b = B();
+  if (terr_gen_ != m.generation || !terr_vb_ || !terr_ib_) {
+    LARGE_INTEGER t0, t1, fq;
+    QueryPerformanceCounter(&t0);
+    SafeRelease(terr_vb_);
+    SafeRelease(terr_ib_);
+    D3D11_BUFFER_DESC vd{};
+    vd.Usage = D3D11_USAGE_IMMUTABLE;
+    vd.ByteWidth = static_cast<UINT>(m.verts.size() * sizeof(gt::Vertex));
+    vd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA vi{m.verts.data(), 0, 0};
+    D3D11_BUFFER_DESC id{};
+    id.Usage = D3D11_USAGE_IMMUTABLE;
+    id.ByteWidth = static_cast<UINT>(((m.idx.size() * 2) + 3) & ~size_t(3));
+    id.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    std::vector<uint16_t> padded;
+    const void* idata = m.idx.data();
+    if (id.ByteWidth != m.idx.size() * 2) {
+      padded = m.idx;
+      padded.push_back(0);
+      idata = padded.data();
+    }
+    D3D11_SUBRESOURCE_DATA ii{idata, 0, 0};
+    HRESULT hv = b.device->CreateBuffer(&vd, &vi, &terr_vb_);
+    HRESULT hi = SUCCEEDED(hv) ? b.device->CreateBuffer(&id, &ii, &terr_ib_) : hv;
+    if (FAILED(hv) || FAILED(hi)) {
+      LogOnce("gpu terrain: buffers of %u + %u bytes failed (%08lx)", vd.ByteWidth, id.ByteWidth,
+              static_cast<unsigned long>(FAILED(hv) ? hv : hi));
+      SafeRelease(terr_vb_);
+      SafeRelease(terr_ib_);
+      return false;
+    }
+    terr_gen_ = m.generation;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&fq);
+    if (st) {
+      st->uploaded = true;
+      st->upload_ms = 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(fq.QuadPart);
+    }
+  }
+  FlushBatch(kBreakScreen);
+  // Rider shadows: drawn into their atlas first if the game's pre-draw did
+  // not (it renders to its own target, so before ours is bound).
+  const bool shadow_frame = g_pipe.shadow_ok && ShadowEnsureFrame();
+  bool has_depth = false;
+  if (!BindTarget(has_depth)) return false;
+
+  // World space: view * projection only.
+  float vpm[16];
+  MatMul(&view_.m[0][0], &proj_.m[0][0], vpm);
+
+  // The game's state for this draw, put back afterwards.
+  const DWORD rs_keys[] = {RS_ZENABLE, RS_ZWRITEENABLE, RS_ALPHABLENDENABLE, RS_ALPHATESTENABLE, RS_CULLMODE,
+                           RS_SHADEMODE, RS_ZFUNC};
+  const DWORD rs_vals[] = {1, 1, 0, 0, 1 /* none */, 2 /* gouraud */, 4 /* less-equal */};
+  constexpr int kRs = 7;
+  static int logged = 0;
+  if (logged < 3) {
+    // Camera and state at the first draws, for the log.
+    ++logged;
+    const float a = proj_.m[2][2], c = proj_.m[3][2];
+    const float zn = (a != 0) ? -c / a : 0, zf = (a != 1) ? c / (1 - a) : 0;
+    Log("gpu terrain draw %d: proj near %.2f far %.1f (m22 %.5f m32 %.3f m23 %.2f); view row3 %.1f %.1f %.1f; "
+        "viewport %lu,%lu %lux%lu z %.2f-%.2f; zenable %lu zwrite %lu zfunc %lu fog %lu (%lu/%lu) colour %08lx; "
+        "depth target %d",
+        logged, zn, zf, a, c, proj_.m[2][3], view_.m[3][0], view_.m[3][1], view_.m[3][2], viewport_.dwX,
+        viewport_.dwY, viewport_.dwWidth, viewport_.dwHeight, viewport_.dvMinZ, viewport_.dvMaxZ, rs_[RS_ZENABLE],
+        rs_[RS_ZWRITEENABLE], rs_[RS_ZFUNC], rs_[RS_FOGENABLE], rs_[RS_FOGTABLEMODE], rs_[RS_FOGVERTEXMODE],
+        rs_[RS_FOGCOLOR], has_depth ? 1 : 0);
+  }
+  DWORD rs_save[kRs];
+  for (int i = 0; i < kRs; ++i) rs_save[i] = rs_[rs_keys[i]], rs_[rs_keys[i]] = rs_vals[i];
+  Surface* tex_save[2] = {tex_[0], tex_[1]};
+  DWORD tss_save[2][32];
+  std::memcpy(tss_save, tss_, sizeof(tss_save));
+  tex_[0] = tex_[1] = nullptr;
+  tss_[0][TSS_COLORARG1] = 2;  // texture
+  tss_[0][TSS_COLORARG2] = 0;  // diffuse
+  tss_[0][TSS_ALPHAOP] = 3;    // select arg 2: diffuse
+  tss_[0][TSS_ALPHAARG2] = 0;
+  tss_[0][TSS_TEXCOORDINDEX] = 0;
+  tss_[0][TSS_ADDRESS] = tss_[0][TSS_ADDRESSU] = tss_[0][TSS_ADDRESSV] = 1;  // wrap
+  tss_[0][TSS_MAGFILTER] = 2;  // linear
+  tss_[0][TSS_MINFILTER] = 2;
+  tss_[0][TSS_MIPFILTER] = 3;  // linear between mip levels
+  tss_[0][TSS_MIPMAPLODBIAS] = 0;
+  tss_[0][TSS_MAXMIPLEVEL] = 0;
+  tss_[1][TSS_COLOROP] = 1;    // disable
+  tss_[1][TSS_ALPHAOP] = 1;
+  // The detail texture (as the game's one-pass mode, 0x50be69): stage 1 on
+  // the second uv, its colour blended in by its own alpha.
+  Surface* detail = static_cast<Surface*>(m.detail);
+  tss_[1][TSS_COLORARG1] = 2;  // texture
+  tss_[1][TSS_COLORARG2] = 1;  // current
+  tss_[1][TSS_ALPHAARG2] = 1;
+  tss_[1][TSS_TEXCOORDINDEX] = 1;
+  tss_[1][TSS_ADDRESS] = tss_[1][TSS_ADDRESSU] = tss_[1][TSS_ADDRESSV] = 1;
+  tss_[1][TSS_MAGFILTER] = 2;
+  tss_[1][TSS_MINFILTER] = 2;
+  tss_[1][TSS_MIPFILTER] = 3;
+  tss_[1][TSS_MIPMAPLODBIAS] = 0;
+  tss_[1][TSS_MAXMIPLEVEL] = 0;
+  // Sample them as the game set its own terrain passes up (captured where
+  // it would have drawn them, GpuTerrainCaptureState).
+  for (int st = 0; st < 2; ++st)
+    if (terr_samp_ok_[st])
+      for (int k = 0; k < 5; ++k) tss_[st][kSampKeys[k]] = terr_samp_[st][k];
+
+  VSConstants vc{};
+  std::memcpy(vc.wvp, vpm, sizeof(vc.wvp));
+  vc.vp[0] = static_cast<float>(viewport_.dwX);
+  vc.vp[1] = static_cast<float>(viewport_.dwY);
+  vc.vp[2] = static_cast<float>(viewport_.dwWidth ? viewport_.dwWidth : 1);
+  vc.vp[3] = static_cast<float>(viewport_.dwHeight ? viewport_.dwHeight : 1);
+  vc.mode[0] = 0;
+  Bound& bd = Cache(this);
+  if (!bd.vc_ok || std::memcmp(&bd.vc, &vc, sizeof(vc)) != 0) {
+    b.ctx->UpdateSubresource(vs_cb_, 0, nullptr, &vc, 0, 0);
+    bd.vc = vc;
+    bd.vc_ok = true;
+  }
+  D3D11_VIEWPORT v{vc.vp[0], vc.vp[1], vc.vp[2], vc.vp[3], viewport_.dvMinZ, viewport_.dvMaxZ};
+  if (!bd.vp_ok || std::memcmp(&bd.vp, &v, sizeof(v)) != 0) {
+    b.ctx->RSSetViewports(1, &v);
+    bd.vp = v;
+    bd.vp_ok = true;
+  }
+  detail_fade_[0] = m.detail_fade[0];
+  detail_fade_[1] = m.detail_fade[1];
+  if (m.far_dist > 0 && m.focal > 0) {
+    terr_far_[0] = m.far_dist;
+    terr_far_[1] = m.focal;
+    terr_far_[2] = vc.vp[0] + vc.vp[2] * 0.5f;
+    terr_far_[3] = vc.vp[1] + vc.vp[3] * 0.5f;
+    ColorToFloat(m.far_diffuse, terr_fard_);
+    ColorToFloat(m.far_specular, terr_fars_);
+    terr_fars_[3] = m.far_dist2;
+  }
+  // Visible chunks' ranges, sorted by texture so each is bound once.
+  std::vector<const gt::Range*>& todo = terr_todo_;
+  std::vector<int32_t>& todo_base = terr_todo_base_;
+  todo.clear();
+  todo_base.clear();
+  unsigned drawn = 0, tris = 0, draws = 0;
+  for (const gt::Chunk& c : m.chunks) {
+    if (BoxOutside(c.lo, c.hi, vpm)) continue;
+    ++drawn;
+    tris += c.index_count / 3;
+    for (uint32_t r = 0; r < c.range_count; ++r) {
+      todo.push_back(&m.ranges[c.first_range + r]);
+      todo_base.push_back(c.base_vertex);
+    }
+  }
+  std::vector<uint32_t>& order = terr_order_;
+  order.resize(todo.size());
+  for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::sort(order.begin(), order.end(),
+            [&](uint32_t a, uint32_t c) {
+              return todo[a]->material != todo[c]->material ? todo[a]->material < todo[c]->material
+                                                             : todo[a]->far_material < todo[c]->far_material;
+            });
+  {
+    ID3D11SamplerState* s0 = GetSampler(0);  // the base texture's (the game's settings)
+    b.ctx->PSSetSamplers(4, 1, &s0);
+  }
+  // Rider shadows (gpushadow.cpp): the mesh is in world space, so the
+  // light-space matrix is the light's alone.
+  static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  const bool shadow = has_depth && shadow_frame && ShadowBindReceiver(kIdentity, false, 0, 0);
+  if (st) st->shadowed = shadow;
+  // One texture pair's state (base + far texture, detail on stage 1).
+  auto bind_range = [&](const gt::Range& r, bool shadowed) {
+    Surface* t = (r.material >= 0 && static_cast<size_t>(r.material) < m.textures.size())
+                     ? static_cast<Surface*>(m.textures[r.material])
+                     : nullptr;
+    tex_[0] = t;
+    tss_[0][TSS_COLOROP] = t ? 4 : 3;  // modulate texture by diffuse, or diffuse alone
+    tex_[1] = (t && detail) ? detail : nullptr;
+    {
+      Surface* ft = (r.far_material >= 0 && static_cast<size_t>(r.far_material) < m.textures.size())
+                        ? static_cast<Surface*>(m.textures[r.far_material])
+                        : nullptr;
+      ID3D11ShaderResourceView* fsrv = ft ? ft->SampleTex()->srv : nullptr;
+      b.ctx->PSSetShaderResources(6, 1, &fsrv);
+    }
+    tss_[1][TSS_COLOROP] = tex_[1] ? 13 : 1;  // blend texture alpha, or off
+    tss_[1][TSS_ALPHAOP] = tex_[1] ? 4 - 1 : 1;  // select arg 2 (current)
+    ApplyState(false, true, has_depth, shadowed);
+  };
+  int32_t bound = -2, bound_far = -2;
+  for (uint32_t i : order) {
+    const gt::Range& r = *todo[i];
+    if (r.material != bound || r.far_material != bound_far) {
+      bound = r.material;
+      bound_far = r.far_material;
+      bind_range(r, shadow);
+      const UINT stride = sizeof(gt::Vertex), zero = 0;
+      b.ctx->IASetVertexBuffers(0, 1, &terr_vb_, &stride, &zero);
+      b.ctx->IASetIndexBuffer(terr_ib_, DXGI_FORMAT_R16_UINT, 0);
+      if (bd.topo != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+        b.ctx->IASetPrimitiveTopology(bd.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    }
+    b.ctx->DrawIndexed(r.index_count, r.first_index, todo_base[i]);
+    ++draws;
+  }
+  // Reflections=2: the terrain near the bike, in view or not, drawn again
+  // into the live reflection cube (the game's own terrain draws are what it
+  // replays otherwise, and those are skipped while GPU terrain draws).
+  if (has_depth && ReflectRecording() && ReflectFrameDue()) {
+    todo.clear();
+    todo_base.clear();
+    std::vector<const gt::Chunk*>& todo_chunk = terr_todo_chunk_;
+    todo_chunk.clear();
+    for (const gt::Chunk& c : m.chunks) {
+      if (!ReflectBoxInRange(c.lo, c.hi)) continue;
+      for (uint32_t k = 0; k < c.range_count; ++k) {
+        todo.push_back(&m.ranges[c.first_range + k]);
+        todo_base.push_back(c.base_vertex);
+        todo_chunk.push_back(&c);
+      }
+    }
+    order.resize(todo.size());
+    for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(),
+              [&](uint32_t a, uint32_t c) { return todo[a]->material < todo[c]->material; });
+    bound = -2;
+    unsigned recorded = 0;
+    for (uint32_t i : order) {
+      const gt::Range& r = *todo[i];
+      if (r.material != bound) {
+        bound = r.material;
+        bind_range(r, false);
+      }
+      ReflectReplay rr{};
+      rr.blend = bd.blend;
+      rr.depth = bd.depth;
+      rr.srv[0] = bd.srv[0];
+      rr.srv[1] = bd.srv[1];
+      std::memcpy(rr.smp, bd.smp, sizeof(rr.smp));
+      rr.vs = bd.vs;
+      rr.ps = bd.ps;
+      static const float kId[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+      std::memcpy(rr.world, kId, sizeof(rr.world));
+      PSConstants pc = bd.pc;
+      // No far-block switch in the cube (it works from the main camera's
+      // screen position and focal length).
+      for (float& f : pc.tfar) f = 0;
+      std::memcpy(rr.pc, &pc, sizeof(PSConstants));
+      rr.pc_size = sizeof(PSConstants);
+      rr.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+      rr.indexed = true;
+      rr.nidx = r.index_count;
+      rr.ioff = r.first_index * 2;
+      rr.base_vertex = todo_base[i];
+      const gt::Chunk& c = *todo_chunk[i];
+      std::memcpy(rr.lo, c.lo, sizeof(rr.lo));
+      std::memcpy(rr.hi, c.hi, sizeof(rr.hi));
+      rr.bounded = true;
+      rr.vb = terr_vb_;
+      rr.ib = terr_ib_;
+      ReflectRecord(rr);
+      ++recorded;
+    }
+    if (st) st->reflect_records = recorded;
+  }
+  bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
+  {
+    ID3D11ShaderResourceView* none = nullptr;
+    b.ctx->PSSetShaderResources(6, 1, &none);
+  }
+  detail_fade_[0] = detail_fade_[1] = 0;
+  for (float& f : terr_far_) f = 0;
+
+  for (int i = 0; i < kRs; ++i) rs_[rs_keys[i]] = rs_save[i];
+  tex_[0] = tex_save[0];
+  tex_[1] = tex_save[1];
+  std::memcpy(tss_, tss_save, sizeof(tss_save));
+  if (cur_msaa_) MsaaMarkDrawn();
+  if (has_depth) Note3DDraw();
+  rt_->MarkGpuWritten();
+  Counters().draws += draws;
+  if (st) {
+    st->chunks_drawn = drawn;
+    st->tris_drawn = tris;
+    st->draws = draws;
+  }
+  return true;
+}
+
 }  // namespace dd
+

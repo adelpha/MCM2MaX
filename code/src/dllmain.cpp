@@ -32,6 +32,9 @@ void ApplyGridFix();
 void ApplySoundFixes();
 void ApplyReverbFixes();
 void ApplySortFixes();
+void ApplyWalkFixes();
+void ApplyFarTreeFixes();
+void ApplyTerrainFixes();
 void ApplyAiFixes();
 namespace input { void Apply(); }
 void LogTextureSummary();
@@ -97,6 +100,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
       ApplyMenuOptions();  // chains the same CreateFileA hook
       ApplyReverbFixes();
       ApplySortFixes();
+      ApplyWalkFixes();
+      ApplyFarTreeFixes();
+      ApplyTerrainFixes();
       ApplyAiFixes();
       dd::InstallGpuShadows();  // after the smoothing and restart hooks it chains
       input::Apply();

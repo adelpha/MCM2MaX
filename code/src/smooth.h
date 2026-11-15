@@ -20,6 +20,11 @@ void SmoothNoteDraw(const char* what, bool tl, unsigned verts);
 const uint8_t* SmoothVertices(const uint8_t* verts, uint32_t stride, uint32_t count,
                               const void* idx);
 
+// StillScenery: a terrain or tree draw (positions placed in the world once,
+// never moved) that skips the blending checks. Samples a few of them to log
+// whether their positions really stay put between steps.
+void SmoothNoteScenery(const uint8_t* verts, uint32_t stride, uint32_t count);
+
 // Hook the game's GDI text so names over riders move with the blend.
 void InstallTextSmoothing();
 

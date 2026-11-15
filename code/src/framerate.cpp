@@ -12,6 +12,7 @@
 // operand at a value of our own, recomputed every tick so that it does per
 // frame what the original constant did per frame at RefRate (30 by default).
 #include "framerate.h"
+#include "freecam.h"
 #include "input_timing.h"
 #include "prof.h"
 #include "smooth.h"
@@ -496,7 +497,11 @@ void FixedTickBody(uintptr_t g) {
     patch::Log("fixed-rate simulation %s", racing ? "on (race)" : "off");
     SoundRaceRunning(racing);
   }
-  if (g_sim_fixed) {
+  if (g_sim_fixed && FreeCamFrame(true, dt)) {
+    // Free camera: the race is frozen (not simulated), still counts as running.
+    g_bike_seen = now;
+    g_sim_acc = 0.0;
+  } else if (g_sim_fixed) {
     const double step = 1.0 / rate;
     g_sim_acc += dt;
     if (g_sim_acc > 0.25) g_sim_acc = 0.25;  // after a stall, don't try to catch up
@@ -685,7 +690,7 @@ void ApplyFramePacing() {
 bool SimRacing() { return g_sim_fixed; }
 
 bool SimDrawPoint(unsigned* tick, float* alpha) {
-  if (!g_sim_fixed || !GetConfig().sim_smooth) return false;
+  if (!g_sim_fixed || !GetConfig().sim_smooth || FreeCamActive()) return false;
   const double step = 1.0 / GetConfig().sim_rate;
   float a = static_cast<float>(g_sim_acc / step);
   if (a < 0.0f) a = 0.0f;

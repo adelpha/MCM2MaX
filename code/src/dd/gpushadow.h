@@ -35,6 +35,10 @@ void ShadowRaceGone(uintptr_t race);
 
 // True while the game draws a terrain patch (shadow receivers).
 bool ShadowReceiverNow();
+// FastTerrain's draw walk (terrain_fast.cpp) calls the patch draws itself:
+// around each, so they are receivers as in the game's walk.
+void ShadowReceiverEnter();
+void ShadowReceiverLeave();
 
 // The running race's sun (the game's shadow light, when it is directional):
 // the unit direction from the ground towards the sun, y up. False when there
@@ -47,6 +51,11 @@ bool ShadowSunDirection(float to_sun[3]);
 // the shadow shader variant. `blend`, `src`, `dst`: the draw's blend state
 // (multiplying layers over shadowed ground are left alone).
 bool ShadowBindReceiver(const float* world, bool blend, DWORD src, DWORD dst);
+
+// GPU terrain: if the game's shadow pre-draw has not drawn this frame's
+// shadows (it is skipped with the game's terrain), draw them now from the
+// running race's shadow. True when this frame has GPU shadows.
+bool ShadowEnsureFrame();
 
 // Presented a frame (surface flip): per-frame bookkeeping and the ShadowLog
 // summary.

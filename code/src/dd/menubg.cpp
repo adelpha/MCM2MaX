@@ -1,4 +1,5 @@
 #include "menubg.h"
+#include "texdecode.h"
 
 #include <cmath>
 #include <cstring>
@@ -206,8 +207,9 @@ bool MenuBgWanted() {
   const std::wstring path = ArtPath();
   std::vector<uint8_t> px;
   UINT w = 0, h = 0;
-  if (!DecodeImageFile(path, px, w, h)) {
-    patch::Log("menu flag: no picture at %ls (MenuBackground), main menu left as it was", path.c_str());
+  std::string err;
+  if (!DecodePicture(path, px, w, h, &err)) {
+    patch::Log("menu flag: no picture at %ls (MenuBackground: %s), main menu left as it was", path.c_str(), err.c_str());
     return false;
   }
   if (w != 640 || h != 480) {

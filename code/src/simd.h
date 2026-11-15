@@ -18,6 +18,8 @@ namespace simd {
 void Init();
 // True when the SSE2 paths are in use.
 bool Sse2();
+// True when the CPU has SSE2 (whatever Simd= says).
+bool CpuHasSse2();
 // "SSE2" or "plain".
 const char* PathName();
 // SimdLog=1: per-kernel calls, items and time every 5 seconds.

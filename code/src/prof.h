@@ -37,6 +37,15 @@ enum Zone : int {
   kGetDC,         // GetDC .. ReleaseDC
   kClear,         // Device::Clear
   kGdiText,       // the game's TextOut / DrawText calls (GPU text or GDI)
+  kReflect,       // Reflections: the cube faces drawn at the end of the scene
+  kReflectCache,  //   Reflections: world draws kept for later frames (per draw)
+  kObjectWalk,    // FastObjectWalk: the game's object passes walked by mcm2fix
+  kFarTrees,      // FarTrees: far tree billboards drawn on the GPU (game side and draw)
+  kTerrSetup,     // terrain: Setup (culling, detail numbers, split/collapse; 0x482d20)
+  kTerrEval,      // terrain: Eval (vertex activation; 0x4836e0 or FastTerrain)
+  kTerrMesh,      // terrain: Mesh (rebuild changed blocks; 0x47fec0)
+  kTerrBlocks,    // terrain: sub-block culling (0x4820e0)
+  kTerrDraw,      // terrain: draw walk and its draw calls (0x4818b0 or FastTerrain)
   kZoneCount
 };
 
