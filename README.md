@@ -106,7 +106,7 @@ Windows 10 and 11.
   (`MipBias`).
 - **Speed blur** (`MotionBlur`, on by default). At speed, the sides of the
   3D scene streak towards where the bike is heading while the middle and the
-  HUD stay sharp. Direct3D 11 and Direct3D 9. Set `MotionBlur=0` to turn it off.
+  HUD stay sharp. Direct3D 11 and Direct3D 9. Set `MotionBlur=0` to turn it off, or untick it in Options > Graphics.
 - **True-colour textures** where the game's own art has more than 16 bits
   (`TrueColorTextures`).
 - **Shadows for every rider, drawn by the graphics card** (`RiderShadows`).
@@ -495,6 +495,13 @@ The file has three parts:
 | `ReflectSkipObjects` | `SIGN*, FLAG*` | frame names | Models with any of these parts get no reflections: the board man at the start line (`SIGN01`) and the flag man (`FLAG01`-`FLAG03`) are the rider model with extra parts, so their bare heads would shine like helmets. |
 | `LiquidMetal` | `0` | `0`, `1` | "T-1000 mode": every bike and rider is drawn in liquid chrome, reflecting the world around it (uses `Reflections=2` if `Reflections` is `0`). |
 | `MotionBlur` | `1` | `0`, `1` | Speed blur: above `MotionBlurMinSpeed` the edges of the 3D scene streak towards the point the bike is heading for, more the faster you go, while the middle of the screen stays sharp. The HUD, text and menus are never blurred. Works the same at any frame rate. |
+| `MenuOptions` | `1` | `0`, `1` | mcm2fix settings on the game's own Options pages: Options > Graphics gets an "Enhancements" box with sliders for `Anisotropy`, `Antialiasing` and `ViewDistance` (1x to 10x) and checkboxes for `VSync`, `WideFov` ("Widescreen View"), `MotionBlur`, `AlphaToCoverage` ("Smooth Tree Edges", greyed while Antialiasing is off), `RiderShadows`, `Reflections` and `TextureReplace` ("Replacement Textures"; `MenuBackground` is always used). Antialiasing, View Distance, Widescreen View, Soft Rider Shadows, Bike Reflections and Replacement Textures apply the next time the game starts. Choices made there are written into `mcm2fix.ini`; if it can't be written they go to `%LOCALAPPDATA%\Motocross Madness 2\mcm2fix-menu.ini`, which then wins over `mcm2fix.ini` (delete it to go back). |
+| `MenuFlag` | `1` | `0`, `1` | A waving dark blue chequered flag behind the main menu, seen through the transparent parts of `MenuBackground` (fills the whole window). Needs that picture and the Direct3D 11 renderer; otherwise the main menu is as it was. |
+| `MenuFlagSpeed` | `100` | `0`-`1000` | How fast the menu flag moves, in percent (`0` = still). |
+| `MenuFlagBrightness` | `68` | `0`-`300` | Brightness of the menu flag, in percent. |
+| `MenuFlagWarp` | `100` | `0`-`500` | How far the flag's chequers are pushed around, in percent (`0` = straight lines). |
+| `MenuFlagShading` | `100` | `0`-`300` | Strength of the flag's light, shadow and drifting patches, in percent (`0` = flat). |
+| `MenuBackground` | `UI\MAINMENU\01_MAIN\BackGround_01.png` | path | The main menu background used with `MenuFlag`: a 640x480 PNG with transparency, relative to the game folder or a full path. `tools/mcm2dat` unpacks the original to start from. |
 | `MotionBlurStrength` | `80` | 0-300 | Length of the streaks at full speed, in percent (higher = longer streaks). |
 | `MotionBlurMinSpeed` | `30` | 0-200 | Speed (mph, as the speedometer shows) where the blur starts. |
 | `MotionBlurMaxSpeed` | `70` | 1-250 | Speed (mph) where the blur is at full strength. |
@@ -654,6 +661,7 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `ReflectLog` | `0` | Which bike and rider textures and model parts reflect, the sky tiles kept for `Reflections`, and every 5 seconds what the reflections cost. |
 | `ReflectDebug` | `0` | `1` = the reflection alone at full strength on everything that reflects (no Fresnel), to see what is reflected. |
 | `MotionBlurLog` | `0` | With `MotionBlur`, every 5 seconds: speed, blur amount and focus point, where in the frame the blur went, plus a few whole-frame draw lists. |
+| `MenuLog` | `0` | Log every event on the Options pages mcm2fix adds settings to. |
 | `ShadowLog` | `0` | `RiderShadows` counters every 5 seconds: shadows drawn, vertices, time taken, terrain draws shadowed. `2` also logs every shadow's placement for 90 frames, 10 s into each race. |
 | `SmoothLog` | `0` | `SimSmooth` tracing: `1` = matrices and draws for a few frames, `2` = camera only (120 frames), `3` = rider shadows, `4` = camera and projection after each race start. |
 

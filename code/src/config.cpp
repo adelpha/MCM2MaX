@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace {
 Config g_config;
@@ -19,6 +20,43 @@ float ReadFloat(const char* key, float def, const char* ini) {
 }
 
 int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+char g_menu_ini[MAX_PATH] = {};
+char g_game_ini[MAX_PATH] = {};  // mcm2fix.ini next to Mcm2.exe
+
+// A key set from the menus (mcm2fix-menu.ini) wins over mcm2fix.ini.
+int ReadMenuInt(const char* key, int value) {
+  if (!g_config.menu_options || !g_menu_ini[0]) return value;
+  return GetPrivateProfileIntA("mcm2fix", key, value, g_menu_ini);
+}
+}
+
+const char* MenuIniPath() { return g_menu_ini; }
+
+int MenuOverride(const char* key, int value) { return ReadMenuInt(key, value); }
+
+const char* SetFromMenu(const char* key, int value) {
+  if (!std::strcmp(key, "MotionBlur")) g_config.motion_blur = value != 0;
+  else if (!std::strcmp(key, "VSync")) g_config.vsync = value != 0;
+  else if (!std::strcmp(key, "AlphaToCoverage")) g_config.alpha_to_coverage = value;
+  else if (!std::strcmp(key, "Anisotropy")) g_config.anisotropy = value;
+  char v[16];
+  std::snprintf(v, sizeof(v), "%d", value);
+  if (!std::strcmp(key, "ViewDistance")) std::snprintf(v, sizeof(v), "%g", value / 100.0);  // value in hundredths
+  // mcm2fix.ini itself when it can be written (only that key's line changes);
+  // then any older choice for the key in the per-user file is dropped so it
+  // can't win at the next start. Otherwise the per-user file.
+  const DWORD attr = g_game_ini[0] ? GetFileAttributesA(g_game_ini) : INVALID_FILE_ATTRIBUTES;
+  if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_READONLY) &&
+      WritePrivateProfileStringA("mcm2fix", key, v, g_game_ini)) {
+    if (g_menu_ini[0] && GetFileAttributesA(g_menu_ini) != INVALID_FILE_ATTRIBUTES)
+      WritePrivateProfileStringA("mcm2fix", key, nullptr, g_menu_ini);
+    return g_game_ini;
+  }
+  if (!g_menu_ini[0]) return "(nowhere: no per-user folder)";
+  CreateDirectoryA(xp::LocalAppData().append("\\Motocross Madness 2").c_str(), nullptr);
+  WritePrivateProfileStringA("mcm2fix", key, v, g_menu_ini);
+  return g_menu_ini;
 }
 
 const Config& GetConfig() { return g_config; }
@@ -28,15 +66,45 @@ void LoadConfig() {
   GetModuleFileNameA(nullptr, ini, MAX_PATH);
   if (char* slash = std::strrchr(ini, '\\')) slash[1] = '\0';
   xp::Append(ini, "mcm2fix.ini");
+  xp::Copy(g_game_ini, ini);
+  // First: the menus' saved choices (ReadMenuInt) need these.
+  g_config.menu_options = GetPrivateProfileIntA("mcm2fix", "MenuOptions", 1, ini) != 0;
+  {
+    const std::string dir = xp::LocalAppData();
+    if (!dir.empty()) xp::Copy(g_menu_ini, (dir + "\\Motocross Madness 2\\mcm2fix-menu.ini").c_str());
+  }
   g_config.one_core = GetPrivateProfileIntA("mcm2fix", "OneCore", 0, ini) != 0;
   g_config.log = GetPrivateProfileIntA("mcm2fix", "Log", 1, ini) != 0;
   g_config.startup = GetPrivateProfileIntA("mcm2fix", "Startup", 1, ini) != 0;
   g_config.registry = GetPrivateProfileIntA("mcm2fix", "Registry", 1, ini) != 0;
   g_config.files = GetPrivateProfileIntA("mcm2fix", "Files", 1, ini) != 0;
   g_config.reg_log = GetPrivateProfileIntA("mcm2fix", "RegLog", 0, ini) != 0;
-  g_config.wide_fov = GetPrivateProfileIntA("mcm2fix", "WideFov", 1, ini) != 0;
+  g_config.wide_fov = ReadMenuInt("WideFov", GetPrivateProfileIntA("mcm2fix", "WideFov", 1, ini)) != 0;
   g_config.alpha_cut = GetPrivateProfileIntA("mcm2fix", "AlphaCut", 128, ini);
-  g_config.motion_blur = GetPrivateProfileIntA("mcm2fix", "MotionBlur", 1, ini) != 0;
+  g_config.menu_log = GetPrivateProfileIntA("mcm2fix", "MenuLog", 0, ini) != 0;
+  g_config.menu_flag = GetPrivateProfileIntA("mcm2fix", "MenuFlag", 1, ini) != 0;
+  {
+    auto pct = [&](const char* key, int def, int hi) {
+      const int v = static_cast<int>(GetPrivateProfileIntA("mcm2fix", key, def, ini));
+      return v < 0 ? 0 : v > hi ? hi : v;
+    };
+    g_config.menu_flag_speed = pct("MenuFlagSpeed", 100, 1000);
+    g_config.menu_flag_brightness = pct("MenuFlagBrightness", 68, 300);
+    g_config.menu_flag_warp = pct("MenuFlagWarp", 100, 500);
+    g_config.menu_flag_shading = pct("MenuFlagShading", 100, 300);
+  }
+  {
+    // A path: stop at a ';' comment, trim the ends.
+    char v[260] = {};
+    GetPrivateProfileStringA("mcm2fix", "MenuBackground", "UI\\MAINMENU\\01_MAIN\\BackGround_01.png", v, sizeof(v), ini);
+    if (char* semi = std::strchr(v, ';')) *semi = '\0';
+    size_t n = std::strlen(v);
+    while (n && (v[n - 1] == ' ' || v[n - 1] == '\t')) v[--n] = '\0';
+    const char* start = v;
+    while (*start == ' ' || *start == '\t') ++start;
+    xp::Copy(g_config.menu_background, *start ? start : "UI\\MAINMENU\\01_MAIN\\BackGround_01.png");
+  }
+  g_config.motion_blur = ReadMenuInt("MotionBlur", GetPrivateProfileIntA("mcm2fix", "MotionBlur", 1, ini)) != 0;
   g_config.motion_blur_strength = Clamp(GetPrivateProfileIntA("mcm2fix", "MotionBlurStrength", 80, ini), 0, 300);
   g_config.motion_blur_min_speed = Clamp(GetPrivateProfileIntA("mcm2fix", "MotionBlurMinSpeed", 30, ini), 0, 200);
   g_config.motion_blur_max_speed = Clamp(GetPrivateProfileIntA("mcm2fix", "MotionBlurMaxSpeed", 70, ini), 1, 250);
@@ -44,10 +112,10 @@ void LoadConfig() {
     g_config.motion_blur_max_speed = g_config.motion_blur_min_speed + 1;
   g_config.motion_blur_center = Clamp(GetPrivateProfileIntA("mcm2fix", "MotionBlurCenter", 60, ini), 0, 95);
   g_config.motion_blur_log = GetPrivateProfileIntA("mcm2fix", "MotionBlurLog", 0, ini) != 0;
-  g_config.alpha_to_coverage = GetPrivateProfileIntA("mcm2fix", "AlphaToCoverage", 2, ini);
+  g_config.alpha_to_coverage = ReadMenuInt("AlphaToCoverage", GetPrivateProfileIntA("mcm2fix", "AlphaToCoverage", 2, ini));
   if (g_config.alpha_to_coverage < 0 || g_config.alpha_to_coverage > 2) g_config.alpha_to_coverage = 2;
   g_config.alpha_log = GetPrivateProfileIntA("mcm2fix", "AlphaLog", 0, ini) != 0;
-  g_config.vsync = GetPrivateProfileIntA("mcm2fix", "VSync", 1, ini) != 0;
+  g_config.vsync = ReadMenuInt("VSync", GetPrivateProfileIntA("mcm2fix", "VSync", 1, ini)) != 0;
   g_config.frame_cap = GetPrivateProfileIntA("mcm2fix", "FrameCap", 0, ini);
   if (g_config.frame_cap < 0) g_config.frame_cap = 0;
   g_config.precise_timer = GetPrivateProfileIntA("mcm2fix", "PreciseTimer", 1, ini) != 0;
@@ -75,7 +143,9 @@ void LoadConfig() {
   g_config.ai_steer_rate = GetPrivateProfileIntA("mcm2fix", "AiSteerRate", 0, ini);
   if (g_config.ai_steer_rate < 0) g_config.ai_steer_rate = 0;
   g_config.smooth_log = GetPrivateProfileIntA("mcm2fix", "SmoothLog", 0, ini);
-  g_config.rider_shadows = GetPrivateProfileIntA("mcm2fix", "RiderShadows", 2, ini);
+  g_config.rider_shadows = ReadMenuInt("RiderShadows", GetPrivateProfileIntA("mcm2fix", "RiderShadows", 2, ini));
+  g_config.reflections = ReadMenuInt("Reflections", GetPrivateProfileIntA("mcm2fix", "Reflections", 2, ini));
+  if (g_config.reflections < 0 || g_config.reflections > 2) g_config.reflections = 2;
   if (g_config.rider_shadows < 0 || g_config.rider_shadows > 2) g_config.rider_shadows = 2;
   g_config.shadow_strength = GetPrivateProfileIntA("mcm2fix", "ShadowStrength", 0, ini);
   if (g_config.shadow_strength < 0 || g_config.shadow_strength > 100) g_config.shadow_strength = 0;
@@ -221,20 +291,21 @@ void LoadConfig() {
 
   float fov = ReadFloat("Fov", 0.0f, ini);
   g_config.fov = fov >= 20.0f && fov <= 150.0f ? fov : 0.0f;
-  g_config.anisotropy = Clamp(GetPrivateProfileIntA("mcm2fix", "Anisotropy", 16, ini), 0, 16);
-  g_config.msaa = Clamp(GetPrivateProfileIntA("mcm2fix", "Antialiasing", 4, ini), 0, 8);
+  g_config.anisotropy = Clamp(ReadMenuInt("Anisotropy", GetPrivateProfileIntA("mcm2fix", "Anisotropy", 16, ini)), 0, 16);
+  g_config.msaa = Clamp(ReadMenuInt("Antialiasing", GetPrivateProfileIntA("mcm2fix", "Antialiasing", 4, ini)), 0, 8);
   float bias = ReadFloat("MipBias", 0.0f, ini);
   g_config.mip_bias = bias < -4.0f ? -4.0f : bias > 4.0f ? 4.0f : bias;
   float fog = ReadFloat("FogDistance", 1.0f, ini);
   g_config.fog_scale = fog >= 0.1f && fog <= 20.0f ? fog : 1.0f;
   float view = ReadFloat("ViewDistance", 1.0f, ini);
+  if (g_config.menu_options && g_menu_ini[0]) view = ReadFloat("ViewDistance", view, g_menu_ini);
   g_config.view_distance = view >= 0.25f && view <= 10.0f ? view : 1.0f;
   float tdet = ReadFloat("TerrainDetail", 2.0f, ini);
   g_config.terrain_detail = tdet >= 0.25f && tdet <= 8.0f ? tdet : 2.0f;
   g_config.tree_always_near = ReadFloat("TreeDetailDistance", 1.0f, ini) == 0.0f;
   float lod = ReadFloat("ModelLod", 1.0f, ini);
   g_config.model_lod = lod >= 0.25f && lod <= 10.0f ? lod : 1.0f;
-  g_config.texture_replace = GetPrivateProfileIntA("mcm2fix", "TextureReplace", 1, ini) != 0;
+  g_config.texture_replace = ReadMenuInt("TextureReplace", GetPrivateProfileIntA("mcm2fix", "TextureReplace", 1, ini)) != 0;
   g_config.texture_dump = GetPrivateProfileIntA("mcm2fix", "TextureDump", 0, ini) != 0;
   g_config.texture_decode_thread = GetPrivateProfileIntA("mcm2fix", "TextureDecodeThread", 1, ini) != 0;
   g_config.texture_preload = GetPrivateProfileIntA("mcm2fix", "TexturePreload", 1, ini) != 0;

@@ -358,8 +358,44 @@ LiquidMetal=0
 ; MotionBlur: 1 = speed blur. Above MotionBlurMinSpeed the edges of the 3D
 ; scene streak towards the point your bike is heading for, more the faster
 ; you go, while the middle of the screen stays sharp. The HUD, text and menus
-; are never blurred. 0 = off. Default 1.
+; are never blurred. 0 = off. Default 1. Also on the game's Options >
+; Graphics page (see MenuOptions).
 MotionBlur=1
+
+; MenuOptions: 1 = mcm2fix settings on the game's own Options pages. Options >
+; Graphics gets an "Enhancements" box: Anisotropy, Antialiasing and View Distance (ViewDistance) sliders,
+; VSync, Widescreen View (WideFov), Motion Blur, Smooth Tree Edges
+; (AlphaToCoverage), Soft Rider Shadows (RiderShadows), Bike Reflections
+; (Reflections) and Replacement Textures (TextureReplace; menu pictures are
+; always used). Antialiasing, View Distance, Widescreen View, Soft Rider Shadows, Bike
+; Reflections and Replacement Textures apply when the game is next started.
+; What you pick there is written into this file. If this file can't be
+; written (read-only, or a protected folder), it goes to
+; %LOCALAPPDATA%\Motocross Madness 2\mcm2fix-menu.ini instead, which then
+; wins over this file (delete it to go back to this one).
+; 0 = the menus as they were. Default 1.
+MenuOptions=1
+
+; MenuFlag: 1 = a waving dark blue chequered flag behind the main menu, seen
+; through the transparent parts of MenuBackground (fills the whole window,
+; also the sides of a wide screen). Needs the MenuBackground picture and the
+; Direct3D 11 renderer; without them the main menu is as it was. Default 1.
+MenuFlag=1
+
+; The flag's look, in percent. MenuFlagSpeed: how fast it moves (0 = still,
+; 200 = twice as fast). MenuFlagBrightness: 100 = brighter colours, default
+; 68. MenuFlagWarp: how far the chequers are pushed around (0 = straight).
+; MenuFlagShading: the light, shadow and drifting patches (0 = flat).
+MenuFlagSpeed=100
+MenuFlagBrightness=68
+MenuFlagWarp=100
+MenuFlagShading=100
+
+; MenuBackground: the main menu background picture used with MenuFlag: a
+; 640x480 PNG with transparency, relative to the game folder (or a full path).
+; It replaces the game's own background (01_Main\BackGround_01 in
+; UI\MAINMENU.DAT; tools/mcm2dat unpacks the original to start from).
+MenuBackground=UI\MAINMENU\01_MAIN\BackGround_01.png
 
 ; MotionBlurStrength: length of the streaks at full speed, in percent (higher
 ; = longer streaks), 0 to 300. Default 80.
@@ -957,6 +993,10 @@ ReflectLog=0
 ; ReflectDebug: 1 = draw the reflection alone at full strength on everything
 ; that reflects (no Fresnel), to see what is reflected. Default 0.
 ReflectDebug=0
+
+; MenuLog: log every event on the Options pages mcm2fix adds settings to.
+; Default 0.
+MenuLog=0
 
 ; MotionBlurLog: with MotionBlur, every 5 s: speed, blur amount and focus
 ; point, where in the frame the blur went, and a few whole-frame draw lists.

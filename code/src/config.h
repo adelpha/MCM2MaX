@@ -81,6 +81,7 @@ struct Config {
   bool frame_fix = true;      // FrameFix: per-frame animation/physics steps scale with frame time
   int ai_rate = 30;           // AiRate: computer riders re-plan this many times a second (0 = every frame)
   int smooth_log = 0;         // SmoothLog: 1 = trace a few frames of matrices and draws, 2 = camera only, 120 frames, 3 = rider shadows
+  int reflections = 2;     // Reflections (also read by dd/reflect.cpp through here)
   int rider_shadows = 2;      // RiderShadows: 0 = the game's CPU shadow, 1 = GPU shadow for the rider the camera follows, 2 = GPU shadows for every rider (dd/gpushadow.cpp)
   int shadow_strength = 0;    // ShadowStrength: GPU shadow darkness in percent (0 = the game's own)
   int shadow_softness = 100;  // ShadowSoftness: how much GPU shadows blur and fade with the caster's height above the ground, percent (0 = sharp)
@@ -132,7 +133,26 @@ struct Config {
   int texture_preload_mb = 256;       // TexturePreloadMB: most decoded picture memory preloaded
   bool true_color_textures = true;  // TrueColorTextures: load textures as 24/32-bit instead of 16-bit
   bool texture_log = false;         // TextureLog: log the format of each texture the game creates
+  bool menu_options = true;   // MenuOptions: mcm2fix settings added to the game's own Options pages (menus.cpp)
+  bool menu_log = false;      // MenuLog: log every event on the pages mcm2fix adds settings to
+  bool menu_flag = true;      // MenuFlag: waving flag behind the main menu, under MenuBackground (dd/menubg.cpp)
+  int menu_flag_speed = 100;       // MenuFlagSpeed: % of the default movement speed
+  int menu_flag_brightness = 68;   // MenuFlagBrightness: % (100 = preview-5 colours)
+  int menu_flag_warp = 100;        // MenuFlagWarp: % of how far the chequers are pushed around
+  int menu_flag_shading = 100;     // MenuFlagShading: % of the light, shadow and mottling
+  char menu_background[260] = {};  // MenuBackground: 640x480 picture with transparency, replaces the main menu background
 };
 
 const Config& GetConfig();
 void LoadConfig();
+
+// Settings changed from the game's menus (MenuOptions) are saved in
+// %LOCALAPPDATA%\Motocross Madness 2\mcm2fix-menu.ini and win over mcm2fix.ini.
+// Empty if there is no per-user folder.
+const char* MenuIniPath();
+// Save a setting chosen in the menus: to mcm2fix.ini when it can be written,
+// else to MenuIniPath(); returns the file used. MotionBlur, VSync and
+// AlphaToCoverage and Anisotropy also change at once; the rest apply at the next start.
+const char* SetFromMenu(const char* key, int value);
+// A value read from mcm2fix.ini, replaced by the menus' choice if there is one.
+int MenuOverride(const char* key, int value);
