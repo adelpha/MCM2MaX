@@ -29,6 +29,8 @@
 // Built with SSE2 (the file is only entered when the CPU has it).
 #include "terrain_fast.h"
 
+#include "dd/gpushadow.h"
+
 #include <cstdint>
 #include <cstring>
 
@@ -676,8 +678,22 @@ static inline void CountDraw(const Node* n, int sub, int vc) {
   if (static_cast<double>(Ti(n->T, 0xCA4)) >= m) ++g_stats.draw_far;
 }
 
+// The game's draws were shadow receivers (RiderShadows hooks their calls in
+// the game's walk, which this replaces), so they are marked here too.
+static int __fastcall DrawRecv(Node* n, int edx, int a1, uint8_t* v, int vc, uint8_t* i, int ic, int sub) {
+  dd::ShadowReceiverEnter();
+  const int r = reinterpret_cast<DrawFn>(kDraw)(n, edx, a1, v, vc, i, ic, sub);
+  dd::ShadowReceiverLeave();
+  return r;
+}
+static int __fastcall DrawAltRecv(Node* n, int edx, int a1, uint8_t* v, int vc, uint8_t* i, int ic, int sub) {
+  dd::ShadowReceiverEnter();
+  const int r = reinterpret_cast<DrawFn>(kDrawAlt)(n, edx, a1, v, vc, i, ic, sub);
+  dd::ShadowReceiverLeave();
+  return r;
+}
 static inline DrawFn PickDraw(const Node* n) {
-  return reinterpret_cast<DrawFn>(At<int32_t>(n->T, kAltDraw) ? kDrawAlt : kDraw);
+  return At<int32_t>(n->T, kAltDraw) ? &DrawAltRecv : &DrawRecv;
 }
 
 int DrawWalk(Node* n, int a1, int x, int y, int size, int q, int a6) {

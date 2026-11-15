@@ -852,6 +852,11 @@ void InstallGpuShadows() {
 }
 
 bool ShadowReceiverNow() { return g_receiver > 0; }
+void ShadowReceiverEnter() {
+  ++g_receiver;
+  ++g_st.recv_patches;
+}
+void ShadowReceiverLeave() { --g_receiver; }
 
 bool ShadowSunDirection(float to_sun[3]) {
   // Noted at the race's update (the race's memory may be gone by now, so it

@@ -35,6 +35,10 @@ void ShadowRaceGone(uintptr_t race);
 
 // True while the game draws a terrain patch (shadow receivers).
 bool ShadowReceiverNow();
+// FastTerrain's draw walk (terrain_fast.cpp) calls the patch draws itself:
+// around each, so they are receivers as in the game's walk.
+void ShadowReceiverEnter();
+void ShadowReceiverLeave();
 
 // The running race's sun (the game's shadow light, when it is directional):
 // the unit direction from the ground towards the sun, y up. False when there

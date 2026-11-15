@@ -1602,7 +1602,7 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
       // else it keeps its last picture and is redrawn next frame.
       bool stale = false;
       for (const ReflectReplay& r : g_replays)
-        if (r.vgen != vgen_ || (r.indexed && r.igen != igen_)) {
+        if (!r.vb && (r.vgen != vgen_ || (r.indexed && r.igen != igen_))) {
           stale = true;
           break;
         }

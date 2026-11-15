@@ -21,3 +21,9 @@ __declspec(dllexport) void H_SetOptions(int lod_fix, int hole_hooked, int hole_f
 __declspec(dllexport) tf::Stats* H_Stats() { return &tf::g_stats; }
 int __stdcall HEntry(void*, unsigned, void*) { return 1; }
 }
+
+// terrain_fast.cpp marks its patch draws as rider-shadow receivers.
+namespace dd {
+void ShadowReceiverEnter() {}
+void ShadowReceiverLeave() {}
+}  // namespace dd

@@ -62,6 +62,7 @@
 #include <vector>
 
 #include "config.h"
+#include "dd/gpushadow.h"
 #include "freecam.h"
 #include "dd/probe.h"
 #include "dd/racetitle.h"
@@ -1375,6 +1376,10 @@ void __fastcall TerrainDrawSite(void* root, void*, void* dev) {
   GpuTerrainKeys();
   if (GetConfig().gpu_terrain) dd::GpuTerrainCaptureState(0, ProbeDue(0));
   if (GpuTerrainDraw(root)) return;
+  // RiderShadows: the game's shadow pre-draw no longer runs on its own
+  // (gterr-15 log: 0 game pre-draws with either terrain), so the frame's
+  // shadows are drawn before the game's terrain patches too.
+  dd::ShadowEnsureFrame();
   reinterpret_cast<TerrainDrawFn>(0x481870)(root, nullptr, dev);
   // GpuTerrainLog: every 2 s while the game draws its own terrain, where it
   // draws it near and far (to match GpuTerrain to it).
@@ -1395,6 +1400,7 @@ int __fastcall TerrainOnePassSite(void* root, void*, void* dev, void* tex) {
   GpuTerrainKeys();
   if (GetConfig().gpu_terrain) dd::GpuTerrainCaptureState(1, ProbeDue(1));
   if (GpuTerrainDraw(root)) return 1;
+  dd::ShadowEnsureFrame();
   return reinterpret_cast<TerrainPassFn>(0x481890)(root, nullptr, dev, tex);
 }
 int __fastcall TerrainDetailPassSite(void* root, void*, void* dev, void* tex) {
