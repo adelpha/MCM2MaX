@@ -51,6 +51,8 @@ struct NodeInfo {
   uint32_t texcode;
   bool has_subs;
   uint32_t sub[16];
+  const NodeInfo* parent;
+  int ix, iy;  // place in the parent
 };
 
 struct BuildStats {
@@ -82,6 +84,8 @@ struct Builder {
   bool open = false;
   std::vector<uint8_t> blob;
   int census_logged = 0;
+  std::vector<std::pair<uint32_t, unsigned>> code_hist;  // codes of nodes above level 0
+  std::vector<unsigned> mat_nodes;
 
   void CloseChunk() {
     if (open) {
@@ -135,7 +139,9 @@ struct Builder {
     ni.s10 = f[0];
     ni.s14 = f[1];
     ni.texcode = tex;
-    ni.has_subs = true;
+    ni.has_subs = false;
+    for (int i = 0; i < 16; ++i)
+      if ((sub[i] & 0xFFFE) != 0xFFFE) ni.has_subs = true;  // 0x47f6a0: a table only if one is set
     std::memcpy(ni.sub, sub, sizeof(sub));
     if (w[1] >= ntiles || !tiles[w[1]]) {
       ++st.bad_tile;
@@ -198,6 +204,7 @@ struct Builder {
   std::vector<int> shared_of_mat;
   struct TexStats {
     unsigned node[4] = {}, sub[4] = {}, subs_missing = 0, bad_index = 0, w64 = 0, w128 = 0, wother = 0;
+    unsigned from_parent = 0, from_parent_sub = 0, parent_none = 0;
   } ts;
 
   // Material of a shared texture code; -1 = draw it untextured.
@@ -233,7 +240,8 @@ struct Builder {
   // own vertices (material and uv), its cells that have no child, and skirts
   // on the edges that lie on the node's border.
   void Patch(const NodeInfo& ni, const bool* has_kid, const float (*H)[17], const float* X, const float* Z,
-             const float (*N)[17][3], int x0, int y0, int n, int mat, float uscale, float& ymin, float& ymax) {
+             const float (*N)[17][3], int x0, int y0, int n, int mat, float uscale, float uoff, float voff,
+             float& ymin, float& ymax) {
     const int nv = (n + 1) * (n + 1) + 4 * (n + 1);
     Room(static_cast<unsigned>(nv));
     cur_mat = mat;
@@ -249,8 +257,8 @@ struct Builder {
         if (mat >= 0) {
           v.diffuse = log >= 2 ? Shade(N[y][x][0], N[y][x][1], N[y][x][2], ni.level, log) | 0xFF000000u
                                : 0xFFFFFFFFu;
-          v.t0[0] = static_cast<float>(((x - x0) * uscale) * 0.9375 + 0.03125);
-          v.t0[1] = static_cast<float>(((y - y0) * uscale) * 0.9375 + 0.03125);
+          v.t0[0] = static_cast<float>(((x - x0) * uscale + uoff) * 0.9375 + 0.03125);
+          v.t0[1] = static_cast<float>(((y - y0) * uscale + voff) * 0.9375 + 0.03125);
         } else {
           v.diffuse = Shade(N[y][x][0], N[y][x][1], N[y][x][2], ni.level, log);
         }
@@ -351,13 +359,46 @@ struct Builder {
         ++ts.sub[sk];
         float us = 1;
         const int mat = sk == kShared ? Material(sc, &us) : -1;
-        Patch(ni, has_kid, H, X, Z, N, sx, sy, 4, mat, 1.0f, ymin, ymax);
+        Patch(ni, has_kid, H, X, Z, N, sx, sy, 4, mat, 1.0f, 0, 0, ymin, ymax);
       }
-    } else {
-      if (k == kSubs) ++ts.subs_missing;
+    } else if (k == kShared) {
       float us = 1;
-      const int mat = k == kShared ? Material(ni.texcode, &us) : -1;
-      Patch(ni, has_kid, H, X, Z, N, 0, 0, 16, mat, us, ymin, ymax);
+      const int mat = Material(ni.texcode, &us);
+      Patch(ni, has_kid, H, X, Z, N, 0, 0, 16, mat, us, 0, 0, ymin, ymax);
+    } else {
+      // No texture of its own (0x47db09): the parent's, if shared, over the
+      // part this node covers (1/16 of it); else the parent's sub-block
+      // texture over this node's quarter of it.
+      if (k == kSubs) ++ts.subs_missing;
+      const NodeInfo* P = ni.parent;
+      int mat = -1;
+      float us = 1, sc = 0, uo = 0, vo = 0;
+      if (P && Kind(P->texcode) == kShared) {
+        mat = Material(P->texcode, &us);
+        sc = 1.0f / 256, uo = ni.ix / 16.0f, vo = ni.iy / 16.0f;
+        ++ts.from_parent;
+      } else if (P && P->has_subs) {
+        const uint32_t c = P->sub[(ni.iy >> 2) * 4 + (ni.ix >> 2)];
+        if ((c & 0xFFFE) != 0xFFFE && !(c & 1)) {
+          mat = Material(c, &us);
+          sc = 1.0f / 64, uo = (ni.ix & 3) / 4.0f, vo = (ni.iy & 3) / 4.0f;
+          ++ts.from_parent_sub;
+        } else {
+          ++ts.parent_none;
+        }
+      } else {
+        ++ts.parent_none;
+      }
+      Patch(ni, has_kid, H, X, Z, N, 0, 0, 16, mat, sc, uo, vo, ymin, ymax);
+    }
+    if (ni.level >= 1 && log >= 1) {
+      const uint32_t c = ni.texcode & 0xFFFF;
+      for (auto& h : code_hist)
+        if (h.first == c) {
+          ++h.second;
+          return;
+        }
+      if (code_hist.size() < 64) code_hist.push_back({c, 1u});
     }
   }
 
@@ -372,7 +413,7 @@ struct Builder {
           if (!c) continue;
           has_kid[i] = true;
           ++st.nodes_mem;
-          VisitMem(c, depth + 1);
+          VisitMem(c, depth + 1, &ni, i);
         }
       } else if (kids_off) {
         uint32_t offs[256];
@@ -397,6 +438,9 @@ struct Builder {
             c.gy = (ni.gy + (i >> 4)) * 16;
             c.shift = ni.shift - 4;
             c.level = ni.level - 1;
+            c.parent = &ni;
+            c.ix = i & 15;
+            c.iy = i >> 4;
             has_kid[i] = true;
             ++st.nodes_file;
             Visit(c, nullptr, ckids, depth + 1);
@@ -409,8 +453,11 @@ struct Builder {
     Emit(ni, has_kid);
   }
 
-  void VisitMem(uint8_t* n, int depth) {
+  void VisitMem(uint8_t* n, int depth, const NodeInfo* parent = nullptr, int index = 0) {
     NodeInfo ni{};
+    ni.parent = parent;
+    ni.ix = index & 15;
+    ni.iy = index >> 4;
     ni.gx = Rd<uint16_t>(n, 0x24);
     ni.gy = Rd<uint16_t>(n, 0x26);
     ni.level = Rd<uint8_t>(n, 0x28);
@@ -497,12 +544,22 @@ bool Build(uint8_t* root) {
   const Builder::TexStats& t = b.ts;
   patch::Log("gpu terrain: textures: %u shared in the track; node codes shared %u, streamed %u, sub-blocks %u (%u "
              "without a sub-block table); sub-block codes shared %u, streamed %u, none %u; %u bad shared numbers; "
-             "%zu shared textures used (64 wide %u, 128 wide %u, other %u), %u without a renderer texture; colours "
-             "c9c %08x ca0 %08x, cb0 %d, ca4 %d",
+             "%zu shared textures used (64 wide %u, 128 wide %u, other %u), %u without a renderer texture; nodes "
+             "with no texture of their own: parent's %u, parent's sub-block %u, none %u; colours c9c %08x ca0 %08x, "
+             "cb0 %d, ca4 %d",
              b.nshared, t.node[Builder::kShared], t.node[Builder::kStreamed], t.node[Builder::kSubs], t.subs_missing,
              t.sub[Builder::kShared], t.sub[Builder::kStreamed], t.sub[Builder::kNone], t.bad_index,
-             b.shared_of_mat.size(), t.w64, t.w128, t.wother, no_tex, Rd<uint32_t>(b.T, 0xC9C),
-             Rd<uint32_t>(b.T, 0xCA0), Rd<int32_t>(b.T, 0xCB0), Rd<int32_t>(b.T, 0xCA4));
+             b.shared_of_mat.size(), t.w64, t.w128, t.wother, no_tex, t.from_parent, t.from_parent_sub,
+             t.parent_none, Rd<uint32_t>(b.T, 0xC9C), Rd<uint32_t>(b.T, 0xCA0), Rd<int32_t>(b.T, 0xCB0),
+             Rd<int32_t>(b.T, 0xCA4));
+  if (b.log >= 1) {
+    char h[1024];
+    int hn = 0;
+    for (size_t i = 0; i < b.code_hist.size() && hn < 900; ++i)
+      hn += std::snprintf(h + hn, sizeof(h) - hn, " %04x:%u", b.code_hist[i].first, b.code_hist[i].second);
+    h[hn] = 0;
+    patch::Log("gpu terrain: texture codes of nodes above level 0 (code:count):%s", h);
+  }
   const double ms = Now() - t0;
   if (m.chunks.empty()) {
     patch::Log("gpu terrain: no terrain found under the root node (%u nodes); the game draws the terrain",
