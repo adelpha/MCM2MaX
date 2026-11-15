@@ -47,6 +47,13 @@ struct Mesh {
   std::vector<void*> textures;  // per material: the renderer's texture (a reference held), or null
   void* detail = nullptr;       // the detail texture (a reference held), or null
   float detail_fade[2] = {0, 0};  // its fade: from, to (depth)
+  // The game's near/far split (0x481c00): blocks whose texel measure is at
+  // or below T+0xca4 are drawn "far": no detail texture, diffuse T+0xc9c and
+  // specular T+0xca0. far_k * T+0x70 (the camera's focal length in pixels)
+  // is the distance where that happens; far_dist is this frame's (0 = off),
+  // focal the focal length in pixels.
+  float far_k = 0, far_dist = 0, focal = 0;
+  uint32_t far_diffuse = 0xFFFFFFFFu, far_specular = 0;
   unsigned generation = 0;      // bumped for each new mesh
 };
 

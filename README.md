@@ -637,6 +637,7 @@ only when asked to. Logs go to `%LOCALAPPDATA%\Motocross Madness 2\logs`.
 | `TerrainCheck` | `0` | With `FastTerrain`, every 2 seconds one frame also runs the game's own terrain code and logs any difference from the rewrite (there should be none), with a summary every 5 seconds. Costs a few milliseconds every 2 seconds. |
 | `GpuTerrainDetail` | `1` | With `GpuTerrain`, the game's fine detail texture is laid over the terrain, as the game does close up. `0` = without it. |
 | `GpuTerrainDetailReach` | `0` | How far from the camera the detail texture reaches (it fades out over the last quarter). `0` = all the way, as the game shows it. |
+| `GpuTerrainFar` | `1` | With `GpuTerrain`, terrain beyond the distance where the game switches its blocks to "far" is drawn as the game draws it there: without the detail texture, in the game's far colours. `0` = the near look all the way. |
 | `GpuTerrainLog` | `1` | With `GpuTerrain`, how the terrain was built and every 5 seconds what was drawn. `2` also tints the terrain by detail level. |
 | `FreeCam` | `1` | Ctrl+F6 during a race freezes it and gives a free camera for screenshots: mouse or arrow keys look, W/A/S/D move, Space/E up, C/Q down, Shift faster, Z slower. Ctrl+F6 again and the race carries on. |
 | `FreeCamSpeed` | `60` | Free camera speed in feet per second. |

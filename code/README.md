@@ -214,6 +214,12 @@ GpuTerrainDetail=1
 ; way, as the game shows it (default).
 GpuTerrainDetailReach=0
 
+; GpuTerrainFar: with GpuTerrain, terrain beyond the distance where the game
+; switches its terrain blocks to "far" is drawn as the game draws them there:
+; without the detail texture and in the game's far colours (default 1).
+; 0 = the near look all the way.
+GpuTerrainFar=1
+
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
 ; (default 1). 2 = fog starts twice as far away. Above 1, the edge of the
 ; drawn world may show through the fog unless ViewDistance is raised too.

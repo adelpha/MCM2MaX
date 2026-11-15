@@ -21,7 +21,7 @@ struct ReflectReplay {
   ID3D11VertexShader* vs;
   ID3D11PixelShader* ps;
   float world[16];
-  uint8_t pc[160];  // the pixel shader constants as drawn
+  uint8_t pc[208];  // the pixel shader constants as drawn
   UINT pc_size;
   D3D11_PRIMITIVE_TOPOLOGY topo;
   bool indexed;

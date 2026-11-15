@@ -41,6 +41,7 @@ struct Config {
   int terrain_mesh_cache_kb = 32768;  // TerrainMeshCache: KB of terrain meshes kept when not drawn (game: 1024)
   bool gpu_terrain = false;   // GpuTerrain: whole terrain built once at full detail on the GPU (gputerrain.cpp)
   bool gpu_terrain_detail = true;
+  int gpu_terrain_far = 1;  // GpuTerrainFar: far terrain coloured and without detail, as the game's far blocks
   float gpu_terrain_detail_reach = 0;  // GpuTerrainDetailReach: how far the detail texture reaches, 0 = the game's
   int free_cam = 1;             // FreeCam: Ctrl+F6 in a race freezes it and gives a fly camera
   float free_cam_speed = 60.0f; // FreeCamSpeed: feet per second (Shift x5, Z x0.2)

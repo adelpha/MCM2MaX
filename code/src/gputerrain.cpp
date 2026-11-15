@@ -615,6 +615,18 @@ bool Build(uint8_t* root) {
     const float reach = GetConfig().gpu_terrain_detail_reach > 0 ? GetConfig().gpu_terrain_detail_reach : 0.0f;
     m.detail_fade[0] = reach * 0.75f;
     m.detail_fade[1] = reach;
+    // The game's far blocks (GpuTerrainFar): measured with GpuTerrainLog
+    // (gterr-10: level 0 blocks near out to ~930 units at T+70 786, ca4 256,
+    // scale 4.5), which is the texel test 64 * T+70 / distance (in grid
+    // units) against ca4, plus about half a block.
+    const float scale = Rd<float>(b.T, 0x40);
+    if (GetConfig().gpu_terrain_far && ca4 > 0 && scale > 0) {
+      m.far_k = 64.0f * scale / ca4 * 1.02f;
+      m.far_diffuse = Rd<uint32_t>(b.T, 0xC9C);
+      m.far_specular = Rd<uint32_t>(b.T, 0xCA0);
+    }
+    patch::Log("gpu terrain: far blocks %s: from %.3f x focal length (%.0f units now), diffuse %08x specular %08x",
+               m.far_k > 0 ? "as the game's" : "off", m.far_k, m.far_k * t70, m.far_diffuse, m.far_specular);
     patch::Log("gpu terrain: detail reach %.0f (0 = everywhere; ini %.0f; the game's texel test would give %.0f from "
                "T+70 %d, ca4 %d); detail uv restarts per block, 1/12 per cell (16/12 on level 1)",
                reach, GetConfig().gpu_terrain_detail_reach, game_reach, Rd<int32_t>(b.T, 0x70), Rd<int32_t>(b.T, 0xCA4));
@@ -745,6 +757,13 @@ bool GpuTerrainDraw(void* root_v) {
   }
   const double t0 = Now();
   gt::DrawStats ds;
+  if (g_mesh.far_k > 0 && g_built_T) {
+    const float focal = static_cast<float>(Rd<int32_t>(g_built_T, 0x70));
+    if (focal != g_mesh.focal && GetConfig().gpu_terrain_log)
+      patch::Log("gpu terrain: focal length %.0f: far blocks from %.0f units", focal, g_mesh.far_k * focal);
+    g_mesh.focal = focal;
+    g_mesh.far_dist = g_mesh.far_k * focal;
+  }
   const bool ok = dd::DrawGpuTerrain(g_mesh, &ds);
   const double ms = Now() - t0;
   if (!ok) {

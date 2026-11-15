@@ -157,6 +157,7 @@ void LoadConfig() {
   g_config.gpu_terrain = GetPrivateProfileIntA("mcm2fix", "GpuTerrain", 0, ini) != 0;
   g_config.gpu_terrain_detail = GetPrivateProfileIntA("mcm2fix", "GpuTerrainDetail", 1, ini) != 0;
   g_config.gpu_terrain_detail_reach = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "GpuTerrainDetailReach", 0, ini));
+  g_config.gpu_terrain_far = GetPrivateProfileIntA("mcm2fix", "GpuTerrainFar", 1, ini);
   g_config.gpu_terrain_log = GetPrivateProfileIntA("mcm2fix", "GpuTerrainLog", 1, ini);
   g_config.free_cam = GetPrivateProfileIntA("mcm2fix", "FreeCam", 1, ini);
   g_config.free_cam_speed = static_cast<float>(GetPrivateProfileIntA("mcm2fix", "FreeCamSpeed", 60, ini));

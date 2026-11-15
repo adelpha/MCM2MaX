@@ -60,6 +60,9 @@ cbuffer PSParams : register(b1) {
   float4 key0;    // stage 0 colour key rgb, w = active
   float4 acut;    // x: discard alpha below this (blended draws that write depth)
                   // y: alpha-to-coverage, 1 sharpened at x, 2 alpha as is
+  float4 tfar;    // GpuTerrain near/far split: x distance (0 off), y focal (pixels), zw screen centre
+  float4 tfard;   // its far diffuse colour
+  float4 tfars;   // its far specular colour
 };
 #ifdef SHADOW
 // Rider shadows on the terrain (gpushadow.cpp): each pixel's light-space
@@ -235,6 +238,18 @@ float4 ps_main(VSOut i) : SV_Target {
   if (acut.w > 0) tc1.a *= saturate((acut.w - i.fogw) / max(acut.w - acut.z, 0.001));
   if (scol[0].w == 0) tc0 = white;
   if (scol[1].w == 0) tc1 = white;
+  // GpuTerrain: beyond the game's near/far distance (distance from the eye,
+  // from depth and the pixel's offset from the screen centre), as its far
+  // blocks: no detail, far diffuse and specular colours.
+  bool tfar_on = false;
+  if (tfar.x > 0) {
+    float2 off = (i.pos.xy - tfar.zw) / tfar.y;
+    if (i.fogw * sqrt(1 + dot(off, off)) > tfar.x) {
+      tfar_on = true;
+      tc1.a = 0;
+      i.diff = tfard;
+    }
+  }
   float4 cur = i.diff;
   if (scol[0].x != 1) {
     cur = Stage(0, i, cur, tc0);
@@ -251,6 +266,7 @@ float4 ps_main(VSOut i) : SV_Target {
   cur.rgb *= 1 - ShadowCover(i.ls) * sinfo.y;
 #endif
   if (atest.z != 0) cur.rgb = saturate(cur.rgb + i.spec.rgb);
+  if (tfar_on) cur.rgb = saturate(cur.rgb + tfars.rgb);
   if (fog.w != 0) {
     float d = i.fogw;
     float f = 1;
@@ -303,6 +319,9 @@ struct PSConstants {
   float atest[4];
   float key0[4];
   float cut[4];
+  float tfar[4];
+  float tfard[4];
+  float tfars[4];
 };
 
 // What the Device last bound on the D3D11 context (ini StateCache=1), so
@@ -2059,6 +2078,9 @@ void Device::ApplyState(bool tl, bool depth_clip, bool has_depth, bool shadow) {
   }
   pc.cut[2] = detail_fade_[0];
   pc.cut[3] = detail_fade_[1];
+  std::memcpy(pc.tfar, terr_far_, sizeof(pc.tfar));
+  std::memcpy(pc.tfard, terr_fard_, sizeof(pc.tfard));
+  std::memcpy(pc.tfars, terr_fars_, sizeof(pc.tfars));
   if (!bd.pc_ok || std::memcmp(&bd.pc, &pc, sizeof(pc)) != 0) {
     b.ctx->UpdateSubresource(ps_cb_, 0, nullptr, &pc, 0, 0);
     bd.pc = pc;
@@ -2889,6 +2911,14 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   }
   detail_fade_[0] = m.detail_fade[0];
   detail_fade_[1] = m.detail_fade[1];
+  if (m.far_dist > 0 && m.focal > 0) {
+    terr_far_[0] = m.far_dist;
+    terr_far_[1] = m.focal;
+    terr_far_[2] = vc.vp[0] + vc.vp[2] * 0.5f;
+    terr_far_[3] = vc.vp[1] + vc.vp[3] * 0.5f;
+    ColorToFloat(m.far_diffuse, terr_fard_);
+    ColorToFloat(m.far_specular, terr_fars_);
+  }
   // Visible chunks' ranges, sorted by texture so each is bound once.
   std::vector<const gt::Range*>& todo = terr_todo_;
   std::vector<int32_t>& todo_base = terr_todo_base_;
@@ -2934,6 +2964,7 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   }
   bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
   detail_fade_[0] = detail_fade_[1] = 0;
+  for (float& f : terr_far_) f = 0;
 
   for (int i = 0; i < kRs; ++i) rs_[rs_keys[i]] = rs_save[i];
   tex_[0] = tex_save[0];
