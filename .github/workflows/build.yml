@@ -76,3 +76,11 @@ jobs:
           path: |
             mcm2dat.exe
             tools/mcm2dat/README.md
+      - name: Build mcm2res (resource viewer/extractor)
+        run: i686-w64-mingw32-g++ -O2 -std=c++17 -static -s -o mcm2res.exe tools/mcm2res/mcm2res.cpp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcm2res
+          path: |
+            mcm2res.exe
+            tools/mcm2res/README.md

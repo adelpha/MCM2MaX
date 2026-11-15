@@ -1117,3 +1117,9 @@ Sky boxes are 48 overlapping tiles each. `tools/mcm2sky` (mcm2sky.exe, built
 by CI) extracts every sky straight from `RES\SKIES.RES` as one picture and
 cuts an edited picture back into correctly named tiles; see
 `tools/mcm2sky/README.md`.
+
+`tools/mcm2res` (mcm2res.exe, built by CI) pulls every texture out of the
+game's archives without playing, already named for `textures\`, and also
+writes each track's height map, ground texture and race maps, a terrain OBJ,
+tree models, sounds and text files, with an index.html to browse them; see
+`tools/mcm2res/README.md`.
