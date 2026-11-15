@@ -552,7 +552,7 @@ bool g_failed = false;
 bool g_on = true;  // Ctrl+F7
 
 struct DrawLog {
-  unsigned frames = 0, chunks = 0, tris = 0, game_frames = 0, draws = 0, shadowed = 0;
+  unsigned frames = 0, chunks = 0, tris = 0, game_frames = 0, draws = 0, shadowed = 0, reflect = 0;
   double ms = 0, max_ms = 0;
   DWORD last = 0;
 } g_dl;
@@ -723,10 +723,10 @@ void Report(bool drew) {
   if (now - g_dl.last < 5000) return;
   if (g_dl.frames)
     patch::Log("gpu terrain 5s: %u frames drawn by it (%u by the game); per frame %.1f chunks, %.1f draws, %.0f "
-               "triangles, %.3f ms on the game thread (worst %.2f); rider shadows on %u frames",
+               "triangles, %.3f ms on the game thread (worst %.2f); rider shadows on %u frames; %u draws kept for reflections",
                g_dl.frames, g_dl.game_frames, static_cast<double>(g_dl.chunks) / g_dl.frames,
                static_cast<double>(g_dl.draws) / g_dl.frames, static_cast<double>(g_dl.tris) / g_dl.frames,
-               g_dl.ms / g_dl.frames, g_dl.max_ms, g_dl.shadowed);
+               g_dl.ms / g_dl.frames, g_dl.max_ms, g_dl.shadowed, g_dl.reflect);
   const DWORD keep = now;
   g_dl = DrawLog();
   g_dl.last = keep;
@@ -817,6 +817,7 @@ bool GpuTerrainDraw(void* root_v) {
     }
   }
   if (ds.shadowed) ++g_dl.shadowed;
+  g_dl.reflect += ds.reflect_records;
   g_dl.chunks += ds.chunks_drawn;
   g_dl.tris += ds.tris_drawn;
   g_dl.draws += ds.draws;

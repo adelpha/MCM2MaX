@@ -69,6 +69,7 @@ struct DrawStats {
   double upload_ms = 0;
   bool uploaded = false;
   bool shadowed = false;  // rider shadows drawn on it this frame
+  unsigned reflect_records = 0;  // draws kept for the reflection cube
 };
 
 }  // namespace gt

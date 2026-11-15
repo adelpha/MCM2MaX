@@ -18,6 +18,7 @@ struct FarTreeFrame;
 namespace gt {
 struct Mesh;
 struct Range;
+struct Chunk;
 struct DrawStats;
 }  // namespace gt
 
@@ -225,6 +226,7 @@ class Device : public d3d7::IDirect3DDevice7 {
   float terr_far_[4] = {0, 0, 0, 0}, terr_fard_[4] = {1, 1, 1, 1}, terr_fars_[4] = {0, 0, 0, 0};
   std::vector<const gt::Range*> terr_todo_;
   std::vector<int32_t> terr_todo_base_;
+  std::vector<const gt::Chunk*> terr_todo_chunk_;
   std::vector<uint32_t> terr_order_;
   ID3D11Buffer* tree_buf_ = nullptr;
   ID3D11ShaderResourceView* tree_srv_ = nullptr;

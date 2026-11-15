@@ -948,7 +948,8 @@ uint64_t WeldKey(const void* verts, DWORD count, const void* idx, DWORD nidx, DW
 // RStats (ReflectLog).
 struct RStats {
   unsigned faces_skipped = 0, frames = 0, passes = 0, tris = 0, skipped_no_tris = 0, faces = 0, replays = 0, replay_stale = 0, replay_far = 0,
-           sky_tiles_drawn = 0, cube_builds = 0, records = 0, sun_draws = 0;
+           sky_tiles_drawn = 0, cube_builds = 0, records = 0, sun_draws = 0,
+           terrain_records = 0, terrain_drawn = 0, terrain_culled = 0;  // GPU terrain
   double pass_s = 0, cube_s = 0, record_s = 0;
   unsigned capture_bike = 0, capture_cam = 0;
 } g_st;
@@ -1423,11 +1424,21 @@ bool ReflectInRange(ReflectReplay& r, const uint8_t* pos, unsigned stride, const
   return true;
 }
 
+bool ReflectBoxInRange(const float lo[3], const float hi[3]) {
+  if (g_range <= 0) return true;
+  return BoxDist2(lo, hi, g_range_eye) <= g_range * g_range;
+}
+
 void Device::ReflectRecord(const ReflectReplay& r) {
   const double t0 = Now();
   g_replays.push_back(r);
   for (auto* s : r.srv)
     if (s) s->AddRef();
+  if (r.vb) {
+    r.vb->AddRef();
+    ++g_st.terrain_records;
+  }
+  if (r.ib) r.ib->AddRef();
   ++g_st.records;
   g_st.record_s += Now() - t0;
 }
@@ -1771,8 +1782,9 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
           float last_world[16];
           bool have_world = false;
           const ReflectReplay* prev = nullptr;
+          ID3D11Buffer* bound_vb = vbuf_;
           for (const ReflectReplay& r : g_replays) {
-            if (r.vgen != vgen || (r.indexed && r.igen != igen)) {
+            if (!r.vb && (r.vgen != vgen || (r.indexed && r.igen != igen))) {
               ++g_st.replay_stale;
               continue;
             }
@@ -1780,6 +1792,18 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
               ++g_st.replay_far;
               continue;
             }
+            if (r.vb && BoxOutside(r.lo, r.hi, vpm)) {
+              ++g_st.terrain_culled;
+              continue;
+            }
+            ID3D11Buffer* want_vb = r.vb ? r.vb : vbuf_;
+            if (want_vb != bound_vb) {
+              // GPU terrain's own buffers (same vertex layout and stride).
+              b.ctx->IASetVertexBuffers(0, 1, &want_vb, &game_stride, &zero);
+              b.ctx->IASetIndexBuffer(r.vb ? r.ib : ibuf_, DXGI_FORMAT_R16_UINT, 0);
+              bound_vb = want_vb;
+            }
+            if (r.vb) ++g_st.terrain_drawn;
             if (!have_world || std::memcmp(last_world, r.world, sizeof(last_world)) != 0) {
               Mul(r.world, vpm, vc.wvp);
               b.ctx->UpdateSubresource(g.game_vs_cb, 0, nullptr, &vc, 0, 0);
@@ -1851,9 +1875,12 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
       ContextTouched();
     }
   }
-  for (ReflectReplay& r : g_replays)
+  for (ReflectReplay& r : g_replays) {
     for (auto* s : r.srv)
       if (s) s->Release();
+    if (r.vb) r.vb->Release();
+    if (r.ib) r.ib->Release();
+  }
   g_replays.clear();
   g_obj_acc.clear();
   // ReflectFaceRate: may the next frame redraw a face (and so record its
@@ -1895,6 +1922,10 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
             "recorded nothing (no face due)",
             g_range, Cfg().max_range, g_rs.in, g_rs.out, g_rs.unbounded,
             g_st.faces ? double(g_st.replay_far) / g_st.faces : 0.0, Cfg().face_rate, g_frames_not_due);
+      if (Cfg().mode == 2 && (g_st.terrain_records || g_st.terrain_drawn))
+        Log("reflections 5s GPU terrain: %u draws kept, %.1f drawn and %.1f outside the face per cube face",
+            g_st.terrain_records, g_st.faces ? double(g_st.terrain_drawn) / g_st.faces : 0.0,
+            g_st.faces ? double(g_st.terrain_culled) / g_st.faces : 0.0);
       if (Cfg().mode == 2 && Cfg().cache) {
         size_t vb = 0, ib = 0;
         for (const auto& kv : g_cache) vb += kv.second.vbytes, ib += kv.second.ibytes;

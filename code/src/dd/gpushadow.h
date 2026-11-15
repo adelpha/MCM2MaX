@@ -48,6 +48,11 @@ bool ShadowSunDirection(float to_sun[3]);
 // (multiplying layers over shadowed ground are left alone).
 bool ShadowBindReceiver(const float* world, bool blend, DWORD src, DWORD dst);
 
+// GPU terrain: if the game's shadow pre-draw has not drawn this frame's
+// shadows (it is skipped with the game's terrain), draw them now from the
+// running race's shadow. True when this frame has GPU shadows.
+bool ShadowEnsureFrame();
+
 // Presented a frame (surface flip): per-frame bookkeeping and the ShadowLog
 // summary.
 void ShadowFrameEnd();

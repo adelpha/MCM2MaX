@@ -2839,6 +2839,9 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     }
   }
   FlushBatch(kBreakScreen);
+  // Rider shadows: drawn into their atlas first if the game's pre-draw did
+  // not (it renders to its own target, so before ours is bound).
+  const bool shadow_frame = g_pipe.shadow_ok && ShadowEnsureFrame();
   bool has_depth = false;
   if (!BindTarget(has_depth)) return false;
 
@@ -2963,30 +2966,34 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   // Rider shadows (gpushadow.cpp): the mesh is in world space, so the
   // light-space matrix is the light's alone.
   static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-  const bool shadow = has_depth && g_pipe.shadow_ok && ShadowBindReceiver(kIdentity, false, 0, 0);
+  const bool shadow = has_depth && shadow_frame && ShadowBindReceiver(kIdentity, false, 0, 0);
   if (st) st->shadowed = shadow;
+  // One texture pair's state (base + far texture, detail on stage 1).
+  auto bind_range = [&](const gt::Range& r, bool shadowed) {
+    Surface* t = (r.material >= 0 && static_cast<size_t>(r.material) < m.textures.size())
+                     ? static_cast<Surface*>(m.textures[r.material])
+                     : nullptr;
+    tex_[0] = t;
+    tss_[0][TSS_COLOROP] = t ? 4 : 3;  // modulate texture by diffuse, or diffuse alone
+    tex_[1] = (t && detail) ? detail : nullptr;
+    {
+      Surface* ft = (r.far_material >= 0 && static_cast<size_t>(r.far_material) < m.textures.size())
+                        ? static_cast<Surface*>(m.textures[r.far_material])
+                        : nullptr;
+      ID3D11ShaderResourceView* fsrv = ft ? ft->SampleTex()->srv : nullptr;
+      b.ctx->PSSetShaderResources(6, 1, &fsrv);
+    }
+    tss_[1][TSS_COLOROP] = tex_[1] ? 13 : 1;  // blend texture alpha, or off
+    tss_[1][TSS_ALPHAOP] = tex_[1] ? 4 - 1 : 1;  // select arg 2 (current)
+    ApplyState(false, true, has_depth, shadowed);
+  };
   int32_t bound = -2, bound_far = -2;
   for (uint32_t i : order) {
     const gt::Range& r = *todo[i];
     if (r.material != bound || r.far_material != bound_far) {
       bound = r.material;
       bound_far = r.far_material;
-      Surface* t = (r.material >= 0 && static_cast<size_t>(r.material) < m.textures.size())
-                       ? static_cast<Surface*>(m.textures[r.material])
-                       : nullptr;
-      tex_[0] = t;
-      tss_[0][TSS_COLOROP] = t ? 4 : 3;  // modulate texture by diffuse, or diffuse alone
-      tex_[1] = (t && detail) ? detail : nullptr;
-      {
-        Surface* ft = (r.far_material >= 0 && static_cast<size_t>(r.far_material) < m.textures.size())
-                          ? static_cast<Surface*>(m.textures[r.far_material])
-                          : nullptr;
-        ID3D11ShaderResourceView* fsrv = ft ? ft->SampleTex()->srv : nullptr;
-        b.ctx->PSSetShaderResources(6, 1, &fsrv);
-      }
-      tss_[1][TSS_COLOROP] = tex_[1] ? 13 : 1;  // blend texture alpha, or off
-      tss_[1][TSS_ALPHAOP] = tex_[1] ? 4 - 1 : 1;  // select arg 2 (current)
-      ApplyState(false, true, has_depth, shadow);
+      bind_range(r, shadow);
       const UINT stride = sizeof(gt::Vertex), zero = 0;
       b.ctx->IASetVertexBuffers(0, 1, &terr_vb_, &stride, &zero);
       b.ctx->IASetIndexBuffer(terr_ib_, DXGI_FORMAT_R16_UINT, 0);
@@ -2995,6 +3002,66 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     }
     b.ctx->DrawIndexed(r.index_count, r.first_index, todo_base[i]);
     ++draws;
+  }
+  // Reflections=2: the terrain near the bike, in view or not, drawn again
+  // into the live reflection cube (the game's own terrain draws are what it
+  // replays otherwise, and those are skipped while GPU terrain draws).
+  if (has_depth && ReflectRecording() && ReflectFrameDue()) {
+    todo.clear();
+    todo_base.clear();
+    std::vector<const gt::Chunk*>& todo_chunk = terr_todo_chunk_;
+    todo_chunk.clear();
+    for (const gt::Chunk& c : m.chunks) {
+      if (!ReflectBoxInRange(c.lo, c.hi)) continue;
+      for (uint32_t k = 0; k < c.range_count; ++k) {
+        todo.push_back(&m.ranges[c.first_range + k]);
+        todo_base.push_back(c.base_vertex);
+        todo_chunk.push_back(&c);
+      }
+    }
+    order.resize(todo.size());
+    for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(),
+              [&](uint32_t a, uint32_t c) { return todo[a]->material < todo[c]->material; });
+    bound = -2;
+    unsigned recorded = 0;
+    for (uint32_t i : order) {
+      const gt::Range& r = *todo[i];
+      if (r.material != bound) {
+        bound = r.material;
+        bind_range(r, false);
+      }
+      ReflectReplay rr{};
+      rr.blend = bd.blend;
+      rr.depth = bd.depth;
+      rr.srv[0] = bd.srv[0];
+      rr.srv[1] = bd.srv[1];
+      std::memcpy(rr.smp, bd.smp, sizeof(rr.smp));
+      rr.vs = bd.vs;
+      rr.ps = bd.ps;
+      static const float kId[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+      std::memcpy(rr.world, kId, sizeof(rr.world));
+      PSConstants pc = bd.pc;
+      // No far-block switch in the cube (it works from the main camera's
+      // screen position and focal length).
+      for (float& f : pc.tfar) f = 0;
+      std::memcpy(rr.pc, &pc, sizeof(PSConstants));
+      rr.pc_size = sizeof(PSConstants);
+      rr.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+      rr.indexed = true;
+      rr.nidx = r.index_count;
+      rr.ioff = r.first_index * 2;
+      rr.base_vertex = todo_base[i];
+      const gt::Chunk& c = *todo_chunk[i];
+      std::memcpy(rr.lo, c.lo, sizeof(rr.lo));
+      std::memcpy(rr.hi, c.hi, sizeof(rr.hi));
+      rr.bounded = true;
+      rr.vb = terr_vb_;
+      rr.ib = terr_ib_;
+      ReflectRecord(rr);
+      ++recorded;
+    }
+    if (st) st->reflect_records = recorded;
   }
   bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
   {

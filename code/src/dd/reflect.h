@@ -31,6 +31,11 @@ struct ReflectReplay {
   // World-space bounds of the draw (sampled; ReflectMaxRange), valid if bounded.
   float lo[3], hi[3];
   bool bounded;
+  // GPU terrain (gputerrain.cpp): drawn from its own buffers (AddRef'd while
+  // kept; stride 40 as the device's), which are never started over; culled
+  // to each cube face by its bounds.
+  ID3D11Buffer* vb;
+  ID3D11Buffer* ib;
 };
 
 // Settings (read from mcm2fix.ini once).
@@ -41,6 +46,9 @@ int ReflectMode();  // 0 off, 1 sky cube, 2 live cube
 // too far to matter in the reflection, nothing to record or cache).
 bool ReflectInRange(ReflectReplay& r, const uint8_t* pos, unsigned stride, const unsigned* starts,
                     const unsigned* counts, size_t n);
+// ReflectMaxRange for a box already in world space: whether it is near
+// enough to the bike to be drawn into the live cube (true while unknown).
+bool ReflectBoxInRange(const float lo[3], const float hi[3]);
 // The game's sky box tiles are textures named <sky>_<offset>, sky one of
 // the SKIES.RES cubes (terraNN, burnNN, windNN).
 bool IsSkyTextureName(const std::string& n);
