@@ -68,6 +68,7 @@
 #include "prof.h"
 #include "simd.h"
 #include "terrain_fast.h"
+#include "fpu_guard.h"
 
 // TerrainLodFix state, shared with the stub below (C names for the asm).
 extern "C" {
@@ -981,8 +982,13 @@ void CheckMeshResult(const char* what, uint8_t* n, int rg, int ro, int og, int o
            static_cast<unsigned>(o), o < kBuilderLen ? "differs" : "same", ti);
 }
 
+// Mesh calls compared per check frame (each copies the 18 KB builder state
+// a few times; a frame can build hundreds of meshes).
+constexpr unsigned kMeshChecksPerFrame = 48;
+unsigned g_mesh_checks_left = 0;
+
 int __fastcall MeshTriHook(uint8_t* n, void*, int L, int cnt, int x, int y, int dx, int dy, int* out) {
-  if (!g_check_mesh || L != 8)
+  if (!g_check_mesh || L != 8 || !g_mesh_checks_left || !--g_mesh_checks_left)
     return tf::MeshTri(reinterpret_cast<tf::Node*>(n), L, cnt, x, y, dx, dy, out);
   static std::vector<uint8_t> pb, gb;
   static std::vector<uint16_t> pi, gi;
@@ -1004,7 +1010,7 @@ int __fastcall MeshTriHook(uint8_t* n, void*, int L, int cnt, int x, int y, int 
 }
 
 int __fastcall MeshCornerHook(uint8_t* n, void*, int t, int x, int y, int dx, int dy) {
-  if (!g_check_mesh) return tf::MeshCorner(t, x, y, dx, dy);
+  if (!g_check_mesh || !g_mesh_checks_left) return tf::MeshCorner(t, x, y, dx, dy);
   static std::vector<uint8_t> pb, gb;
   static std::vector<uint16_t> gi;
   pb.assign(reinterpret_cast<uint8_t*>(kBuilder), reinterpret_cast<uint8_t*>(kBuilder) + kBuilderLen);
@@ -1050,6 +1056,28 @@ void __fastcall EvalHook(uint8_t* root, void*) {
     dd::DebugNotice(g_fast_on ? "FastTerrain ON" : "FastTerrain off");
   }
   prof::Scope z(prof::kTerrEval);
+  // The game thread's x87 control word as the game's C runtime left it
+  // (53-bit precision), taken at the first frame. Something that changes it
+  // later (a library on the game thread) would change the game's own maths
+  // too; it is put back and logged.
+  static uint16_t cw0 = 0;
+  static bool have_cw0 = false;
+  {
+    uint16_t cw;
+    uint32_t csr;
+    FpuGuard::Save(&cw, &csr);
+    if (!have_cw0) {
+      have_cw0 = true;
+      cw0 = cw;
+      patch::Log("terrain: game thread FPU control word %04x at the first frame", cw);
+    } else if (cw != cw0) {
+      static unsigned fixes = 0;
+      if (++fixes <= 10)
+        patch::Log("terrain: game thread FPU control word changed from %04x to %04x; put back%s", cw0, cw,
+                   fixes == 10 ? " (no more of these lines)" : "");
+      FpuGuard::Restore(cw0, csr);
+    }
+  }
   if (!g_fast_on || !tf::FpuIs53()) {
     if (g_fast_on) {
       patch::Log("terrain: FastTerrain: the FPU is not at 53-bit precision; switched off");
@@ -1075,6 +1103,7 @@ void __fastcall EvalHook(uint8_t* root, void*) {
   if (check) {
     CheckEval(root);
     g_check_mesh = true;    // this frame's mesh building (after Eval)
+    g_mesh_checks_left = kMeshChecksPerFrame;
     g_check_draw = true;    // this frame's draw walk
     g_check_detail = true;  // next frame's Setup
   } else {

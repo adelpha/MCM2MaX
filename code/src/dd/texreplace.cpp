@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../config.h"
+#include "../fpu_guard.h"
 #include "../xp_compat.h"
 
 namespace dd {
@@ -119,6 +120,7 @@ const std::map<uint64_t, std::wstring>& Index() {
 }
 
 bool Decode(const std::wstring& path, std::vector<uint8_t>& px, UINT& w, UINT& h) {
+  FpuGuard fpu;  // the imaging components may change the FPU's precision
   IWICImagingFactory* f = Wic();
   if (!f) return false;
   IWICBitmapDecoder* dec = nullptr;
@@ -185,7 +187,12 @@ bool LoadPicture(const std::wstring& path, const char* label, GpuTexture& out) {
     LogOnce("texture replacement %s: could not read the picture", label);
     return false;
   }
-  if (!CreateTextureFromBGRA(out, px.data(), w, h)) {
+  bool made;
+  {
+    FpuGuard fpu;
+    made = CreateTextureFromBGRA(out, px.data(), w, h);
+  }
+  if (!made) {
     LogOnce("texture replacement %s: could not create a %ux%u texture", label, w, h);
     return false;
   }
@@ -205,6 +212,7 @@ std::wstring DumpDir() {
 }
 
 bool WritePng(const std::wstring& path, const uint8_t* bgra, UINT w, UINT h) {
+  FpuGuard fpu;
   IWICImagingFactory* f = Wic();
   if (!f) return false;
   IWICStream* stream = nullptr;
