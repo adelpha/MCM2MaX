@@ -773,9 +773,26 @@ bool GpuTerrainDraw(void* root_v) {
   gt::DrawStats ds;
   if (g_mesh.far_k > 0 && g_built_T) {
     const float focal = static_cast<float>(Rd<int32_t>(g_built_T, 0x70));
-    if (focal != g_mesh.focal && GetConfig().gpu_terrain_log)
+    // Logged when it settles or moves a lot (it slides every frame while the
+    // view zooms at the race start).
+    static float logged_focal = 0.0f;
+    static double logged_at = 0.0;
+    if (GetConfig().gpu_terrain_log && focal != logged_focal &&
+        (std::fabs(focal - logged_focal) > logged_focal * 0.1f || t0 - logged_at > 1000.0)) {
       patch::Log("gpu terrain: focal length %.0f: far blocks from %.0f units", focal, g_mesh.far_k * focal);
+      logged_focal = focal;
+      logged_at = t0;
+    }
     g_mesh.focal = focal;
+    // The far colours change after the build (gterr-12: c0c0c0 / 070300 at
+    // load, cacaca / 060300 in the race), so follow the game's every frame.
+    const uint32_t fd = Rd<uint32_t>(g_built_T, 0xC9C), fs = Rd<uint32_t>(g_built_T, 0xCA0);
+    if (fd != g_mesh.far_diffuse || fs != g_mesh.far_specular) {
+      patch::Log("gpu terrain: far colours now diffuse %08x specular %08x (were %08x %08x)", fd, fs,
+                 g_mesh.far_diffuse, g_mesh.far_specular);
+      g_mesh.far_diffuse = fd;
+      g_mesh.far_specular = fs;
+    }
     g_mesh.far_dist = g_mesh.far_k * focal;
     g_mesh.far_dist2 = g_mesh.far_k2 * focal;
   }
