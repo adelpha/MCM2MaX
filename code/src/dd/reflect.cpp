@@ -631,12 +631,15 @@ struct CacheEntry {
   double seen = 0;
   unsigned seen_frame = 0;
   unsigned serial = 0;
+  uint64_t vat_total = 0, iat_total = 0;  // ring bytes written when it was copied
 };
 std::unordered_map<uint64_t, CacheEntry> g_cache;
 // Entries in the order their room was taken (both rings fill in this order,
 // so the oldest are in the way first): key and serial.
 std::deque<std::pair<uint64_t, unsigned>> g_cache_order;
 unsigned g_cache_serial = 0;
+// Bytes written into each ring so far: how far round the ring an entry is.
+uint64_t g_cache_vtotal = 0, g_cache_itotal = 0;
 std::vector<const CacheEntry*> g_cache_draw;  // this cube update's
 float g_cache_radius_used = 0;
 // ReflectMaxRange: where the cube was last drawn from and how far it looks
@@ -649,8 +652,9 @@ struct RangeStats {
 unsigned g_cache_frame = 1;  // frames recorded (the cache's own count)
 struct CStats {
   unsigned far_skipped = 0, hits = 0, inserts = 0, evicted = 0, aged = 0, too_big = 0, drawn = 0, culled_view = 0, culled_far = 0,
-           culled_old = 0;
+           culled_old = 0, refreshed = 0, evicted_recent = 0;
   double copied = 0;  // bytes
+  double evict_age_sum = 0, evict_age_min = 1e9;  // seconds since seen, at eviction
 } g_cs;
 
 void ReleaseEntry(CacheEntry& e) {
@@ -687,6 +691,12 @@ void CacheAlloc(UINT vbytes, UINT ibytes, UINT stride, UINT* vat, UINT* iat) {
     // its start: it goes first.
     const bool tail = (vwrap && e.vbyte >= *vat + vbytes) || (iwrap && e.ibytes && e.ibyte >= *iat + ibytes);
     if (!in_v && !in_i && !tail) break;
+    {
+      const double age = Now() - e.seen;
+      g_cs.evict_age_sum += age;
+      g_cs.evict_age_min = std::min(g_cs.evict_age_min, age);
+      if (age < 2.0) ++g_cs.evicted_recent;
+    }
     ReleaseEntry(it->second);
     g_cache.erase(it);
     g_cache_order.pop_front();
@@ -1522,6 +1532,16 @@ void Device::ReflectCache(const ReflectReplay& r, const uint8_t* cpu, UINT cpu_s
     h = Fnv(h, &r.topo, sizeof(r.topo));
     h = Fnv(h, q, sizeof(q));
     auto it = g_cache.find(h);
+    // An entry still being drawn but more than half way round the ring is
+    // copied afresh to its front (it would be the next pushed out, then gone
+    // from the cube as soon as it is behind the camera: gterr-18).
+    if (it != g_cache.end() && (g_cache_vtotal - it->second.vat_total > g.cvb_size / 2 ||
+                                g_cache_itotal - it->second.iat_total > g.cib_size / 2)) {
+      ReleaseEntry(it->second);
+      g_cache.erase(it);
+      it = g_cache.end();
+      ++g_cs.refreshed;
+    }
     if (it != g_cache.end()) {
       CacheEntry& e = it->second;
       e.seen = now;
@@ -1574,6 +1594,10 @@ void Device::ReflectCache(const ReflectReplay& r, const uint8_t* cpu, UINT cpu_s
     e.seen = now;
     e.seen_frame = g_cache_frame;
     e.serial = ++g_cache_serial;
+    g_cache_vtotal += vbytes;
+    g_cache_itotal += ibytes;
+    e.vat_total = g_cache_vtotal;
+    e.iat_total = g_cache_itotal;
     g_cache.emplace(h, e);
     g_cache_order.emplace_back(h, e.serial);
     ++g_cs.inserts;
@@ -1943,6 +1967,16 @@ void Device::ReflectEndScene(ID3D11InputLayout* game_layout, UINT game_stride) {
             g_cs.hits / fr, g_cs.inserts / fr, g_cs.copied / 1024 / fr,
             g_st.cube_builds ? double(g_cs.drawn) / g_st.faces : 0.0, g_cs.culled_view, g_cs.culled_far,
             g_cs.culled_old, g_cs.evicted, g_cs.aged, g_cs.too_big, g_cs.far_skipped / fr);
+        // How long kept draws last: what was pushed out had last been seen
+        // this long ago (short = gone from the cube soon after it left the
+        // camera's view; ReflectCacheMB gives the ring more room).
+        const double ring_s = g_cs.copied > 0 ? (g.cvb_size + g.cib_size) / (g_cs.copied / 5.0) : 0.0;
+        Log("reflections 5s cache life: %u copied afresh (still drawn, half way round the ring); pushed out %u, %u of them "
+            "seen under 2 s before, seen %.2f s before on average (shortest %.2f s); new draws average %.1f KB; ring of "
+            "%d MB lasts about %.1f s at this rate",
+            g_cs.refreshed, g_cs.evicted, g_cs.evicted_recent, g_cs.evicted ? g_cs.evict_age_sum / g_cs.evicted : 0.0,
+            g_cs.evicted ? g_cs.evict_age_min : 0.0, g_cs.inserts ? g_cs.copied / 1024 / g_cs.inserts : 0.0,
+            Cfg().cache_mb, ring_s);
       }
     }
     g_cs = CStats{};
