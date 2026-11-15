@@ -416,21 +416,25 @@ void GpuTerrainKeys() {
   }
 }
 
-bool GpuTerrainDraw(void* root_v) {
+bool GpuTerrainPrepare(void* root_v) {
   uint8_t* root = static_cast<uint8_t*>(root_v);
-  if (!root || !GpuTerrainActive()) {
-    Report(false);
-    return false;
-  }
+  if (!root || !GpuTerrainActive()) return false;
   uint8_t* T = Rd<uint8_t*>(root, 0x34);
   if (T != g_built_T || root != g_built_root) {
     g_built_T = T;
     g_built_root = root;
     if (!Build(root)) {
       g_failed = true;
-      Report(false);
       return false;
     }
+  }
+  return true;
+}
+
+bool GpuTerrainDraw(void* root_v) {
+  if (!GpuTerrainPrepare(root_v)) {
+    Report(false);
+    return false;
   }
   const double t0 = Now();
   gt::DrawStats ds;

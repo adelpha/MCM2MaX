@@ -54,8 +54,12 @@ bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* stats);
 bool GpuTerrainDrawable();
 }  // namespace dd
 
-// fixes_terrain.cpp: true while GpuTerrain draws the terrain this frame (the
-// game's terrain phases are skipped). `root`: the game's terrain root node.
+// fixes_terrain.cpp. `root`: the game's terrain root node.
+// GpuTerrainPrepare (in the terrain update): builds the mesh when the track
+// changed; true when GpuTerrain draws the terrain (the game's terrain phases
+// are skipped). GpuTerrainDraw (where the game draws its terrain, 0x481870's
+// call sites): draws it; false = the game draws its own.
+bool GpuTerrainPrepare(void* root);
 bool GpuTerrainDraw(void* root);
 bool GpuTerrainActive();
 void GpuTerrainKeys();  // Ctrl+F7 switches between it and the game's terrain

@@ -2723,10 +2723,25 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
 
   // The game's state for this draw, put back afterwards.
   const DWORD rs_keys[] = {RS_ZENABLE, RS_ZWRITEENABLE, RS_ALPHABLENDENABLE, RS_ALPHATESTENABLE, RS_CULLMODE,
-                           RS_SHADEMODE};
-  const DWORD rs_vals[] = {1, 1, 0, 0, 1 /* none */, 2 /* gouraud */};
-  DWORD rs_save[6];
-  for (int i = 0; i < 6; ++i) rs_save[i] = rs_[rs_keys[i]], rs_[rs_keys[i]] = rs_vals[i];
+                           RS_SHADEMODE, RS_ZFUNC};
+  const DWORD rs_vals[] = {1, 1, 0, 0, 1 /* none */, 2 /* gouraud */, 4 /* less-equal */};
+  constexpr int kRs = 7;
+  static int logged = 0;
+  if (logged < 3) {
+    // Camera and state at the first draws, for the log.
+    ++logged;
+    const float a = proj_.m[2][2], c = proj_.m[3][2];
+    const float zn = (a != 0) ? -c / a : 0, zf = (a != 1) ? c / (1 - a) : 0;
+    Log("gpu terrain draw %d: proj near %.2f far %.1f (m22 %.5f m32 %.3f m23 %.2f); view row3 %.1f %.1f %.1f; "
+        "viewport %lu,%lu %lux%lu z %.2f-%.2f; zenable %lu zwrite %lu zfunc %lu fog %lu (%lu/%lu) colour %08lx; "
+        "depth target %d",
+        logged, zn, zf, a, c, proj_.m[2][3], view_.m[3][0], view_.m[3][1], view_.m[3][2], viewport_.dwX,
+        viewport_.dwY, viewport_.dwWidth, viewport_.dwHeight, viewport_.dvMinZ, viewport_.dvMaxZ, rs_[RS_ZENABLE],
+        rs_[RS_ZWRITEENABLE], rs_[RS_ZFUNC], rs_[RS_FOGENABLE], rs_[RS_FOGTABLEMODE], rs_[RS_FOGVERTEXMODE],
+        rs_[RS_FOGCOLOR], has_depth ? 1 : 0);
+  }
+  DWORD rs_save[kRs];
+  for (int i = 0; i < kRs; ++i) rs_save[i] = rs_[rs_keys[i]], rs_[rs_keys[i]] = rs_vals[i];
   Surface* tex_save[2] = {tex_[0], tex_[1]};
   DWORD tss_save[2][32];
   std::memcpy(tss_save, tss_, sizeof(tss_save));
@@ -2772,7 +2787,7 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   }
   bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
 
-  for (int i = 0; i < 6; ++i) rs_[rs_keys[i]] = rs_save[i];
+  for (int i = 0; i < kRs; ++i) rs_[rs_keys[i]] = rs_save[i];
   tex_[0] = tex_save[0];
   tex_[1] = tex_save[1];
   std::memcpy(tss_, tss_save, sizeof(tss_save));

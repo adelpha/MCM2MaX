@@ -1345,10 +1345,19 @@ int __fastcall MeshZone(void* root, void*) {
   return reinterpret_cast<ThisVoid>(0x47FEC0)(root, nullptr);
 }
 int __fastcall BlocksZone(void* root, void*) {
-  GpuTerrainKeys();
-  if (GpuTerrainDraw(root)) return 1;
+  if (GpuTerrainPrepare(root)) return 1;
   prof::Scope z(prof::kTerrBlocks);
   return reinterpret_cast<ThisVoid>(kRender)(root, nullptr);
+}
+
+// Where the game draws its terrain (0x50bfaf / 0x50bffc: call 481870,
+// thiscall root, arg the device wrapper, ret 4), inside the scene with the
+// camera of this frame.
+using TerrainDrawFn = void(__fastcall*)(void* root, void* edx, void* dev);
+void __fastcall TerrainDrawSite(void* root, void*, void* dev) {
+  GpuTerrainKeys();
+  if (GpuTerrainDraw(root)) return;
+  reinterpret_cast<TerrainDrawFn>(0x481870)(root, nullptr, dev);
 }
 
 }  // namespace
@@ -1416,8 +1425,13 @@ void ApplyTerrainFixes() {
     const uint8_t call_eval[] = {0xE8, 0x9D, 0x66, 0xF7, 0xFF};    // call 4836e0
     const uint8_t call_mesh[] = {0xE8, 0x44, 0x2E, 0xF7, 0xFF};    // call 47fec0
     const uint8_t call_blocks[] = {0xE8, 0x4B, 0x50, 0xF7, 0xFF};  // call 4820e0
+    const uint8_t call_draw1[] = {0xE8, 0xBC, 0x58, 0xF7, 0xFF};   // 50bfaf: call 481870
+    const uint8_t call_draw2[] = {0xE8, 0x6F, 0x58, 0xF7, 0xFF};   // 50bffc: call 481870
     if (patch::Matches(0x50D00C, call_setup, 5) && patch::Matches(0x50D03E, call_eval, 5) &&
-        patch::Matches(0x50D077, call_mesh, 5) && patch::Matches(0x50D090, call_blocks, 5)) {
+        patch::Matches(0x50D077, call_mesh, 5) && patch::Matches(0x50D090, call_blocks, 5) &&
+        patch::Matches(0x50BFAF, call_draw1, 5) && patch::Matches(0x50BFFC, call_draw2, 5)) {
+      patch::Call(0x50BFAF, reinterpret_cast<const void*>(&TerrainDrawSite), 5);
+      patch::Call(0x50BFFC, reinterpret_cast<const void*>(&TerrainDrawSite), 5);
       patch::Call(0x50D00C, reinterpret_cast<const void*>(&SetupZone), 5);
       patch::Call(0x50D03E, reinterpret_cast<const void*>(&EvalSite), 5);
       patch::Call(0x50D077, reinterpret_cast<const void*>(&MeshZone), 5);
