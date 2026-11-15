@@ -68,6 +68,7 @@ struct DrawStats {
   unsigned chunks_drawn = 0, tris_drawn = 0, draws = 0;
   double upload_ms = 0;
   bool uploaded = false;
+  bool shadowed = false;  // rider shadows drawn on it this frame
 };
 
 }  // namespace gt

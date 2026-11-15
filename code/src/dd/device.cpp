@@ -2960,6 +2960,11 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     ID3D11SamplerState* s0 = GetSampler(0);  // the base texture's (the game's settings)
     b.ctx->PSSetSamplers(4, 1, &s0);
   }
+  // Rider shadows (gpushadow.cpp): the mesh is in world space, so the
+  // light-space matrix is the light's alone.
+  static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  const bool shadow = has_depth && g_pipe.shadow_ok && ShadowBindReceiver(kIdentity, false, 0, 0);
+  if (st) st->shadowed = shadow;
   int32_t bound = -2, bound_far = -2;
   for (uint32_t i : order) {
     const gt::Range& r = *todo[i];
@@ -2981,7 +2986,7 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
       }
       tss_[1][TSS_COLOROP] = tex_[1] ? 13 : 1;  // blend texture alpha, or off
       tss_[1][TSS_ALPHAOP] = tex_[1] ? 4 - 1 : 1;  // select arg 2 (current)
-      ApplyState(false, true, has_depth, false);
+      ApplyState(false, true, has_depth, shadow);
       const UINT stride = sizeof(gt::Vertex), zero = 0;
       b.ctx->IASetVertexBuffers(0, 1, &terr_vb_, &stride, &zero);
       b.ctx->IASetIndexBuffer(terr_ib_, DXGI_FORMAT_R16_UINT, 0);
