@@ -2645,6 +2645,26 @@ bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   return g_tree_device->DrawGpuTerrain(m, st);
 }
 
+void* GpuTerrainCurrentTexture() {
+  if (!g_tree_device) return nullptr;
+  Surface* t = g_tree_device->Texture0();
+  if (t) t->AddRef();
+  return t;
+}
+
+void GpuTerrainReleaseTexture(void* t) {
+  if (t) static_cast<Surface*>(t)->Release();
+}
+
+void GpuTerrainDescribeTexture(void* t, char* out, size_t n) {
+  if (!t) {
+    std::snprintf(out, n, "no texture");
+    return;
+  }
+  Surface* s = static_cast<Surface*>(t);
+  std::snprintf(out, n, "%ux%u \"%s\"", s->Width(), s->Height(), s->TextureName().c_str());
+}
+
 namespace {
 // Outside the view: all 8 corners beyond one clip plane (row vectors, D3D
 // clip space 0 <= z <= w).
@@ -2746,11 +2766,16 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   DWORD tss_save[2][32];
   std::memcpy(tss_save, tss_, sizeof(tss_save));
   tex_[0] = tex_[1] = nullptr;
-  tss_[0][TSS_COLOROP] = 3;  // select arg 2: diffuse
-  tss_[0][TSS_COLORARG2] = 0;
-  tss_[0][TSS_ALPHAOP] = 3;
+  tss_[0][TSS_COLORARG1] = 2;  // texture
+  tss_[0][TSS_COLORARG2] = 0;  // diffuse
+  tss_[0][TSS_ALPHAOP] = 3;    // select arg 2: diffuse
   tss_[0][TSS_ALPHAARG2] = 0;
-  tss_[1][TSS_COLOROP] = 1;  // disable
+  tss_[0][TSS_TEXCOORDINDEX] = 0;
+  tss_[0][TSS_ADDRESS] = tss_[0][TSS_ADDRESSU] = tss_[0][TSS_ADDRESSV] = 1;  // wrap
+  tss_[0][TSS_MAGFILTER] = 2;  // linear
+  tss_[0][TSS_MINFILTER] = 2;
+  tss_[0][TSS_MIPFILTER] = 3;  // linear between mip levels
+  tss_[1][TSS_COLOROP] = 1;    // disable
   tss_[1][TSS_ALPHAOP] = 1;
 
   VSConstants vc{};
@@ -2772,18 +2797,45 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     bd.vp = v;
     bd.vp_ok = true;
   }
-  ApplyState(false, true, has_depth, false);
-  const UINT stride = sizeof(gt::Vertex), zero = 0;
-  b.ctx->IASetVertexBuffers(0, 1, &terr_vb_, &stride, &zero);
-  b.ctx->IASetIndexBuffer(terr_ib_, DXGI_FORMAT_R16_UINT, 0);
-  if (bd.topo != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
-    b.ctx->IASetPrimitiveTopology(bd.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  unsigned drawn = 0, tris = 0;
+  // Visible chunks' ranges, sorted by texture so each is bound once.
+  std::vector<const gt::Range*>& todo = terr_todo_;
+  std::vector<int32_t>& todo_base = terr_todo_base_;
+  todo.clear();
+  todo_base.clear();
+  unsigned drawn = 0, tris = 0, draws = 0;
   for (const gt::Chunk& c : m.chunks) {
     if (BoxOutside(c.lo, c.hi, vpm)) continue;
-    b.ctx->DrawIndexed(c.index_count, c.first_index, c.base_vertex);
     ++drawn;
     tris += c.index_count / 3;
+    for (uint32_t r = 0; r < c.range_count; ++r) {
+      todo.push_back(&m.ranges[c.first_range + r]);
+      todo_base.push_back(c.base_vertex);
+    }
+  }
+  std::vector<uint32_t>& order = terr_order_;
+  order.resize(todo.size());
+  for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::sort(order.begin(), order.end(),
+            [&](uint32_t a, uint32_t c) { return todo[a]->material < todo[c]->material; });
+  int32_t bound = -2;
+  for (uint32_t i : order) {
+    const gt::Range& r = *todo[i];
+    if (r.material != bound) {
+      bound = r.material;
+      Surface* t = (r.material >= 0 && static_cast<size_t>(r.material) < m.textures.size())
+                       ? static_cast<Surface*>(m.textures[r.material])
+                       : nullptr;
+      tex_[0] = t;
+      tss_[0][TSS_COLOROP] = t ? 4 : 3;  // modulate texture by diffuse, or diffuse alone
+      ApplyState(false, true, has_depth, false);
+      const UINT stride = sizeof(gt::Vertex), zero = 0;
+      b.ctx->IASetVertexBuffers(0, 1, &terr_vb_, &stride, &zero);
+      b.ctx->IASetIndexBuffer(terr_ib_, DXGI_FORMAT_R16_UINT, 0);
+      if (bd.topo != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+        b.ctx->IASetPrimitiveTopology(bd.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    }
+    b.ctx->DrawIndexed(r.index_count, r.first_index, todo_base[i]);
+    ++draws;
   }
   bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
 
@@ -2794,10 +2846,11 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   if (cur_msaa_) MsaaMarkDrawn();
   if (has_depth) Note3DDraw();
   rt_->MarkGpuWritten();
-  Counters().draws += drawn;
+  Counters().draws += draws;
   if (st) {
     st->chunks_drawn = drawn;
     st->tris_drawn = tris;
+    st->draws = draws;
   }
   return true;
 }

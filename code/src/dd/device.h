@@ -17,6 +17,7 @@
 struct FarTreeFrame;
 namespace gt {
 struct Mesh;
+struct Range;
 struct DrawStats;
 }  // namespace gt
 
@@ -206,10 +207,14 @@ class Device : public d3d7::IDirect3DDevice7 {
   bool DrawFarTrees(const ::FarTreeFrame& f);
   // GpuTerrain (gputerrain.cpp): the whole terrain from its own buffers.
   bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st);
+  Surface* Texture0() const { return tex_[0]; }
  private:
   ID3D11Buffer* terr_vb_ = nullptr;
   ID3D11Buffer* terr_ib_ = nullptr;
   unsigned terr_gen_ = 0;
+  std::vector<const gt::Range*> terr_todo_;
+  std::vector<int32_t> terr_todo_base_;
+  std::vector<uint32_t> terr_order_;
   ID3D11Buffer* tree_buf_ = nullptr;
   ID3D11ShaderResourceView* tree_srv_ = nullptr;
   ID3D11Buffer* tree_cb_ = nullptr;

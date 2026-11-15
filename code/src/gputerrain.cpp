@@ -38,7 +38,6 @@ T Rd(const void* p, int off) {
 }
 
 constexpr int kChunkVerts = 32768;  // vertices per chunk (16-bit indices from its base)
-constexpr int kNodeVerts = 289 + 4 * 17;
 
 using SeekFn = int(__fastcall*)(void* stream, void* edx, int pos, int a, int b);
 using ReadFn = int(__fastcall*)(void* stream, void* edx, void* dst, int size, int count);
@@ -50,6 +49,8 @@ struct NodeInfo {
   float s10, s14;
   const uint8_t* tile;
   uint32_t texcode;
+  bool has_subs;
+  uint32_t sub[16];
 };
 
 struct BuildStats {
@@ -80,9 +81,25 @@ struct Builder {
   gt::Chunk cur{};
   bool open = false;
   std::vector<uint8_t> blob;
+  int census_logged = 0;
 
   void CloseChunk() {
-    if (open && cur.index_count) m->chunks.push_back(cur);
+    if (open) {
+      cur.first_range = static_cast<uint32_t>(m->ranges.size());
+      for (size_t k = 0; k < pend.size(); ++k) {
+        if (pend[k].empty()) continue;
+        gt::Range r;
+        r.first_index = static_cast<uint32_t>(m->idx.size());
+        r.index_count = static_cast<uint32_t>(pend[k].size());
+        r.material = static_cast<int32_t>(k) - 1;
+        m->idx.insert(m->idx.end(), pend[k].begin(), pend[k].end());
+        m->ranges.push_back(r);
+        cur.index_count += r.index_count;
+        pend[k].clear();
+      }
+      cur.range_count = static_cast<uint32_t>(m->ranges.size()) - cur.first_range;
+      if (cur.index_count) m->chunks.push_back(cur);
+    }
     open = false;
   }
   void Room(unsigned verts) {
@@ -118,6 +135,8 @@ struct Builder {
     ni.s10 = f[0];
     ni.s14 = f[1];
     ni.texcode = tex;
+    ni.has_subs = true;
+    std::memcpy(ni.sub, sub, sizeof(sub));
     if (w[1] >= ntiles || !tiles[w[1]]) {
       ++st.bad_tile;
       ni.tile = nullptr;
@@ -158,16 +177,144 @@ struct Builder {
     return 0xFF000000u | c(r) << 16 | c(g) << 8 | c(bl);
   }
 
+  // ---- textures (the game's choice at full detail, 0x47d9f0): a node's
+  // texture code is a shared texture (T+0x544[(int16)code >> 1]), a texture
+  // streamed from the track file (bit 0), or 0xfffe/0xffff = 16 sub-block
+  // textures (4x4 cells each, row-major), each code shared or streamed.
+  // u = ((x - x0) * scale + offset) * 0.9375 + 0.03125 (0x47ede0), v from y;
+  // a shared texture 64 wide repeats every cell (scale 1), otherwise it spans
+  // the node (scale 1/16); sub-block textures use scale 1 from the
+  // sub-block's corner.
+  enum CodeKind { kNone, kShared, kStreamed, kSubs };
+  static CodeKind Kind(uint32_t code) {
+    if ((code & 0xFFFE) == 0xFFFE) return kSubs;
+    if (code & 1) return kStreamed;
+    return kShared;
+  }
+  static int SharedIndex(uint32_t code) { return static_cast<int16_t>(code & 0xFFFF) >> 1; }
+  uint32_t nshared = 0;
+  uint8_t* const* shared = nullptr;
+  std::vector<int> mat_of_shared;  // shared texture -> material, -1 = not used yet
+  std::vector<int> shared_of_mat;
+  struct TexStats {
+    unsigned node[4] = {}, sub[4] = {}, subs_missing = 0, bad_index = 0, w64 = 0, w128 = 0, wother = 0;
+  } ts;
+
+  // Material of a shared texture code; -1 = draw it untextured.
+  int Material(uint32_t code, float* uscale) {
+    const int i = SharedIndex(code);
+    if (i < 0 || static_cast<uint32_t>(i) >= nshared || !shared[i]) {
+      ++ts.bad_index;
+      return -1;
+    }
+    if (mat_of_shared[i] < 0) {
+      mat_of_shared[i] = static_cast<int>(shared_of_mat.size());
+      shared_of_mat.push_back(i);
+      const int w = Rd<int32_t>(shared[i], 0x14);
+      if (w == 64) ++ts.w64; else if (w == 128) ++ts.w128; else ++ts.wother;
+    }
+    *uscale = Rd<int32_t>(shared[i], 0x14) == 64 ? 1.0f : 1.0f / 16.0f;
+    return mat_of_shared[i];
+  }
+
+  // Indices waiting for the chunk to close, by material (+1: 0 = untextured).
+  std::vector<std::vector<uint16_t>> pend;
+  int cur_mat = -1;
+  void Add(uint32_t a, uint32_t b, uint32_t c) {
+    const size_t k = static_cast<size_t>(cur_mat + 1);
+    if (pend.size() <= k) pend.resize(k + 1);
+    std::vector<uint16_t>& v = pend[k];
+    v.push_back(static_cast<uint16_t>(a));
+    v.push_back(static_cast<uint16_t>(b));
+    v.push_back(static_cast<uint16_t>(c));
+  }
+
+  // One patch of n x n cells from grid point (x0, y0) of the node, with its
+  // own vertices (material and uv), its cells that have no child, and skirts
+  // on the edges that lie on the node's border.
+  void Patch(const NodeInfo& ni, const bool* has_kid, const float (*H)[17], const float* X, const float* Z,
+             const float (*N)[17][3], int x0, int y0, int n, int mat, float uscale, float& ymin, float& ymax) {
+    const int nv = (n + 1) * (n + 1) + 4 * (n + 1);
+    Room(static_cast<unsigned>(nv));
+    cur_mat = mat;
+    const uint32_t base = cur.vertex_count;
+    const uint32_t vfirst = static_cast<uint32_t>(m->verts.size());
+    for (int y = y0; y <= y0 + n; ++y) {
+      for (int x = x0; x <= x0 + n; ++x) {
+        gt::Vertex v{};
+        v.pos[0] = X[x];
+        v.pos[1] = H[y][x];
+        v.pos[2] = Z[y];
+        v.pos[3] = 1;
+        if (mat >= 0) {
+          v.diffuse = log >= 2 ? Shade(N[y][x][0], N[y][x][1], N[y][x][2], ni.level, log) | 0xFF000000u
+                               : 0xFFFFFFFFu;
+          v.t0[0] = static_cast<float>(((x - x0) * uscale) * 0.9375 + 0.03125);
+          v.t0[1] = static_cast<float>(((y - y0) * uscale) * 0.9375 + 0.03125);
+        } else {
+          v.diffuse = Shade(N[y][x][0], N[y][x][1], N[y][x][2], ni.level, log);
+        }
+        m->verts.push_back(v);
+        if (H[y][x] < ymin) ymin = H[y][x];
+        if (H[y][x] > ymax) ymax = H[y][x];
+      }
+    }
+    const int w = n + 1;
+    for (int cy = 0; cy < n; ++cy) {
+      for (int cx = 0; cx < n; ++cx) {
+        if (has_kid[(y0 + cy) * 16 + x0 + cx]) continue;
+        const uint32_t a = base + cy * w + cx;
+        Add(a, a + w, a + w + 1);
+        Add(a, a + w + 1, a + 1);
+        ++st.leaf_cells;
+      }
+    }
+    // Skirts: a strip hanging down from each outer edge of the node where a
+    // cell is drawn, so seams with finer or coarser neighbours show no sky.
+    const float drop = std::fabs(X[1] - X[0]) * 1.5f + 1.0f;
+    uint32_t vbase = base + w * w;
+    // edge: start (local x, y), step; on the node border?
+    const int edges[4][4] = {{0, 0, 1, 0}, {0, n, 1, 0}, {0, 0, 0, 1}, {n, 0, 0, 1}};
+    const bool border[4] = {y0 == 0, y0 + n == 16, x0 == 0, x0 + n == 16};
+    for (int e = 0; e < 4; ++e) {
+      for (int k = 0; k <= n; ++k) {
+        const int x = edges[e][0] + edges[e][2] * k, y = edges[e][1] + edges[e][3] * k;
+        gt::Vertex v = m->verts[vfirst + y * w + x];
+        v.pos[1] -= drop;
+        m->verts.push_back(v);
+      }
+      if (border[e]) {
+        for (int k = 0; k < n; ++k) {
+          const int x = edges[e][0] + edges[e][2] * k, y = edges[e][1] + edges[e][3] * k;
+          const int cx = x0 + (e == 3 ? n - 1 : (edges[e][2] ? k : 0));
+          const int cy = y0 + (e == 1 ? n - 1 : (edges[e][3] ? k : 0));
+          if (has_kid[cy * 16 + cx]) continue;
+          const uint32_t t0 = base + y * w + x;
+          const uint32_t t1 = base + (y + edges[e][3]) * w + (x + edges[e][2]);
+          const uint32_t b0 = vbase + k, b1 = vbase + k + 1;
+          Add(t0, b0, b1);
+          Add(t0, b1, t1);
+          ++st.skirt_quads;
+        }
+      }
+      vbase += static_cast<uint32_t>(n + 1);
+    }
+    cur.vertex_count += static_cast<uint32_t>(nv);
+    const float lo[3] = {std::fmin(X[x0], X[x0 + n]), ymin - drop, std::fmin(Z[y0], Z[y0 + n])};
+    const float hi[3] = {std::fmax(X[x0], X[x0 + n]), ymax, std::fmax(Z[y0], Z[y0 + n])};
+    for (int i = 0; i < 3; ++i) {
+      if (lo[i] < cur.lo[i]) cur.lo[i] = lo[i];
+      if (hi[i] > cur.hi[i]) cur.hi[i] = hi[i];
+    }
+  }
+
   void Emit(const NodeInfo& ni, const bool* has_kid) {
     unsigned leaves = 0;
     for (int i = 0; i < 256; ++i) leaves += has_kid[i] ? 0 : 1;
     if (!leaves || !ni.tile) return;
     ++st.nodes_drawn;
-    st.leaf_cells += leaves;
     if (ni.level >= 0 && ni.level < 16) ++st.by_level[ni.level];
-    Room(kNodeVerts);
-    const uint32_t base = cur.vertex_count;
-    float H[17][17], X[17], Z[17];
+    float H[17][17], X[17], Z[17], N[17][17][3];
     for (int i = 0; i < 17; ++i) {
       X[i] = Coord(ni.gx + i, ni.shift);
       Z[i] = Coord(ni.gy + i, ni.shift);
@@ -176,72 +323,41 @@ struct Builder {
       for (int x = 0; x < 17; ++x) H[y][x] = Height(ni, y * 17 + x);
     const float cell = X[1] - X[0];
     const float inv = cell != 0 ? 1.0f / cell : 0.0f;
-    float ymin = 3e38f, ymax = -3e38f;
     for (int y = 0; y < 17; ++y) {
       for (int x = 0; x < 17; ++x) {
         const int x0 = x > 0 ? x - 1 : x, x1 = x < 16 ? x + 1 : x;
         const int y0 = y > 0 ? y - 1 : y, y1 = y < 16 ? y + 1 : y;
         const float dx = (H[y][x1] - H[y][x0]) * inv / static_cast<float>(x1 - x0);
         const float dz = (H[y1][x] - H[y0][x]) * inv / static_cast<float>(y1 - y0);
-        float nx = -dx, ny = 1, nz = -dz;
-        const float l = 1.0f / std::sqrt(nx * nx + ny * ny + nz * nz);
-        gt::Vertex v{};
-        v.pos[0] = X[x];
-        v.pos[1] = H[y][x];
-        v.pos[2] = Z[y];
-        v.pos[3] = 1;
-        v.diffuse = Shade(nx * l, ny * l, nz * l, ni.level, log);
-        m->verts.push_back(v);
-        if (H[y][x] < ymin) ymin = H[y][x];
-        if (H[y][x] > ymax) ymax = H[y][x];
+        const float l = 1.0f / std::sqrt(dx * dx + 1 + dz * dz);
+        N[y][x][0] = -dx * l;
+        N[y][x][1] = l;
+        N[y][x][2] = -dz * l;
       }
     }
-    auto add = [&](uint32_t a, uint32_t b, uint32_t c) {
-      m->idx.push_back(static_cast<uint16_t>(a));
-      m->idx.push_back(static_cast<uint16_t>(b));
-      m->idx.push_back(static_cast<uint16_t>(c));
-      cur.index_count += 3;
-    };
-    for (int cy = 0; cy < 16; ++cy) {
-      for (int cx = 0; cx < 16; ++cx) {
-        if (has_kid[cy * 16 + cx]) continue;
-        const uint32_t a = base + cy * 17 + cx;
-        add(a, a + 17, a + 18);
-        add(a, a + 18, a + 1);
+    float ymin = 3e38f, ymax = -3e38f;
+    const CodeKind k = Kind(ni.texcode);
+    ++ts.node[k];
+    if (k == kSubs && ni.has_subs) {
+      for (int s = 0; s < 16; ++s) {
+        const int sx = (s & 3) * 4, sy = (s >> 2) * 4;
+        bool any = false;
+        for (int cy = 0; cy < 4 && !any; ++cy)
+          for (int cx = 0; cx < 4; ++cx)
+            if (!has_kid[(sy + cy) * 16 + sx + cx]) any = true;
+        if (!any) continue;
+        const uint32_t sc = ni.sub[s];
+        const CodeKind sk = (sc & 0xFFFE) == 0xFFFE ? kNone : Kind(sc);
+        ++ts.sub[sk];
+        float us = 1;
+        const int mat = sk == kShared ? Material(sc, &us) : -1;
+        Patch(ni, has_kid, H, X, Z, N, sx, sy, 4, mat, 1.0f, ymin, ymax);
       }
-    }
-    // Skirts: a strip hanging down from each outer edge where a cell is drawn
-    // here, so seams with finer or coarser neighbours show no sky.
-    const float drop = std::fabs(cell) * 1.5f + 1.0f;
-    uint32_t vbase = base + 289;
-    const int edges[4][4] = {{0, 0, 1, 0}, {0, 16, 1, 0}, {0, 0, 0, 1}, {16, 0, 0, 1}};  // start x,y, step
-    for (int e = 0; e < 4; ++e) {
-      for (int k = 0; k < 17; ++k) {
-        const int x = edges[e][0] + edges[e][2] * k, y = edges[e][1] + edges[e][3] * k;
-        gt::Vertex v = m->verts[cur.base_vertex + base + y * 17 + x];
-        v.pos[1] -= drop;
-        m->verts.push_back(v);
-      }
-      for (int k = 0; k < 16; ++k) {
-        const int x = edges[e][0] + edges[e][2] * k, y = edges[e][1] + edges[e][3] * k;
-        // the cell on the inside of this edge segment
-        const int cx = e == 3 ? 15 : (edges[e][2] ? k : 0), cy = e == 1 ? 15 : (edges[e][3] ? k : 0);
-        if (has_kid[cy * 16 + cx]) continue;
-        const uint32_t t0 = base + y * 17 + x;
-        const uint32_t t1 = base + (y + edges[e][3]) * 17 + (x + edges[e][2]);
-        const uint32_t b0 = vbase + k, b1 = vbase + k + 1;
-        add(t0, b0, b1);
-        add(t0, b1, t1);
-        ++st.skirt_quads;
-      }
-      vbase += 17;
-    }
-    cur.vertex_count += kNodeVerts;
-    const float lo[3] = {std::fmin(X[0], X[16]), ymin - drop, std::fmin(Z[0], Z[16])};
-    const float hi[3] = {std::fmax(X[0], X[16]), ymax, std::fmax(Z[0], Z[16])};
-    for (int i = 0; i < 3; ++i) {
-      if (lo[i] < cur.lo[i]) cur.lo[i] = lo[i];
-      if (hi[i] > cur.hi[i]) cur.hi[i] = hi[i];
+    } else {
+      if (k == kSubs) ++ts.subs_missing;
+      float us = 1;
+      const int mat = k == kShared ? Material(ni.texcode, &us) : -1;
+      Patch(ni, has_kid, H, X, Z, N, 0, 0, 16, mat, us, ymin, ymax);
     }
   }
 
@@ -303,7 +419,18 @@ struct Builder {
     ni.s14 = Rd<float>(n, 0x14);
     ni.tile = Rd<const uint8_t*>(n, 0x0C);
     const uint8_t* tex = Rd<const uint8_t*>(n, 0x3C);
-    ni.texcode = tex ? Rd<uint32_t>(tex, 0x0C) : 0;
+    ni.texcode = tex ? Rd<uint32_t>(tex, 0x0C) : 0xFFFFFFFFu;
+    const uint8_t* subs = tex ? Rd<const uint8_t*>(tex, 0x38) : nullptr;
+    ni.has_subs = subs != nullptr;
+    if (subs)
+      for (int i = 0; i < 16; ++i) ni.sub[i] = Rd<uint32_t>(subs, i * 0x2C);
+    if (log >= 1 && subs && census_logged < 3) {
+      ++census_logged;
+      char hx[0x40 * 3 + 1], hs[0x2C * 3 + 1];
+      for (int i = 0; i < 0x40; ++i) std::snprintf(hx + i * 3, 4, "%02x ", tex[i]);
+      for (int i = 0; i < 0x2C; ++i) std::snprintf(hs + i * 3, 4, "%02x ", subs[i]);
+      patch::Log("gpu terrain: node %u,%u level %u texture data: %s; sub-block 0: %s", ni.gx, ni.gy, ni.level, hx, hs);
+    }
     Visit(ni, Rd<uint8_t* const*>(n, 0x04), Rd<uint32_t>(n, 0x2C), depth);
   }
 };
@@ -317,7 +444,7 @@ bool g_failed = false;
 bool g_on = true;  // Ctrl+F7
 
 struct DrawLog {
-  unsigned frames = 0, chunks = 0, tris = 0, game_frames = 0;
+  unsigned frames = 0, chunks = 0, tris = 0, game_frames = 0, draws = 0;
   double ms = 0, max_ms = 0;
   DWORD last = 0;
 } g_dl;
@@ -341,15 +468,50 @@ bool Build(uint8_t* root) {
   m.verts.reserve(1u << 20);
   m.idx.reserve(3u << 20);
   b.m = &m;
+  b.nshared = Rd<uint32_t>(b.T, 0x540);
+  if (b.nshared > 65536) b.nshared = 0;
+  b.shared = reinterpret_cast<uint8_t* const*>(b.T + 0x544);
+  b.mat_of_shared.assign(b.nshared, -1);
   b.VisitMem(root, 0);
   b.CloseChunk();
+  // The renderer's texture for each shared texture used: the game's texture
+  // object sets itself on stage 0 (vtable +0x4c, as 0x47e26f does).
+  using SetFn = void(__fastcall*)(void* obj, void* edx);
+  m.textures.assign(b.shared_of_mat.size(), nullptr);
+  unsigned no_tex = 0;
+  for (size_t i = 0; i < b.shared_of_mat.size(); ++i) {
+    uint8_t* obj = b.shared[b.shared_of_mat[i]];
+    void** vt = Rd<void**>(obj, 0);
+    reinterpret_cast<SetFn>(vt[0x4C / 4])(obj, nullptr);
+    m.textures[i] = dd::GpuTerrainCurrentTexture();
+    if (!m.textures[i]) ++no_tex;
+    if (b.log >= 1 && i < 6) {
+      char d[160];
+      dd::GpuTerrainDescribeTexture(m.textures[i], d, sizeof(d));
+      patch::Log("gpu terrain: material %zu = shared texture %d (object %p: +14 %d +6c %d +68 %08x +84 %.4f +88 %.4f "
+                 "+8c %.4f) -> %s",
+                 i, b.shared_of_mat[i], static_cast<void*>(obj), Rd<int32_t>(obj, 0x14), Rd<int32_t>(obj, 0x6C),
+                 Rd<uint32_t>(obj, 0x68), Rd<float>(obj, 0x84), Rd<float>(obj, 0x88), Rd<float>(obj, 0x8C), d);
+    }
+  }
+  const Builder::TexStats& t = b.ts;
+  patch::Log("gpu terrain: textures: %u shared in the track; node codes shared %u, streamed %u, sub-blocks %u (%u "
+             "without a sub-block table); sub-block codes shared %u, streamed %u, none %u; %u bad shared numbers; "
+             "%zu shared textures used (64 wide %u, 128 wide %u, other %u), %u without a renderer texture; colours "
+             "c9c %08x ca0 %08x, cb0 %d, ca4 %d",
+             b.nshared, t.node[Builder::kShared], t.node[Builder::kStreamed], t.node[Builder::kSubs], t.subs_missing,
+             t.sub[Builder::kShared], t.sub[Builder::kStreamed], t.sub[Builder::kNone], t.bad_index,
+             b.shared_of_mat.size(), t.w64, t.w128, t.wother, no_tex, Rd<uint32_t>(b.T, 0xC9C),
+             Rd<uint32_t>(b.T, 0xCA0), Rd<int32_t>(b.T, 0xCB0), Rd<int32_t>(b.T, 0xCA4));
   const double ms = Now() - t0;
   if (m.chunks.empty()) {
     patch::Log("gpu terrain: no terrain found under the root node (%u nodes); the game draws the terrain",
                b.st.nodes_mem);
+    for (void* tx : m.textures) dd::GpuTerrainReleaseTexture(tx);
     return false;
   }
   m.generation = g_mesh.generation + 1;
+  for (void* t : g_mesh.textures) dd::GpuTerrainReleaseTexture(t);
   g_mesh = std::move(m);
   const BuildStats& s = b.st;
   const double mb = (g_mesh.verts.size() * sizeof(gt::Vertex) + g_mesh.idx.size() * 2) / 1048576.0;
@@ -370,8 +532,10 @@ bool Build(uint8_t* root) {
   if (b.log >= 1) {
     for (size_t i = 0; i < g_mesh.chunks.size() && i < 8; ++i) {
       const gt::Chunk& c = g_mesh.chunks[i];
-      patch::Log("gpu terrain: chunk %zu: %u vertices, %u triangles, box %.0f,%.0f,%.0f - %.0f,%.0f,%.0f", i,
-                 c.vertex_count, c.index_count / 3, c.lo[0], c.lo[1], c.lo[2], c.hi[0], c.hi[1], c.hi[2]);
+      patch::Log("gpu terrain: chunk %zu: %u vertices, %u triangles in %u textures, box %.0f,%.0f,%.0f - "
+                 "%.0f,%.0f,%.0f",
+                 i, c.vertex_count, c.index_count / 3, c.range_count, c.lo[0], c.lo[1], c.lo[2], c.hi[0], c.hi[1],
+                 c.hi[2]);
     }
   }
   return true;
@@ -390,10 +554,11 @@ void Report(bool drew) {
   if (!g_dl.last) g_dl.last = now;
   if (now - g_dl.last < 5000) return;
   if (g_dl.frames)
-    patch::Log("gpu terrain 5s: %u frames drawn by it (%u by the game); per frame %.1f chunks, %.0f triangles, "
-               "%.3f ms on the game thread (worst %.2f)",
+    patch::Log("gpu terrain 5s: %u frames drawn by it (%u by the game); per frame %.1f chunks, %.1f draws, %.0f "
+               "triangles, %.3f ms on the game thread (worst %.2f)",
                g_dl.frames, g_dl.game_frames, static_cast<double>(g_dl.chunks) / g_dl.frames,
-               static_cast<double>(g_dl.tris) / g_dl.frames, g_dl.ms / g_dl.frames, g_dl.max_ms);
+               static_cast<double>(g_dl.draws) / g_dl.frames, static_cast<double>(g_dl.tris) / g_dl.frames,
+               g_dl.ms / g_dl.frames, g_dl.max_ms);
   const DWORD keep = now;
   g_dl = DrawLog();
   g_dl.last = keep;
@@ -450,6 +615,7 @@ bool GpuTerrainDraw(void* root_v) {
   if (ds.uploaded) patch::Log("gpu terrain: sent to the GPU in %.1f ms", ds.upload_ms);
   g_dl.chunks += ds.chunks_drawn;
   g_dl.tris += ds.tris_drawn;
+  g_dl.draws += ds.draws;
   g_dl.ms += ms;
   if (ms > g_dl.max_ms) g_dl.max_ms = ms;
   Report(true);

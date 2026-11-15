@@ -11,6 +11,7 @@
 // yet from the track file through the game's own stream) and builds the
 // mesh; dd/device.cpp (DrawGpuTerrain) uploads it and draws it.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -24,23 +25,32 @@ struct Vertex {
 };
 static_assert(sizeof(Vertex) == 40, "gt::Vertex must match dd GpuVertex");
 
+// Indices of one chunk drawn with one texture (material -1: untextured).
+struct Range {
+  uint32_t first_index, index_count;
+  int32_t material;
+};
+
 struct Chunk {
   uint32_t first_index, index_count;
   int32_t base_vertex;
   uint32_t vertex_count;
   float lo[3], hi[3];  // bounding box
+  uint32_t first_range, range_count;
 };
 
 struct Mesh {
   std::vector<Vertex> verts;
   std::vector<uint16_t> idx;  // relative to the chunk's base_vertex
   std::vector<Chunk> chunks;
-  unsigned generation = 0;  // bumped for each new mesh
+  std::vector<Range> ranges;
+  std::vector<void*> textures;  // per material: the renderer's texture (a reference held), or null
+  unsigned generation = 0;      // bumped for each new mesh
 };
 
 // Draw statistics the device returns for the log.
 struct DrawStats {
-  unsigned chunks_drawn = 0, tris_drawn = 0;
+  unsigned chunks_drawn = 0, tris_drawn = 0, draws = 0;
   double upload_ms = 0;
   bool uploaded = false;
 };
@@ -52,6 +62,11 @@ namespace dd {
 // device). Uploads it first when its generation is new.
 bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* stats);
 bool GpuTerrainDrawable();
+// The texture now set on stage 0 (a reference added), its release, and a
+// description for the log.
+void* GpuTerrainCurrentTexture();
+void GpuTerrainReleaseTexture(void* t);
+void GpuTerrainDescribeTexture(void* t, char* out, size_t n);
 }  // namespace dd
 
 // fixes_terrain.cpp. `root`: the game's terrain root node.
