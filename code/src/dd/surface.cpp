@@ -1355,6 +1355,7 @@ HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
   PresentFront(GetConfig().vsync ? 1 : 0);
   ShadowFrameEnd();
   SmoothFrameEnd();
+  ReplacementFrame(2.0);
   return DD_OK;
 }
 

@@ -35,6 +35,8 @@ uint64_t FastTextureHash(const uint8_t* bgra, UINT w, UINT h);
 enum { kReplaceNone = 0, kReplaced = 1, kReplacePending = 2 };
 int FindReplacement(const std::string& name, uint64_t hash, bool exact, GpuTexture& out);
 unsigned ReplacementGeneration();
+// TexturePreload: called once per frame shown (game thread).
+void ReplacementFrame(double budget_ms);
 void ReplacementMemoryLog();
 
 // Save the texture as PNG if TextureDump is on and it wasn't saved before.

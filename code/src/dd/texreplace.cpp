@@ -1,5 +1,6 @@
 #include "texreplace.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -148,6 +149,7 @@ struct Picture {
   std::string label;
   DWORD asked = 0;  // GetTickCount at the first request
   double decode_ms = 0;
+  bool preload = false;  // TexturePreload queued it, not a request
   GpuTexture tex;
 };
 
@@ -157,6 +159,14 @@ std::map<std::wstring, Picture> g_pics;  // by path; under g_cs (tex: game threa
 std::vector<std::wstring> g_queue;        // paths waiting for the decoding thread
 volatile LONG g_generation = 0;           // bumped each time the thread finishes one
 bool g_thread_failed = false;
+// TexturePreload: progress (under g_cs).
+struct PreloadStats {
+  bool started = false, done_logged = false, uploads_logged = false;
+  unsigned queued = 0, decoded = 0, failed = 0, over_cap = 0, uploaded = 0;
+  double decoded_mb = 0, decode_ms = 0, upload_ms = 0, upload_max_frame_ms = 0;
+  unsigned upload_frames = 0;
+  LARGE_INTEGER t0{};
+} g_pre;
 
 void InitLock() {
   static bool done = false;
@@ -203,9 +213,30 @@ DWORD WINAPI DecodeThread(void*) {
       g_queue.erase(g_queue.begin());
       Picture& p = g_pics[path];  // std::map: stays put
       const size_t left = g_queue.size();
+      // TexturePreloadMB reached: the rest are left for when the game asks.
+      if (p.preload && p.state == Picture::kQueued &&
+          g_pre.decoded_mb >= static_cast<double>(GetConfig().texture_preload_mb)) {
+        ++g_pre.over_cap;
+        g_pics.erase(path);
+        LeaveCriticalSection(&g_cs);
+        InterlockedIncrement(&g_generation);  // a surface waiting on it asks again
+        continue;
+      }
       LeaveCriticalSection(&g_cs);
       DecodeInto(p, path);
+      if (p.preload) {
+        EnterCriticalSection(&g_cs);
+        if (p.state == Picture::kFailed) {
+          ++g_pre.failed;
+        } else {
+          ++g_pre.decoded;
+          g_pre.decoded_mb += p.w * double(p.h) * 4 / 1048576.0;
+        }
+        g_pre.decode_ms += p.decode_ms;
+        LeaveCriticalSection(&g_cs);
+      }
       InterlockedIncrement(&g_generation);
+      if (p.preload) continue;  // logged in total (TexturePreload)
       static unsigned logged = 0;
       if (++logged <= 300)
         Log("texture replacement \"%s\": decoded on the decoding thread, %ux%u in %.1f ms%s%s (%u more queued)",
@@ -230,6 +261,30 @@ bool StartDecodeThread() {
   CloseHandle(t);
   started = true;
   Log("texture replacement: decoding thread started (TextureDecodeThread=1)");
+  return true;
+}
+
+// Decoded pixels -> the picture's GPU texture (game thread).
+bool MakeTexture(Picture& p, std::vector<uint8_t>& px, double* ms) {
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  GpuTexture t;
+  bool made;
+  {
+    FpuGuard fpu;
+    made = CreateTextureFromBGRA(t, px.data(), p.w, p.h);
+  }
+  QueryPerformanceCounter(&t1);
+  *ms = Ms(t0, t1);
+  EnterCriticalSection(&g_cs);
+  p.state = made ? Picture::kOnGpu : Picture::kFailed;
+  if (!made) p.err = "could not create the texture";
+  LeaveCriticalSection(&g_cs);
+  if (!made) {
+    LogOnce("texture replacement \"%s\": could not create a %ux%u texture", p.label.c_str(), p.w, p.h);
+    return false;
+  }
+  p.tex = t;
   return true;
 }
 
@@ -268,29 +323,14 @@ int GetPicture(const std::wstring& path, const char* label, GpuTexture& out) {
     return kReplaceNone;
   }
   if (st == Picture::kDecoded) {
-    LARGE_INTEGER t0, t1;
-    QueryPerformanceCounter(&t0);
-    GpuTexture t;
-    bool made;
-    {
-      FpuGuard fpu;
-      made = CreateTextureFromBGRA(t, px.data(), p.w, p.h);
-    }
-    QueryPerformanceCounter(&t1);
-    EnterCriticalSection(&g_cs);
-    p.state = made ? Picture::kOnGpu : Picture::kFailed;
-    if (!made) p.err = "could not create the texture";
-    LeaveCriticalSection(&g_cs);
-    if (!made) {
-      LogOnce("texture replacement \"%s\": could not create a %ux%u texture", p.label.c_str(), p.w, p.h);
-      return kReplaceNone;
-    }
-    p.tex = t;
+    double ms = 0;
+    if (!MakeTexture(p, px, &ms)) return kReplaceNone;
     static unsigned logged = 0;
     if (++logged <= 300)
       Log("texture replacement \"%s\": %ux%u (decoded in %.1f ms, texture made in %.1f ms on the game thread, in "
-          "use %lu ms after the game first asked for it)",
-          p.label.c_str(), p.w, p.h, p.decode_ms, Ms(t0, t1), static_cast<unsigned long>(GetTickCount() - p.asked));
+          "use %lu ms after the game first asked for it%s)",
+          p.label.c_str(), p.w, p.h, p.decode_ms, ms, static_cast<unsigned long>(GetTickCount() - p.asked),
+          p.preload ? "; preloaded, asked for before its texture was made" : "");
   }
   out.Reset();
   out = p.tex.Share();
@@ -372,6 +412,97 @@ int FindReplacement(const std::string& name, uint64_t hash, bool exact, GpuTextu
 }
 
 unsigned ReplacementGeneration() { return static_cast<unsigned>(g_generation); }
+
+// TexturePreload: the first call (first frame shown) queues every picture in
+// the textures folders for the decoding thread; each call then makes GPU
+// textures of decoded ones, for up to `budget_ms` (game thread), so the game
+// finds them ready when it first loads the texture.
+void ReplacementFrame(double budget_ms) {
+  const Config& c = GetConfig();
+  if (!c.texture_replace || !c.texture_preload || !c.texture_decode_thread) return;
+  InitLock();
+  if (!g_pre.started) {
+    g_pre.started = true;
+    QueryPerformanceCounter(&g_pre.t0);
+    std::vector<std::pair<std::wstring, std::string>> todo;
+    for (const auto& kv : Index()) {
+      char label[24];
+      std::snprintf(label, sizeof(label), "%016llx", static_cast<unsigned long long>(kv.first));
+      todo.emplace_back(kv.second, label);
+    }
+    for (const auto& kv : NameIndex()) todo.emplace_back(kv.second, kv.first);
+    EnterCriticalSection(&g_cs);
+    for (const auto& t : todo) {
+      if (g_pics.count(t.first)) continue;  // already asked for
+      Picture& p = g_pics[t.first];
+      p.label = t.second;
+      p.asked = GetTickCount();
+      p.preload = true;
+      g_queue.push_back(t.first);
+      ++g_pre.queued;
+    }
+    LeaveCriticalSection(&g_cs);
+    Log("texture preload (TexturePreload=1): %u pictures queued for the decoding thread (up to %d MB decoded)",
+        g_pre.queued, c.texture_preload_mb);
+    if (g_pre.queued && StartDecodeThread()) SetEvent(g_wake);
+    if (g_thread_failed) {
+      EnterCriticalSection(&g_cs);  // no thread: forget them, the game's requests decode as before
+      for (auto it = g_pics.begin(); it != g_pics.end();)
+        it = it->second.preload && it->second.state == Picture::kQueued ? g_pics.erase(it) : std::next(it);
+      g_queue.clear();
+      LeaveCriticalSection(&g_cs);
+      return;
+    }
+  }
+  if (!g_pre.queued) return;
+  LARGE_INTEGER f0, now;
+  QueryPerformanceCounter(&f0);
+  double frame_ms = 0;
+  bool any = false;
+  for (;;) {
+    Picture* pick = nullptr;
+    std::vector<uint8_t> px;
+    EnterCriticalSection(&g_cs);
+    for (auto& kv : g_pics)
+      if (kv.second.preload && kv.second.state == Picture::kDecoded) {
+        pick = &kv.second;
+        px.swap(pick->px);
+        break;
+      }
+    LeaveCriticalSection(&g_cs);
+    if (!pick) break;
+    double ms = 0;
+    if (MakeTexture(*pick, px, &ms)) ++g_pre.uploaded;
+    g_pre.upload_ms += ms;
+    any = true;
+    QueryPerformanceCounter(&now);
+    frame_ms = Ms(f0, now);
+    if (frame_ms >= budget_ms) break;
+  }
+  if (any) {
+    ++g_pre.upload_frames;
+    g_pre.upload_max_frame_ms = std::max(g_pre.upload_max_frame_ms, frame_ms);
+    InterlockedIncrement(&g_generation);  // surfaces waiting on one look again
+  }
+  EnterCriticalSection(&g_cs);
+  const bool all_decoded = g_pre.decoded + g_pre.failed + g_pre.over_cap >= g_pre.queued;
+  LeaveCriticalSection(&g_cs);
+  if (all_decoded && !g_pre.done_logged) {
+    g_pre.done_logged = true;
+    QueryPerformanceCounter(&now);
+    Log("texture preload: decoding done in %.0f ms: %u decoded (%.1f MB, %.0f ms of decoding), %u failed, %u left for "
+        "later (TexturePreloadMB %d reached)",
+        Ms(g_pre.t0, now), g_pre.decoded, g_pre.decoded_mb, g_pre.decode_ms, g_pre.failed, g_pre.over_cap,
+        c.texture_preload_mb);
+  }
+  if (all_decoded && !g_pre.uploads_logged && !any) {
+    g_pre.uploads_logged = true;
+    QueryPerformanceCounter(&now);
+    Log("texture preload: all ready %.0f ms after the first frame: %u textures made in %.1f ms over %u frames (at most "
+        "%.2f ms in one frame)",
+        Ms(g_pre.t0, now), g_pre.uploaded, g_pre.upload_ms, g_pre.upload_frames, g_pre.upload_max_frame_ms);
+  }
+}
 
 void ReplacementMemoryLog() {
   InitLock();

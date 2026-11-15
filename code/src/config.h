@@ -128,6 +128,8 @@ struct Config {
   bool texture_replace = true;  // TextureReplace: load replacement textures from textures\ folder
   bool texture_dump = false;    // TextureDump: save every texture the game uploads as PNG
   bool texture_decode_thread = true;  // TextureDecodeThread: decode replacement pictures off the game thread
+  bool texture_preload = true;        // TexturePreload: decode every replacement picture at startup
+  int texture_preload_mb = 256;       // TexturePreloadMB: most decoded picture memory preloaded
   bool true_color_textures = true;  // TrueColorTextures: load textures as 24/32-bit instead of 16-bit
   bool texture_log = false;         // TextureLog: log the format of each texture the game creates
 };

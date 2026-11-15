@@ -405,6 +405,16 @@ TextureDump=0
 ; long as that takes.
 TextureDecodeThread=1
 
+; TexturePreload: 1 = read every replacement picture in the textures folders
+; while the game starts up (default), on the decoding thread, then put a few
+; on the graphics card each frame, so a replacement is already there when
+; the game first loads its texture instead of the game's own showing for a
+; few frames. 0 = read each picture when the game first needs it. Needs
+; TextureDecodeThread=1. TexturePreloadMB: most picture memory read this way
+; (default 256); pictures past it are read when needed.
+TexturePreload=1
+TexturePreloadMB=256
+
 ; RiderShadows: how the riders' shadows are drawn. The game drew one shadow,
 ; for the rider the camera follows, into a small picture on the CPU.
 ;   2 - every rider and bike casts a shadow, drawn by the graphics card at
