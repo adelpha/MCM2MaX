@@ -29,6 +29,7 @@ static_assert(sizeof(Vertex) == 40, "gt::Vertex must match dd GpuVertex");
 struct Range {
   uint32_t first_index, index_count;
   int32_t material;
+  int32_t far_material = -1;  // the parent's whole texture, drawn instead beyond far_dist2 (-1: none)
 };
 
 struct Chunk {
@@ -53,6 +54,11 @@ struct Mesh {
   // is the distance where that happens; far_dist is this frame's (0 = off),
   // focal the focal length in pixels.
   float far_k = 0, far_dist = 0, focal = 0;
+  // Further out still (0x47d9f0 case 0: texel measure 16 * T+70 / distance
+  // at or below 16), level 0 blocks take their parent's whole texture:
+  // far_k2 * focal is that distance; vertices' pos[3] = 1 + ix + 16 * iy,
+  // their place in the parent (0: no such texture).
+  float far_k2 = 0, far_dist2 = 0;
   uint32_t far_diffuse = 0xFFFFFFFFu, far_specular = 0;
   unsigned generation = 0;      // bumped for each new mesh
 };

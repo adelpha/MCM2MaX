@@ -106,6 +106,8 @@ Texture2D tex1 : register(t1);
 SamplerState smp0 : register(s0);
 SamplerState smp1 : register(s1);
 SamplerState keysmp : register(s2);
+Texture2D tex2 : register(t6);  // GpuTerrain: the parent's whole texture (far away)
+SamplerState smp2 : register(s4);
 struct VSIn {
   float4 pos : POSITION;
   float4 diff : COLOR0;
@@ -120,6 +122,7 @@ struct VSOut {
   float2 t0 : TEXCOORD0;
   float2 t1 : TEXCOORD1;
   float fogw : TEXCOORD2;
+  float pw : TEXCOORD4;
 #ifdef SHADOW
   float3 ls : TEXCOORD3;
 #endif
@@ -142,6 +145,7 @@ VSOut vs_main(VSIn i) {
   p.y -= p.w / vp.w;
   o.pos = p;
   o.fogw = p.w;
+  o.pw = i.pos.w;
   o.diff = i.diff;
   o.spec = i.spec;
   o.t0 = i.t0;
@@ -185,6 +189,7 @@ VSOut vs_tree(uint id : SV_VertexID) {
   p.y -= p.w / vp.w;
   o.pos = draw ? p : float4(0, 0, -2, 1);
   o.fogw = p.w;
+  o.pw = 0;
   o.diff = tcol;
   o.spec = tspec;
   o.t0 = float2(rside ? u.x : u.y, corner < 2 ? u.w : u.z);
@@ -244,10 +249,18 @@ float4 ps_main(VSOut i) : SV_Target {
   bool tfar_on = false;
   if (tfar.x > 0) {
     float2 off = (i.pos.xy - tfar.zw) / tfar.y;
-    if (i.fogw * sqrt(1 + dot(off, off)) > tfar.x) {
+    float dist = i.fogw * sqrt(1 + dot(off, off));
+    // Sampled outside the varying branches below (gradients).
+    float k = max(round(i.pw) - 1, 0);
+    float2 place = float2(fmod(k, 16), floor(k / 16));
+    float4 tcw = tex2.Sample(smp2, (i.t1 * 12 / 256 + place / 16) * 0.9375 + 0.03125);
+    if (dist > tfar.x) {
       tfar_on = true;
       tc1.a = 0;
       i.diff = tfard;
+      // Further still, level 0 blocks on their parent's whole texture
+      // (1/256 of it per cell; cell index from the detail uv, 1/12 per cell).
+      if (tfars.w > 0 && dist > tfars.w && i.pw > 0.5) tc0 = tcw;
     }
   }
   float4 cur = i.diff;
@@ -2918,6 +2931,7 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     terr_far_[3] = vc.vp[1] + vc.vp[3] * 0.5f;
     ColorToFloat(m.far_diffuse, terr_fard_);
     ColorToFloat(m.far_specular, terr_fars_);
+    terr_fars_[3] = m.far_dist2;
   }
   // Visible chunks' ranges, sorted by texture so each is bound once.
   std::vector<const gt::Range*>& todo = terr_todo_;
@@ -2938,18 +2952,33 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
   order.resize(todo.size());
   for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
   std::sort(order.begin(), order.end(),
-            [&](uint32_t a, uint32_t c) { return todo[a]->material < todo[c]->material; });
-  int32_t bound = -2;
+            [&](uint32_t a, uint32_t c) {
+              return todo[a]->material != todo[c]->material ? todo[a]->material < todo[c]->material
+                                                             : todo[a]->far_material < todo[c]->far_material;
+            });
+  {
+    ID3D11SamplerState* s0 = GetSampler(0);  // the base texture's (the game's settings)
+    b.ctx->PSSetSamplers(4, 1, &s0);
+  }
+  int32_t bound = -2, bound_far = -2;
   for (uint32_t i : order) {
     const gt::Range& r = *todo[i];
-    if (r.material != bound) {
+    if (r.material != bound || r.far_material != bound_far) {
       bound = r.material;
+      bound_far = r.far_material;
       Surface* t = (r.material >= 0 && static_cast<size_t>(r.material) < m.textures.size())
                        ? static_cast<Surface*>(m.textures[r.material])
                        : nullptr;
       tex_[0] = t;
       tss_[0][TSS_COLOROP] = t ? 4 : 3;  // modulate texture by diffuse, or diffuse alone
       tex_[1] = (t && detail) ? detail : nullptr;
+      {
+        Surface* ft = (r.far_material >= 0 && static_cast<size_t>(r.far_material) < m.textures.size())
+                          ? static_cast<Surface*>(m.textures[r.far_material])
+                          : nullptr;
+        ID3D11ShaderResourceView* fsrv = ft ? ft->SampleTex()->srv : nullptr;
+        b.ctx->PSSetShaderResources(6, 1, &fsrv);
+      }
       tss_[1][TSS_COLOROP] = tex_[1] ? 13 : 1;  // blend texture alpha, or off
       tss_[1][TSS_ALPHAOP] = tex_[1] ? 4 - 1 : 1;  // select arg 2 (current)
       ApplyState(false, true, has_depth, false);
@@ -2963,6 +2992,10 @@ bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
     ++draws;
   }
   bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
+  {
+    ID3D11ShaderResourceView* none = nullptr;
+    b.ctx->PSSetShaderResources(6, 1, &none);
+  }
   detail_fade_[0] = detail_fade_[1] = 0;
   for (float& f : terr_far_) f = 0;
 

@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 
 #include "config.h"
 #include "dd/racetitle.h"
@@ -91,16 +92,17 @@ struct Builder {
   void CloseChunk() {
     if (open) {
       cur.first_range = static_cast<uint32_t>(m->ranges.size());
-      for (size_t k = 0; k < pend.size(); ++k) {
-        if (pend[k].empty()) continue;
+      for (auto& kv : pend) {
+        if (kv.second.empty()) continue;
         gt::Range r;
         r.first_index = static_cast<uint32_t>(m->idx.size());
-        r.index_count = static_cast<uint32_t>(pend[k].size());
-        r.material = static_cast<int32_t>(k) - 1;
-        m->idx.insert(m->idx.end(), pend[k].begin(), pend[k].end());
+        r.index_count = static_cast<uint32_t>(kv.second.size());
+        r.material = static_cast<int32_t>(kv.first & 0xFFFF) - 1;
+        r.far_material = static_cast<int32_t>(kv.first >> 16) - 1;
+        m->idx.insert(m->idx.end(), kv.second.begin(), kv.second.end());
         m->ranges.push_back(r);
         cur.index_count += r.index_count;
-        pend[k].clear();
+        kv.second.clear();
       }
       cur.range_count = static_cast<uint32_t>(m->ranges.size()) - cur.first_range;
       if (cur.index_count) m->chunks.push_back(cur);
@@ -205,7 +207,7 @@ struct Builder {
   std::vector<int> shared_of_mat;
   struct TexStats {
     unsigned node[4] = {}, sub[4] = {}, subs_missing = 0, bad_index = 0, w64 = 0, w128 = 0, wother = 0;
-    unsigned from_parent = 0, from_parent_sub = 0, parent_none = 0;
+    unsigned from_parent = 0, from_parent_sub = 0, parent_none = 0, with_far = 0;
   } ts;
 
   // Material of a shared texture code; -1 = draw it untextured.
@@ -226,11 +228,11 @@ struct Builder {
   }
 
   // Indices waiting for the chunk to close, by material (+1: 0 = untextured).
-  std::vector<std::vector<uint16_t>> pend;
-  int cur_mat = -1;
+  std::map<uint32_t, std::vector<uint16_t>> pend;  // key: (far material + 1) << 16 | (material + 1)
+  int cur_mat = -1, cur_far = -1;
+  float cur_place = 0;  // pos[3] of the patch's vertices
   void Add(uint32_t a, uint32_t b, uint32_t c) {
-    const size_t k = static_cast<size_t>(cur_mat + 1);
-    if (pend.size() <= k) pend.resize(k + 1);
+    const uint32_t k = (static_cast<uint32_t>(cur_far + 1) << 16) | static_cast<uint32_t>(cur_mat + 1);
     std::vector<uint16_t>& v = pend[k];
     v.push_back(static_cast<uint16_t>(a));
     v.push_back(static_cast<uint16_t>(b));
@@ -254,7 +256,7 @@ struct Builder {
         v.pos[0] = X[x];
         v.pos[1] = H[y][x];
         v.pos[2] = Z[y];
-        v.pos[3] = 1;
+        v.pos[3] = cur_place;
         if (mat >= 0) {
           v.diffuse = log >= 2 ? Shade(N[y][x][0], N[y][x][1], N[y][x][2], ni.level, log) | 0xFF000000u
                                : 0xFFFFFFFFu;
@@ -390,6 +392,12 @@ struct Builder {
         mat = Material(psub, &us);
         sc = 1.0f / 64, uo = (ni.ix & 3) / 4.0f, vo = (ni.iy & 3) / 4.0f;
         ++ts.from_parent_sub;
+        // Far away the game draws it with the parent's whole texture.
+        if (ni.level == 0 && Kind(P->texcode) == kShared) {
+          float us2 = 1;
+          cur_far = Material(P->texcode, &us2);
+          if (cur_far >= 0) cur_place = static_cast<float>(1 + ni.ix + 16 * ni.iy);
+        }
       } else if (P && Kind(P->texcode) == kShared) {
         mat = Material(P->texcode, &us);
         sc = 1.0f / 256, uo = ni.ix / 16.0f, vo = ni.iy / 16.0f;
@@ -398,6 +406,9 @@ struct Builder {
         ++ts.parent_none;
       }
       Patch(ni, has_kid, H, X, Z, N, 0, 0, 16, mat, sc, uo, vo, ymin, ymax);
+      if (cur_far >= 0) ++ts.with_far;
+      cur_far = -1;
+      cur_place = 0;
     }
     if (ni.level >= 1 && log >= 1) {
       const uint32_t c = ni.texcode & 0xFFFF;
@@ -622,11 +633,14 @@ bool Build(uint8_t* root) {
     const float scale = Rd<float>(b.T, 0x40);
     if (GetConfig().gpu_terrain_far && ca4 > 0 && scale > 0) {
       m.far_k = 64.0f * scale / ca4 * 1.02f;
+      m.far_k2 = scale * 1.02f;
       m.far_diffuse = Rd<uint32_t>(b.T, 0xC9C);
       m.far_specular = Rd<uint32_t>(b.T, 0xCA0);
     }
-    patch::Log("gpu terrain: far blocks %s: from %.3f x focal length (%.0f units now), diffuse %08x specular %08x",
-               m.far_k > 0 ? "as the game's" : "off", m.far_k, m.far_k * t70, m.far_diffuse, m.far_specular);
+    patch::Log("gpu terrain: far blocks %s: from %.3f x focal length (%.0f units now), diffuse %08x specular %08x; "
+               "parent's whole texture from %.3f x focal length (%.0f units now) on %u level 0 nodes",
+               m.far_k > 0 ? "as the game's" : "off", m.far_k, m.far_k * t70, m.far_diffuse, m.far_specular,
+               m.far_k2, m.far_k2 * t70, b.ts.with_far);
     patch::Log("gpu terrain: detail reach %.0f (0 = everywhere; ini %.0f; the game's texel test would give %.0f from "
                "T+70 %d, ca4 %d); detail uv restarts per block, 1/12 per cell (16/12 on level 1)",
                reach, GetConfig().gpu_terrain_detail_reach, game_reach, Rd<int32_t>(b.T, 0x70), Rd<int32_t>(b.T, 0xCA4));
@@ -763,6 +777,7 @@ bool GpuTerrainDraw(void* root_v) {
       patch::Log("gpu terrain: focal length %.0f: far blocks from %.0f units", focal, g_mesh.far_k * focal);
     g_mesh.focal = focal;
     g_mesh.far_dist = g_mesh.far_k * focal;
+    g_mesh.far_dist2 = g_mesh.far_k2 * focal;
   }
   const bool ok = dd::DrawGpuTerrain(g_mesh, &ds);
   const double ms = Now() - t0;
