@@ -200,10 +200,12 @@ TerrainMeshCache=32768
 
 ; GpuTerrain: 1 = the whole track's terrain is built once at full detail and
 ; kept on the graphics card, in place of the game's per-frame terrain
-; (Direct3D 11 only; experimental, not textured yet). The ground you ride on
-; is unchanged. Ctrl+F7 switches between it and the game's terrain while
-; racing. Default 0.
-GpuTerrain=0
+; (default; Direct3D 11 only, Direct3D 9 keeps the game's terrain). It looks
+; the same as the game's terrain, with more detail in the distance, and is
+; much faster at long view distances. The ground you ride on is unchanged.
+; Ctrl+F7 switches between it and the game's terrain while racing. 0 = the
+; game's terrain (with FastTerrain).
+GpuTerrain=1
 
 ; GpuTerrainDetail: with GpuTerrain, the game's fine detail texture is laid
 ; over the terrain, as the game does close up (default 1). 0 = without it.
