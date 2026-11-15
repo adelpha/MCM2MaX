@@ -2,7 +2,7 @@
 # Makes the release zip: d3drm.dll (mcm2fix, drop-in next to Mcm2.exe),
 # mcm2fix.ini with every setting at its default, README.txt, README.md, licences, the
 # HUD fonts (FONTS\, SIL Open Font License) and the race announcer sounds
-# (SOUNDS\, played by Announcer=1).
+# (SOUNDS\, played by Announcer=1) and the MenuFlag main menu picture (UI\).
 #
 #   tools/package.sh <mcm2fix.dll> <output zip> [MCM2HELP.HLP]
 #
@@ -40,12 +40,17 @@ cp "$ROOT"/package/FONTS/*.ttf "$STAGE/FONTS/"
 mkdir "$STAGE/SOUNDS"
 cp "$ROOT"/package/SOUNDS/*.wav "$STAGE/SOUNDS/"
 
+# The MenuFlag main menu background (MenuBackground in code/README.md): the
+# game's own menu art with the backdrop cut out, read from the game folder.
+mkdir -p "$STAGE/UI/MAINMENU/01_MAIN"
+cp "$ROOT/package/UI/MAINMENU/01_MAIN/BackGround_01.png" "$STAGE/UI/MAINMENU/01_MAIN/"
+
 if [ -n "$HLP" ]; then
   python3 "$ROOT/tools/hlp2html.py" "$HLP" "$STAGE/MCM2HELP.html"
 else
   cp "$ROOT/package/MCM2HELP.html" "$STAGE/MCM2HELP.html"
 fi
-FILES="d3drm.dll mcm2fix.ini README.txt README.md licenses MCM2HELP.html FONTS SOUNDS"
+FILES="d3drm.dll mcm2fix.ini README.txt README.md licenses MCM2HELP.html FONTS SOUNDS UI"
 
 rm -f "$OUT"
 OUT_ABS=$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")

@@ -54,8 +54,11 @@ Requirements
 
 Installing
 ----------
-Copy d3drm.dll, mcm2fix.ini, MCM2HELP.html and the FONTS and SOUNDS folders
-into the game folder, next to Mcm2.exe, and start Mcm2.exe. If a different Mcm2.exe
+Copy d3drm.dll, mcm2fix.ini, MCM2HELP.html and the FONTS, SOUNDS and UI
+folders into the game folder, next to Mcm2.exe, and start Mcm2.exe. The UI
+folder only adds one new picture (the main menu background for the waving
+flag, UI\MAINMENU\01_MAIN\BackGround_01.png); none of the game's files are
+replaced. If a different Mcm2.exe
 is found, the fix does nothing and says so in the log.
 
 d3drm.dll is mcm2fix itself. The game loads a library of that name, which
@@ -71,8 +74,9 @@ where only the main log is on.
 
 Uninstalling
 ------------
-Delete d3drm.dll, mcm2fix.ini, MCM2HELP.html, README.txt, README.md and the
-FONTS, SOUNDS and licenses folders from the game folder.
+Delete d3drm.dll, mcm2fix.ini, MCM2HELP.html, README.txt, README.md, the
+FONTS, SOUNDS and licenses folders and UI\MAINMENU\01_MAIN\BackGround_01.png
+from the game folder.
 Settings are kept in HKEY_CURRENT_USER\Software\mcm2fix\Motocross Madness 2,
 and saves and the log in %LOCALAPPDATA%\Motocross Madness 2.
 
