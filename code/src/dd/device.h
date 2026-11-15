@@ -15,6 +15,10 @@
 #include "d3d7.h"
 
 struct FarTreeFrame;
+namespace gt {
+struct Mesh;
+struct DrawStats;
+}  // namespace gt
 
 namespace dd {
 struct ReflectReplay;
@@ -200,7 +204,12 @@ class Device : public d3d7::IDirect3DDevice7 {
  public:
   // FarTrees (fartrees.cpp): draws the far trees with the current state.
   bool DrawFarTrees(const ::FarTreeFrame& f);
+  // GpuTerrain (gputerrain.cpp): the whole terrain from its own buffers.
+  bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st);
  private:
+  ID3D11Buffer* terr_vb_ = nullptr;
+  ID3D11Buffer* terr_ib_ = nullptr;
+  unsigned terr_gen_ = 0;
   ID3D11Buffer* tree_buf_ = nullptr;
   ID3D11ShaderResourceView* tree_srv_ = nullptr;
   ID3D11Buffer* tree_cb_ = nullptr;

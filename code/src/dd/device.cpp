@@ -12,6 +12,7 @@
 #include "probe.h"
 #include "reflect.h"
 #include "../fartrees.h"
+#include "../gputerrain.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1009,6 +1010,8 @@ Device::~Device() {
   SafeRelease(tree_srv_);
   SafeRelease(tree_buf_);
   SafeRelease(tree_cb_);
+  SafeRelease(terr_vb_);
+  SafeRelease(terr_ib_);
   if (g_tree_device == this) g_tree_device = nullptr;
   if (g_bound.owner == this) g_bound = Bound{};
   dd_->Release();
@@ -2633,4 +2636,156 @@ bool Device::DrawFarTrees(const FarTreeFrame& f) {
   return true;
 }
 
+// ---- GpuTerrain (gputerrain.cpp)
+
+bool GpuTerrainDrawable() { return g_tree_device && !IsD3D9(); }
+
+bool DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
+  if (!g_tree_device) return false;
+  return g_tree_device->DrawGpuTerrain(m, st);
+}
+
+namespace {
+// Outside the view: all 8 corners beyond one clip plane (row vectors, D3D
+// clip space 0 <= z <= w).
+bool BoxOutside(const float* lo, const float* hi, const float* M) {
+  float c[8][4];
+  for (int i = 0; i < 8; ++i) {
+    const float x = (i & 1) ? hi[0] : lo[0], y = (i & 2) ? hi[1] : lo[1], z = (i & 4) ? hi[2] : lo[2];
+    for (int k = 0; k < 4; ++k) c[i][k] = x * M[k] + y * M[4 + k] + z * M[8 + k] + M[12 + k];
+  }
+  int out[6] = {};
+  for (int i = 0; i < 8; ++i) {
+    const float w = c[i][3];
+    out[0] += c[i][0] < -w;
+    out[1] += c[i][0] > w;
+    out[2] += c[i][1] < -w;
+    out[3] += c[i][1] > w;
+    out[4] += c[i][2] < 0;
+    out[5] += c[i][2] > w;
+  }
+  for (int p = 0; p < 6; ++p)
+    if (out[p] == 8) return true;
+  return false;
+}
+}  // namespace
+
+bool Device::DrawGpuTerrain(const gt::Mesh& m, gt::DrawStats* st) {
+  if (IsD3D9() || !InitPipeline()) return false;
+  if (m.verts.empty() || m.idx.empty()) return false;
+  Backend& b = B();
+  if (terr_gen_ != m.generation || !terr_vb_ || !terr_ib_) {
+    LARGE_INTEGER t0, t1, fq;
+    QueryPerformanceCounter(&t0);
+    SafeRelease(terr_vb_);
+    SafeRelease(terr_ib_);
+    D3D11_BUFFER_DESC vd{};
+    vd.Usage = D3D11_USAGE_IMMUTABLE;
+    vd.ByteWidth = static_cast<UINT>(m.verts.size() * sizeof(gt::Vertex));
+    vd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA vi{m.verts.data(), 0, 0};
+    D3D11_BUFFER_DESC id{};
+    id.Usage = D3D11_USAGE_IMMUTABLE;
+    id.ByteWidth = static_cast<UINT>(((m.idx.size() * 2) + 3) & ~size_t(3));
+    id.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    std::vector<uint16_t> padded;
+    const void* idata = m.idx.data();
+    if (id.ByteWidth != m.idx.size() * 2) {
+      padded = m.idx;
+      padded.push_back(0);
+      idata = padded.data();
+    }
+    D3D11_SUBRESOURCE_DATA ii{idata, 0, 0};
+    HRESULT hv = b.device->CreateBuffer(&vd, &vi, &terr_vb_);
+    HRESULT hi = SUCCEEDED(hv) ? b.device->CreateBuffer(&id, &ii, &terr_ib_) : hv;
+    if (FAILED(hv) || FAILED(hi)) {
+      LogOnce("gpu terrain: buffers of %u + %u bytes failed (%08lx)", vd.ByteWidth, id.ByteWidth,
+              static_cast<unsigned long>(FAILED(hv) ? hv : hi));
+      SafeRelease(terr_vb_);
+      SafeRelease(terr_ib_);
+      return false;
+    }
+    terr_gen_ = m.generation;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&fq);
+    if (st) {
+      st->uploaded = true;
+      st->upload_ms = 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(fq.QuadPart);
+    }
+  }
+  FlushBatch(kBreakScreen);
+  bool has_depth = false;
+  if (!BindTarget(has_depth)) return false;
+
+  // World space: view * projection only.
+  float vpm[16];
+  MatMul(&view_.m[0][0], &proj_.m[0][0], vpm);
+
+  // The game's state for this draw, put back afterwards.
+  const DWORD rs_keys[] = {RS_ZENABLE, RS_ZWRITEENABLE, RS_ALPHABLENDENABLE, RS_ALPHATESTENABLE, RS_CULLMODE,
+                           RS_SHADEMODE};
+  const DWORD rs_vals[] = {1, 1, 0, 0, 1 /* none */, 2 /* gouraud */};
+  DWORD rs_save[6];
+  for (int i = 0; i < 6; ++i) rs_save[i] = rs_[rs_keys[i]], rs_[rs_keys[i]] = rs_vals[i];
+  Surface* tex_save[2] = {tex_[0], tex_[1]};
+  DWORD tss_save[2][32];
+  std::memcpy(tss_save, tss_, sizeof(tss_save));
+  tex_[0] = tex_[1] = nullptr;
+  tss_[0][TSS_COLOROP] = 3;  // select arg 2: diffuse
+  tss_[0][TSS_COLORARG2] = 0;
+  tss_[0][TSS_ALPHAOP] = 3;
+  tss_[0][TSS_ALPHAARG2] = 0;
+  tss_[1][TSS_COLOROP] = 1;  // disable
+  tss_[1][TSS_ALPHAOP] = 1;
+
+  VSConstants vc{};
+  std::memcpy(vc.wvp, vpm, sizeof(vc.wvp));
+  vc.vp[0] = static_cast<float>(viewport_.dwX);
+  vc.vp[1] = static_cast<float>(viewport_.dwY);
+  vc.vp[2] = static_cast<float>(viewport_.dwWidth ? viewport_.dwWidth : 1);
+  vc.vp[3] = static_cast<float>(viewport_.dwHeight ? viewport_.dwHeight : 1);
+  vc.mode[0] = 0;
+  Bound& bd = Cache(this);
+  if (!bd.vc_ok || std::memcmp(&bd.vc, &vc, sizeof(vc)) != 0) {
+    b.ctx->UpdateSubresource(vs_cb_, 0, nullptr, &vc, 0, 0);
+    bd.vc = vc;
+    bd.vc_ok = true;
+  }
+  D3D11_VIEWPORT v{vc.vp[0], vc.vp[1], vc.vp[2], vc.vp[3], viewport_.dvMinZ, viewport_.dvMaxZ};
+  if (!bd.vp_ok || std::memcmp(&bd.vp, &v, sizeof(v)) != 0) {
+    b.ctx->RSSetViewports(1, &v);
+    bd.vp = v;
+    bd.vp_ok = true;
+  }
+  ApplyState(false, true, has_depth, false);
+  const UINT stride = sizeof(gt::Vertex), zero = 0;
+  b.ctx->IASetVertexBuffers(0, 1, &terr_vb_, &stride, &zero);
+  b.ctx->IASetIndexBuffer(terr_ib_, DXGI_FORMAT_R16_UINT, 0);
+  if (bd.topo != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+    b.ctx->IASetPrimitiveTopology(bd.topo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  unsigned drawn = 0, tris = 0;
+  for (const gt::Chunk& c : m.chunks) {
+    if (BoxOutside(c.lo, c.hi, vpm)) continue;
+    b.ctx->DrawIndexed(c.index_count, c.first_index, c.base_vertex);
+    ++drawn;
+    tris += c.index_count / 3;
+  }
+  bd.pipe = false;  // our buffers are bound: the next draw binds the game's again
+
+  for (int i = 0; i < 6; ++i) rs_[rs_keys[i]] = rs_save[i];
+  tex_[0] = tex_save[0];
+  tex_[1] = tex_save[1];
+  std::memcpy(tss_, tss_save, sizeof(tss_save));
+  if (cur_msaa_) MsaaMarkDrawn();
+  if (has_depth) Note3DDraw();
+  rt_->MarkGpuWritten();
+  Counters().draws += drawn;
+  if (st) {
+    st->chunks_drawn = drawn;
+    st->tris_drawn = tris;
+  }
+  return true;
+}
+
 }  // namespace dd
+

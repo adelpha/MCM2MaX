@@ -192,6 +192,19 @@ TerrainDetail=2
 ; 0 = the game's own code.
 FastTerrain=1
 
+; TerrainMeshCache: memory in KB the game may keep for terrain triangles it
+; has built (default 32768). The game kept only 1 MB, so at long view
+; distances it threw away and rebuilt hundreds of blocks every frame.
+; 1024 = the game's own limit.
+TerrainMeshCache=32768
+
+; GpuTerrain: 1 = the whole track's terrain is built once at full detail and
+; kept on the graphics card, in place of the game's per-frame terrain
+; (Direct3D 11 only; experimental, not textured yet). The ground you ride on
+; is unchanged. Ctrl+F7 switches between it and the game's terrain while
+; racing. Default 0.
+GpuTerrain=0
+
 ; FogDistance: multiplies the fog distances on top of ViewDistance, 0.1 to 20
 ; (default 1). 2 = fog starts twice as far away. Above 1, the edge of the
 ; drawn world may show through the fog unless ViewDistance is raised too.
@@ -865,6 +878,11 @@ TerrainLog=0
 ; none), with a summary every 5 seconds. Costs a few milliseconds every 2
 ; seconds. Default 0.
 TerrainCheck=0
+
+; GpuTerrainLog: with GpuTerrain, logs how the terrain was built and every
+; 5 seconds what was drawn (default 1). 2 also tints the terrain by detail
+; level.
+GpuTerrainLog=1
 
 ; SoundLog: 3D sound buffers, and when they are muted or unmuted by
 ; SoundMaxDistanceMute. Default 0.

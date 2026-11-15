@@ -69,6 +69,7 @@
 #include "simd.h"
 #include "terrain_fast.h"
 #include "fpu_guard.h"
+#include "gputerrain.h"
 
 // TerrainLodFix state, shared with the stub below (C names for the asm).
 extern "C" {
@@ -1327,15 +1328,25 @@ void InstallFastTerrain() {
 
 // Profile=1: time the terrain phases the rewrites leave to the game.
 using SetupFn = int(__fastcall*)(void* root, void* edx, int a, int b);
+// GpuTerrain (gputerrain.cpp): while it draws the terrain, the game's own
+// terrain phases (node setup, Eval, mesh building, drawing) are skipped.
 int __fastcall SetupZone(void* root, void*, int a, int b) {
+  if (GpuTerrainActive()) return 1;
   prof::Scope z(prof::kTerrSetup);
   return reinterpret_cast<SetupFn>(0x482D20)(root, nullptr, a, b);
 }
+int __fastcall EvalSite(void* root, void*) {
+  if (GpuTerrainActive()) return 0;
+  return reinterpret_cast<ThisVoid>(kEvalFn)(root, nullptr);
+}
 int __fastcall MeshZone(void* root, void*) {
+  if (GpuTerrainActive()) return 1;
   prof::Scope z(prof::kTerrMesh);
   return reinterpret_cast<ThisVoid>(0x47FEC0)(root, nullptr);
 }
 int __fastcall BlocksZone(void* root, void*) {
+  GpuTerrainKeys();
+  if (GpuTerrainDraw(root)) return 1;
   prof::Scope z(prof::kTerrBlocks);
   return reinterpret_cast<ThisVoid>(kRender)(root, nullptr);
 }
@@ -1382,6 +1393,40 @@ void ApplyTerrainFixes() {
   }
   InstallFastTerrain();
   if (c.terrain_check || c.terrain_log) InstallMeshWhy();
+  // TerrainMeshCache: the game keeps at most 1 MB of terrain meshes that were
+  // not drawn last frame (then trims to 512 KB, 0x50ce86/0x50ce96); at long
+  // view distances it throws out and rebuilds hundreds of meshes a frame.
+  if (c.terrain_mesh_cache_kb > 0 && c.terrain_mesh_cache_kb != 1024) {
+    const uint8_t cmp_limit[] = {0x81, 0xF9, 0x00, 0x00, 0x10, 0x00};  // cmp ecx,100000h
+    const uint8_t add_keep[] = {0x05, 0x00, 0x00, 0x08, 0x00};         // add eax,80000h
+    if (patch::Matches(0x50CE86, cmp_limit, 6) && patch::Matches(0x50CE96, add_keep, 5)) {
+      const int kb = c.terrain_mesh_cache_kb < 256 ? 256 : (c.terrain_mesh_cache_kb > 1048576 ? 1048576 : c.terrain_mesh_cache_kb);
+      const uint32_t limit = static_cast<uint32_t>(kb) * 1024u, keep = limit / 2;
+      patch::Write(0x50CE88, &limit, 4);
+      patch::Write(0x50CE97, &keep, 4);
+      patch::Log("terrain: TerrainMeshCache %d KB (meshes not drawn last frame kept up to that, trimmed to half; game "
+                 "1024 KB)", kb);
+    } else {
+      patch::Log("terrain: TerrainMeshCache: code differs, not applied");
+    }
+  }
+  if (c.gpu_terrain) {
+    // The terrain phases' call sites (shared with Profile=1's zones).
+    const uint8_t call_setup[] = {0xE8, 0x0F, 0x5D, 0xF7, 0xFF};   // call 482d20
+    const uint8_t call_eval[] = {0xE8, 0x9D, 0x66, 0xF7, 0xFF};    // call 4836e0
+    const uint8_t call_mesh[] = {0xE8, 0x44, 0x2E, 0xF7, 0xFF};    // call 47fec0
+    const uint8_t call_blocks[] = {0xE8, 0x4B, 0x50, 0xF7, 0xFF};  // call 4820e0
+    if (patch::Matches(0x50D00C, call_setup, 5) && patch::Matches(0x50D03E, call_eval, 5) &&
+        patch::Matches(0x50D077, call_mesh, 5) && patch::Matches(0x50D090, call_blocks, 5)) {
+      patch::Call(0x50D00C, reinterpret_cast<const void*>(&SetupZone), 5);
+      patch::Call(0x50D03E, reinterpret_cast<const void*>(&EvalSite), 5);
+      patch::Call(0x50D077, reinterpret_cast<const void*>(&MeshZone), 5);
+      if (!c.terrain_log) patch::Call(0x50D090, reinterpret_cast<const void*>(&BlocksZone), 5);
+      patch::Log("terrain: GpuTerrain on (Ctrl+F7 switches between it and the game's terrain)");
+    } else {
+      patch::Log("terrain: GpuTerrain: code differs, not applied");
+    }
+  }
   if (c.profile) {
     const uint8_t call_setup[] = {0xE8, 0x0F, 0x5D, 0xF7, 0xFF};   // call 482d20
     const uint8_t call_mesh[] = {0xE8, 0x44, 0x2E, 0xF7, 0xFF};    // call 47fec0

@@ -30,6 +30,7 @@ add_library(mcm2fix SHARED
   src/fixes_sort.cpp
   src/fixes_walk.cpp
   src/fartrees.cpp
+  src/gputerrain.cpp
   src/fixes_terrain.cpp
   src/fixes_ai.cpp
   src/diagnostics.cpp

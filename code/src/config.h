@@ -38,6 +38,9 @@ struct Config {
   float terrain_detail = 2.0f;  // TerrainDetail: terrain mesh detail multiplier (fixes_terrain.cpp)
   bool fast_terrain = true;   // FastTerrain: exact rewrites of the per-frame terrain code (terrain_fast.cpp)
   int terrain_check = 0;      // TerrainCheck: compare FastTerrain with the game's own code every 2 s
+  int terrain_mesh_cache_kb = 32768;  // TerrainMeshCache: KB of terrain meshes kept when not drawn (game: 1024)
+  bool gpu_terrain = false;   // GpuTerrain: whole terrain built once at full detail on the GPU (gputerrain.cpp)
+  int gpu_terrain_log = 1;    // GpuTerrainLog: 0 off, 1 build and 5 s lines, 2 also tint by node level
   int terrain_log = 0;  // TerrainLog: terrain statistics, hole checks and debug keys (fixes_terrain.cpp)
   int far_tree_log = 0;  // FarTreeLog: statistics every 5 s and a check against the game's billboards; 2 also tints far trees
   bool draw_batch = true;     // DrawBatch: send 3D draws in a row with the same state as one draw (device.cpp)
