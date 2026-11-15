@@ -260,6 +260,7 @@ are welcome.
    | `MCM2HELP.html` | the converted in-game help |
    | `FONTS\` | the HUD fonts (Contrail One, DSEG7 Classic) |
    | `SOUNDS\` | the race announcer sounds |
+   | `UI\MAINMENU\01_MAIN\BackGround_01.png` | the main menu picture shown over the waving flag (`MenuFlag`); a new file, none of the game's are replaced |
    | `README.txt` | short player notes |
    | `README.md` | this document |
    | `licenses\` | FFmpeg and font licences |
@@ -306,7 +307,7 @@ On Windows XP, `%LOCALAPPDATA%` means
 ## Uninstalling
 
 Delete `d3drm.dll`, `mcm2fix.ini`, `MCM2HELP.html`, `FONTS\`, `README.txt`,
-`README.md`, `licenses\` and `SOUNDS\` from the game folder. To also remove your settings and saves,
+`README.md`, `licenses\`, `SOUNDS\` and `UI\MAINMENU\01_MAIN\BackGround_01.png` from the game folder. To also remove your settings and saves,
 delete `HKCU\Software\mcm2fix` and `%LOCALAPPDATA%\Motocross Madness 2`.
 
 ## Renderers and fullscreen
@@ -501,7 +502,7 @@ The file has three parts:
 | `MenuFlagBrightness` | `68` | `0`-`300` | Brightness of the menu flag, in percent. |
 | `MenuFlagWarp` | `100` | `0`-`500` | How far the flag's chequers are pushed around, in percent (`0` = straight lines). |
 | `MenuFlagShading` | `100` | `0`-`300` | Strength of the flag's light, shadow and drifting patches, in percent (`0` = flat). |
-| `MenuBackground` | `UI\MAINMENU\01_MAIN\BackGround_01.png` | path | The main menu background used with `MenuFlag`: a 640x480 PNG with transparency, relative to the game folder or a full path. `tools/mcm2dat` unpacks the original to start from. |
+| `MenuBackground` | `UI\MAINMENU\01_MAIN\BackGround_01.png` | path | The main menu background used with `MenuFlag`: a 640x480 PNG with transparency, relative to the game folder or a full path. The release ships one at that path. `tools/mcm2dat` unpacks the original to start from. |
 | `MotionBlurStrength` | `80` | 0-300 | Length of the streaks at full speed, in percent (higher = longer streaks). |
 | `MotionBlurMinSpeed` | `30` | 0-200 | Speed (mph, as the speedometer shows) where the blur starts. |
 | `MotionBlurMaxSpeed` | `70` | 1-250 | Speed (mph) where the blur is at full strength. |
