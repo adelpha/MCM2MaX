@@ -81,6 +81,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -966,7 +967,7 @@ void ScanEmbedded(const Archive& ar, const Member& m, const std::vector<uint8_t>
       bad ? Fmt(", %u failed", bad).c_str() : "");
 }
 
-// ---------------------------------------------------------------- models (.slt)
+// ---------------------------------------------------------------- models (.slt, .slb)
 
 std::vector<std::string> SplitLines(const std::string& s) {
   std::vector<std::string> out;
@@ -1082,6 +1083,184 @@ void ConvertSlt(const Archive& ar, const Member& m, const std::vector<uint8_t>& 
   e.archive = ar.name();
   e.obj = Join(dir, stem + ".obj");
   e.info = Fmt("%zu vertices, %zu triangles", nv, nf) + (mats.empty() ? "" : ", texture " + mats[0]);
+  g_models.push_back(e);
+  ++g_count.models;
+}
+
+// Writes LOD 0 of a binary model (.slb, the game's Soultree object loader
+// 0x4408f0) as OBJ + MTL into models\<archive>\, in its rest pose.
+// Layout: u32 node count; per node 0x80 name, 4x4 float matrix (row vectors,
+// relative to the parent), u32, u32, 2 x vec3 (bounds), u32, 2 x vec3 (60 bytes); then
+// one s32 parent per node (-1 = root) (0x502a90). u32 material count; per
+// material 0x40 texture name ("PROCEDURAL" = made by the game), 4 u32, u32
+// has texture, 10 u32, u16, u32 (0x5042e0). u32 LOD count, u32 has
+// distances, LOD count - 1 floats. Per LOD: u32 mesh count; per mesh u32
+// segments, u32 vertices, u32 triangles, u32 materials; vertices x 32 bytes
+// (model space: x, y, z, -, -, -, u, v; LOD 0 only, a copy of the next array
+// in the others), vertices x 32 bytes (the same in the node's own space),
+// vertices x 12 (normals), triangles x 3 u16, vertices x 2 floats (u, v),
+// materials x u32 (material numbers), segments x 20 bytes (+4 = vertex
+// count), segments x (u32 node, u32 first vertex).
+void ConvertSlb(const Archive& ar, const Member& m, const std::vector<uint8_t>& d) {
+  size_t p = 0;
+  std::string err;
+  auto need = [&](size_t n) {
+    if (p + n > d.size()) {
+      if (err.empty()) err = Fmt("cut short at byte %zu", p);
+      return false;
+    }
+    return true;
+  };
+  auto u32 = [&]() -> uint32_t {
+    if (!need(4)) return 0;
+    const uint32_t v = U32(&d[p]);
+    p += 4;
+    return v;
+  };
+  struct Node {
+    std::string name;
+    double m[16];
+    int parent = -1;
+    double w[16];
+    bool done = false;
+  };
+  std::vector<Node> nodes(std::min<uint32_t>(u32(), 4096));
+  for (Node& n : nodes) {
+    if (!need(0x80 + 64 + 60)) break;
+    n.name = std::string(reinterpret_cast<const char*>(&d[p]), strnlen(reinterpret_cast<const char*>(&d[p]), 0x80));
+    p += 0x80;
+    for (double& v : n.m) v = F32(&d[p]), p += 4;
+    p += 60;
+  }
+  for (Node& n : nodes) n.parent = static_cast<int32_t>(u32());
+  std::vector<std::string> mats(std::min<uint32_t>(u32(), 4096));
+  for (std::string& t : mats) {
+    if (!need(0x40 + 66)) break;
+    t = std::string(reinterpret_cast<const char*>(&d[p]), strnlen(reinterpret_cast<const char*>(&d[p]), 0x40));
+    if (t == "PROCEDURAL") t.clear();
+    p += 0x40 + 66;
+  }
+  const uint32_t lods = u32();
+  if (u32() && lods) p += 4ull * (lods - 1);
+  // World matrices: own matrix times the parent's (row vectors).
+  std::function<const double*(int)> world = [&](int i) -> const double* {
+    Node& n = nodes[i];
+    if (n.done) return n.w;
+    n.done = true;  // also guards against loops
+    std::memcpy(n.w, n.m, sizeof n.w);
+    if (n.parent >= 0 && n.parent < static_cast<int>(nodes.size()) && n.parent != i) {
+      const double* q = world(n.parent);
+      for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c) {
+          double s = 0;
+          for (int k = 0; k < 4; ++k) s += n.m[r * 4 + k] * q[k * 4 + c];
+          n.w[r * 4 + c] = s;
+        }
+    }
+    return n.w;
+  };
+  const std::string dir = Join("models", SafeFile(ar.name()));
+  const std::string stem = SafeFile(StripExt(m.name));
+  std::string obj = "# " + m.name + " from " + ar.name() + " (LOD 0 of " + std::to_string(lods) +
+                    "), written by mcm2res\n# One group per part (node); feet. The game is left-handed; z is negated "
+                    "here so the model is not mirrored.\nmtllib " + stem + ".mtl\n";
+  size_t nv = 0, nf = 0;
+  long base = 1;
+  const uint32_t meshes = lods ? u32() : 0;
+  for (uint32_t mi = 0; mi < meshes && err.empty(); ++mi) {
+    const uint32_t nseg = u32(), nvert = u32(), ntri = u32(), nmat = u32();
+    if (nseg > 100000 || nvert > 1000000 || ntri > 1000000 || nmat > 1000) {
+      err = Fmt("bad mesh %u header", mi);
+      break;
+    }
+    if (!need(64ull * nvert)) break;
+    const size_t local = p + 32ull * nvert;
+    p += 64ull * nvert;
+    if (!need(12ull * nvert)) break;
+    const size_t normals = p;
+    p += 12ull * nvert;
+    if (!need(6ull * ntri)) break;
+    const size_t tris = p;
+    p += 6ull * ntri;
+    if (!need(8ull * nvert)) break;
+    const size_t uvs = p;
+    p += 8ull * nvert;
+    int mat = 0;
+    for (uint32_t i = 0; i < nmat; ++i) {
+      const uint32_t v = u32();
+      if (i == 0) mat = static_cast<int>(v);
+    }
+    if (!need(28ull * nseg)) break;
+    const size_t segs = p;
+    p += 28ull * nseg;
+    // Vertices in model space: local position times the node's world matrix.
+    std::vector<int> owner(nvert, -1);
+    for (uint32_t s = 0; s < nseg; ++s) {
+      const uint32_t cnt = U32(&d[segs + 20 * s + 4]);
+      const uint32_t node = U32(&d[segs + 20ull * nseg + 8 * s]), first = U32(&d[segs + 20ull * nseg + 8 * s + 4]);
+      if (node >= nodes.size()) continue;
+      for (uint32_t k = first; k < first + cnt && k < nvert; ++k) owner[k] = static_cast<int>(node);
+    }
+    std::string vs, vts, vns;
+    for (uint32_t k = 0; k < nvert; ++k) {
+      double x = F32(&d[local + 32 * k]), y = F32(&d[local + 32 * k + 4]), z = F32(&d[local + 32 * k + 8]);
+      double nx = F32(&d[normals + 12 * k]), ny = F32(&d[normals + 12 * k + 4]), nz = F32(&d[normals + 12 * k + 8]);
+      if (owner[k] >= 0) {
+        const double* w = world(owner[k]);
+        const double X = x * w[0] + y * w[4] + z * w[8] + w[12], Y = x * w[1] + y * w[5] + z * w[9] + w[13],
+                     Z = x * w[2] + y * w[6] + z * w[10] + w[14];
+        const double NX = nx * w[0] + ny * w[4] + nz * w[8], NY = nx * w[1] + ny * w[5] + nz * w[9],
+                     NZ = nx * w[2] + ny * w[6] + nz * w[10];
+        x = X, y = Y, z = Z;
+        const double l = std::sqrt(NX * NX + NY * NY + NZ * NZ);
+        if (l > 0) nx = NX / l, ny = NY / l, nz = NZ / l;
+      }
+      vs += Fmt("v %.5f %.5f %.5f\n", x, y, -z);
+      vts += Fmt("vt %.6f %.6f\n", F32(&d[uvs + 8 * k]), 1.0 - F32(&d[uvs + 8 * k + 4]));
+      vns += Fmt("vn %.5f %.5f %.5f\n", nx, ny, -nz);
+    }
+    obj += vs + vts + vns;
+    // Triangles, grouped by the part their first corner belongs to.
+    std::map<int, std::string> groups;
+    for (uint32_t t = 0; t < ntri; ++t) {
+      const uint32_t a = d[tris + 6 * t] | d[tris + 6 * t + 1] << 8, b = d[tris + 6 * t + 2] | d[tris + 6 * t + 3] << 8,
+                     c = d[tris + 6 * t + 4] | d[tris + 6 * t + 5] << 8;
+      if (a >= nvert || b >= nvert || c >= nvert) continue;
+      const long A = base + a, B = base + c, C = base + b;  // z negated: swap two corners
+      groups[owner[a]] += Fmt("f %ld/%ld/%ld %ld/%ld/%ld %ld/%ld/%ld\n", A, A, A, B, B, B, C, C, C);
+      ++nf;
+    }
+    for (auto& g : groups) {
+      const std::string part = g.first >= 0 ? nodes[g.first].name : "unattached";
+      obj += Fmt("g %s_mesh%u\nusemtl mat%d\n", SafeFile(part).c_str(), mi, mat) + g.second;
+    }
+    base += static_cast<long>(nvert);
+    nv += nvert;
+  }
+  if (!err.empty() || meshes == 0) {
+    Log("  %s %s: %s", ar.name().c_str(), m.name.c_str(), err.empty() ? "no meshes" : err.c_str());
+    ++g_count.failed;
+    return;
+  }
+  std::string mtl;
+  for (size_t i = 0; i < mats.size(); ++i) {
+    mtl += Fmt("newmtl mat%d\nKd 1 1 1\n", static_cast<int>(i));
+    if (!mats[i].empty()) mtl += "map_Kd ../../textures/" + TextureKey(mats[i]) + ".png\n";
+    mtl += "\n";
+  }
+  if (mats.empty()) mtl += "newmtl mat0\nKd 1 1 1\n";
+  MakeDirs(Join(g_out, dir));
+  WriteText(Join(g_out, Join(dir, stem + ".obj")), obj);
+  WriteText(Join(g_out, Join(dir, stem + ".mtl")), mtl);
+  ModelEntry e;
+  e.name = m.name;
+  e.archive = ar.name();
+  e.obj = Join(dir, stem + ".obj");
+  std::string tex;
+  for (const std::string& t : mats)
+    if (!t.empty()) tex += (tex.empty() ? "" : ", ") + t;
+  e.info = Fmt("%zu vertices, %zu triangles, %zu parts, %u LODs", nv, nf, nodes.size(), lods) +
+           (tex.empty() ? "" : ", textures " + tex);
   g_models.push_back(e);
   ++g_count.models;
 }
@@ -2186,6 +2365,10 @@ void ProcessArchive(const std::string& path, const std::string& rel) {
       ConvertSlt(ar, m, d);
       row.what = "model (text; OBJ in models\\)";
       if (!g_models.empty() && g_models.back().name == m.name) row.file = g_models.back().obj;
+    } else if (e == "slb") {
+      ConvertSlb(ar, m, d);
+      row.what = "model (binary; OBJ in models\\)";
+      if (!g_models.empty() && g_models.back().name == m.name) row.file = g_models.back().obj;
     } else if (e == "wav") {
       row.what = "sound";
     } else if (e == "scn" || e == "wpt" || e == "ini" || e == "mcf" || e == "vut" || e == "pb" || e == "seg" ||
@@ -2296,8 +2479,8 @@ void WriteIndex(const std::string& game) {
   }
 
   // Models
-  h += "<h2 id=\"models\">Models</h2><p class=\"dim\">Text models (.slt) as OBJ with their texture. Bike, rider and "
-       "object models (.slb) are binary and not converted yet.</p><table><tr><th>Model</th><th>Archive</th><th></th></tr>\n";
+  h += "<h2 id=\"models\">Models</h2><p class=\"dim\">Soultree models as OBJ with their textures: trees and plants (.slt, text) and bikes, riders and "
+       "objects (.slb, binary), the most detailed level, in the rest pose, one group per moving part.</p><table><tr><th>Model</th><th>Archive</th><th></th></tr>\n";
   for (const ModelEntry& m : g_models)
     h += "<tr class=\"f\" data-n=\"" + HtmlEsc(Lower(m.name)) + "\"><td><a href=\"" + Url(m.obj) + "\">" + HtmlEsc(m.name) +
          "</a></td><td>" + HtmlEsc(m.archive) + "</td><td class=\"dim\">" + HtmlEsc(m.info) + "</td></tr>\n";
