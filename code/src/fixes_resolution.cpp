@@ -144,9 +144,11 @@ void __stdcall NotePick(int pos) {
 }
 
 // The dropdown's text for a mode: the game's "W X H", plus the refresh rate
-// with Fullscreen=Exclusive. Called instead of the game's sprintf, with the
-// mode position (esi) pushed in front by a stub.
-int __cdecl LabelFormat(int pos, void* /*ret*/, char* buf, const char* /*fmt*/, int w, int h) {
+// with Fullscreen=Exclusive. Called instead of the game's sprintf by a stub
+// that pushes copies of the arguments (never the game's own stack slots: a
+// cdecl callee may reuse its argument slots, and res-1 crashed when a tail
+// call overwrote the game's return address that way).
+int __cdecl LabelFormat(int pos, char* buf, int w, int h) {
   const uint8_t* arr = nullptr;
   const int n = Modes(&arr);
   int hz = 0;
@@ -184,8 +186,8 @@ bool HookPickSite(uintptr_t site) {
   return true;
 }
 
-// Replace "call sprintf" at site (dropdown label) with: push esi; call
-// LabelFormat; add esp,4; ret.
+// Replace "call sprintf(buf, fmt, w, h)" at site (dropdown label) with a
+// stub: push h; push w; push buf; push esi; call LabelFormat; add esp,16; ret.
 uint8_t* g_label_stub = nullptr;
 bool HookLabelSite(uintptr_t site) {
   const uint8_t code[] = {0xE8};
@@ -197,16 +199,22 @@ bool HookLabelSite(uintptr_t site) {
   if (!g_label_stub) {
     auto* t = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (!t) return false;
-    size_t n = 0;
-    t[n++] = 0x56;  // push esi
-    t[n++] = 0xE8;
+    // On entry: [esp] ret, +4 buf, +8 fmt, +12 w, +16 h.
+    const uint8_t head[] = {
+        0xFF, 0x74, 0x24, 0x10,  // push [esp+16]  h
+        0xFF, 0x74, 0x24, 0x10,  // push [esp+16]  w
+        0xFF, 0x74, 0x24, 0x0C,  // push [esp+12]  buf
+        0x56,                    // push esi       mode position
+        0xE8};                   // call LabelFormat
+    size_t n = sizeof(head);
+    std::memcpy(t, head, n);
     const int32_t r = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&LabelFormat) -
                                            reinterpret_cast<uintptr_t>(t + n + 4));
     std::memcpy(t + n, &r, 4);
     n += 4;
-    t[n++] = 0x83;  // add esp,4
+    t[n++] = 0x83;  // add esp,16
     t[n++] = 0xC4;
-    t[n++] = 0x04;
+    t[n++] = 0x10;
     t[n++] = 0xC3;  // ret
     FlushInstructionCache(GetCurrentProcess(), t, n);
     g_label_stub = t;
