@@ -5,7 +5,13 @@ on modern Windows by double-clicking `Mcm2.exe`. You don't need compatibility
 settings, administrator rights, DirectX wrappers or old codecs, and you don't
 change the game's display resolution.
 
-Its core features are:
+> ***You need the no-CD `Mcm2.exe`.*** mcm2fix only works with the widely
+> available no-CD exe (1,577,005 bytes; see [Requirements](#requirements)).
+> The original `Mcm2.exe` from the CD uses SafeDisc copy protection, which
+> Windows 10 and 11 can't run at all, and mcm2fix doesn't patch it. With any
+> other exe mcm2fix does nothing.
+
+Motocross Madness 2 MaXimuM's core features are:
 
 | Feature | Description |
 |---|---|
@@ -17,12 +23,6 @@ Its core features are:
 | Music | Optional music tracks, either per-event or per-track (provide your own) |
 
 See the [Featrures](#features) section for more details.
-
-> ***You need the no-CD `Mcm2.exe`.*** mcm2fix only works with the widely
-> available no-CD exe (1,577,005 bytes; see [Requirements](#requirements)).
-> The original `Mcm2.exe` from the CD uses SafeDisc copy protection, which
-> Windows 10 and 11 can't run at all, and mcm2fix doesn't patch it. With any
-> other exe mcm2fix does nothing.
 
 It is a single DLL that the game loads in place of `d3drm.dll`, a library
 Windows no longer ships. When the DLL loads, it patches the game's code in
