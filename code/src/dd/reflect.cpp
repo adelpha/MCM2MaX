@@ -151,7 +151,7 @@ void ParseList(const char* text, float k, int mat, std::vector<Pattern>& out) {
 
 float ReadF(const char* key, float def, const char* ini) {
   char buf[64] = {};
-  GetPrivateProfileStringA("mcm2fix", key, "", buf, sizeof(buf), ini);
+  GetPrivateProfileStringA(IniSection(), key, "", buf, sizeof(buf), ini);
   if (!buf[0]) return def;
   char* end = nullptr;
   double v = std::strtod(buf, &end);
@@ -161,11 +161,8 @@ float ReadF(const char* key, float def, const char* ini) {
 const RCfg& Cfg() {
   if (g_cfg.loaded) return g_cfg;
   g_cfg.loaded = true;
-  char ini[MAX_PATH] = {};
-  GetModuleFileNameA(nullptr, ini, MAX_PATH);
-  if (char* slash = std::strrchr(ini, '\\')) slash[1] = '\0';
-  xp::Append(ini, "mcm2fix.ini");
-  g_cfg.mode = GetConfig().reflections;  // mcm2fix.ini, or the menus' choice
+  const char* ini = IniPath();
+  g_cfg.mode = GetConfig().reflections;  // mcm2max.ini, or the menus' choice
   g_cfg.strength = std::clamp(ReadF("ReflectStrength", 1.0f, ini), 0.0f, 4.0f);
   g_cfg.bike = std::clamp(ReadF("ReflectBike", 1.0f, ini), 0.0f, 1.0f);
   g_cfg.helmet = std::clamp(ReadF("ReflectHelmet", 1.0f, ini), 0.0f, 1.0f);
@@ -191,40 +188,40 @@ const RCfg& Cfg() {
     }
   }
   g_cfg.sun = std::clamp(ReadF("ReflectSun", 1.0f, ini), 0.0f, 4.0f);
-  g_cfg.cache = GetPrivateProfileIntA("mcm2fix", "ReflectCache", 1, ini) != 0;
-  g_cfg.cache_mb = std::clamp(static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectCacheMB", 128, ini)), 4, 512);
+  g_cfg.cache = GetPrivateProfileIntA(IniSection(), "ReflectCache", 1, ini) != 0;
+  g_cfg.cache_mb = std::clamp(static_cast<int>(GetPrivateProfileIntA(IniSection(), "ReflectCacheMB", 128, ini)), 4, 512);
   g_cfg.cache_secs = std::clamp(ReadF("ReflectCacheSecs", 20.0f, ini), 0.5f, 600.0f);
   g_cfg.cache_radius = std::clamp(ReadF("ReflectCacheRadius", 0.0f, ini), 0.0f, 1e6f);
   g_cfg.max_range = std::clamp(ReadF("ReflectMaxRange", 1024.0f, ini), 0.0f, 1e6f);
   g_cfg.face_rate = std::clamp(ReadF("ReflectFaceRate", 60.0f, ini), 0.0f, 10000.0f);
-  int size = static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectSize", 128, ini));
+  int size = static_cast<int>(GetPrivateProfileIntA(IniSection(), "ReflectSize", 128, ini));
   int p = 16;
   while (p < size && p < 1024) p <<= 1;
   g_cfg.size = p;
-  g_cfg.live_faces = std::clamp(static_cast<int>(GetPrivateProfileIntA("mcm2fix", "ReflectLiveFaces", 6, ini)), 1, 6);
+  g_cfg.live_faces = std::clamp(static_cast<int>(GetPrivateProfileIntA(IniSection(), "ReflectLiveFaces", 6, ini)), 1, 6);
   g_cfg.ground = std::clamp(ReadF("ReflectGround", 1.0f, ini), 0.0f, 2.0f);
-  g_cfg.log = GetPrivateProfileIntA("mcm2fix", "ReflectLog", 0, ini) != 0;
-  g_cfg.debug = GetPrivateProfileIntA("mcm2fix", "ReflectDebug", 0, ini) != 0;
-  g_cfg.liquid = GetPrivateProfileIntA("mcm2fix", "LiquidMetal", 0, ini) != 0;
+  g_cfg.log = GetPrivateProfileIntA(IniSection(), "ReflectLog", 0, ini) != 0;
+  g_cfg.debug = GetPrivateProfileIntA(IniSection(), "ReflectDebug", 0, ini) != 0;
+  g_cfg.liquid = GetPrivateProfileIntA(IniSection(), "LiquidMetal", 0, ini) != 0;
   if (g_cfg.liquid && !g_cfg.mode) g_cfg.mode = 2;
   char buf[1024] = {};
-  GetPrivateProfileStringA("mcm2fix", "ReflectBikeTextures",
+  GetPrivateProfileStringA(IniSection(), "ReflectBikeTextures",
                            "honda*, ktm*, yamaha*, kazuyuki*, suzuki*, kawasaki*, husq*", buf, sizeof(buf), ini);
   ParseList(buf, g_cfg.bike, 0, g_cfg.textures);
-  GetPrivateProfileStringA("mcm2fix", "ReflectTextures", "", buf, sizeof(buf), ini);
+  GetPrivateProfileStringA(IniSection(), "ReflectTextures", "", buf, sizeof(buf), ini);
   ParseList(buf, g_cfg.bike, 0, g_cfg.textures);
-  GetPrivateProfileStringA("mcm2fix", "ReflectHelmetFrames", "Head", buf, sizeof(buf), ini);
+  GetPrivateProfileStringA(IniSection(), "ReflectHelmetFrames", "Head", buf, sizeof(buf), ini);
   ParseList(buf, g_cfg.helmet, 1, g_cfg.frames);
-  GetPrivateProfileStringA("mcm2fix", "ReflectRiderFrames",
+  GetPrivateProfileStringA(IniSection(), "ReflectRiderFrames",
                            "PELVIS, LWRTORSO, UPRTORSO, UPRLEG*, LWRLEG*, UPRARM*, LWRARM*, HANDL, HANDR, FOOTL, FOOTR",
                            buf, sizeof(buf), ini);
   ParseList(buf, g_cfg.rider, 2, g_cfg.frames);
-  GetPrivateProfileStringA("mcm2fix", "ReflectFrames", "", buf, sizeof(buf), ini);
+  GetPrivateProfileStringA(IniSection(), "ReflectFrames", "", buf, sizeof(buf), ini);
   ParseList(buf, g_cfg.helmet, 1, g_cfg.frames);
-  GetPrivateProfileStringA("mcm2fix", "ReflectSkipObjects", "SIGN*, FLAG*", buf, sizeof(buf), ini);
+  GetPrivateProfileStringA(IniSection(), "ReflectSkipObjects", "SIGN*, FLAG*", buf, sizeof(buf), ini);
   ParseList(buf, 1, 0, g_cfg.skip_objects);
   std::vector<Pattern> ex;
-  GetPrivateProfileStringA("mcm2fix", "ReflectExclude", "tire*", buf, sizeof(buf), ini);
+  GetPrivateProfileStringA(IniSection(), "ReflectExclude", "tire*", buf, sizeof(buf), ini);
   ParseList(buf, 0, 0, ex);
   for (auto& e : ex) g_cfg.exclude.push_back(e.glob);
   if (g_cfg.mode) {

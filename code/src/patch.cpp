@@ -66,12 +66,12 @@ void* HookIat(uintptr_t slot, void* replacement) {
 
 namespace {
 constexpr size_t kKeepLogs = 50;
-// Deletes the oldest mcm2fix-*.log files in dir so that at most
+// Deletes the oldest MCM2MaX-*.log files in dir so that at most
 // kKeepLogs - 1 remain (the new one makes kKeepLogs). Names sort by time.
 void PruneLogs(const char* dir) {
   std::vector<std::string> names;
   WIN32_FIND_DATAA fd{};
-  std::string pattern = std::string(dir) + "\\mcm2fix-*.log";
+  std::string pattern = std::string(dir) + "\\MCM2MaX-*.log";
   HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
   if (h == INVALID_HANDLE_VALUE) return;
   do {
@@ -94,7 +94,7 @@ void Log(const char* fmt, ...) {
   if (n > static_cast<int>(sizeof(msg)) - 2) n = sizeof(msg) - 2;
   msg[n] = '\n';
   msg[n + 1] = 0;
-  OutputDebugStringA("[mcm2fix] ");
+  OutputDebugStringA("[MCM2MaX] ");
   OutputDebugStringA(msg);
   if (!GetConfig().log) return;
   static HANDLE file = INVALID_HANDLE_VALUE;
@@ -107,7 +107,7 @@ void Log(const char* fmt, ...) {
       xp::Append(path, local.c_str());
       xp::Append(path, "\\Motocross Madness 2");
       CreateDirectoryA(path, nullptr);
-      // One file per run: logs\mcm2fix-YYYYMMDD-HHMMSS.log, keeping the
+      // One file per run: logs\MCM2MaX-YYYYMMDD-HHMMSS.log, keeping the
       // newest kKeepLogs.
       xp::Append(path, "\\logs");
       CreateDirectoryA(path, nullptr);
@@ -115,7 +115,7 @@ void Log(const char* fmt, ...) {
       SYSTEMTIME st;
       GetLocalTime(&st);
       char name[64];
-      std::snprintf(name, sizeof(name), "\\mcm2fix-%04u%02u%02u-%02u%02u%02u.log", st.wYear, st.wMonth,
+      std::snprintf(name, sizeof(name), "\\MCM2MaX-%04u%02u%02u-%02u%02u%02u.log", st.wYear, st.wMonth,
                     st.wDay, st.wHour, st.wMinute, st.wSecond);
       xp::Append(path, name);
       file = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,

@@ -4,7 +4,7 @@
 // Patch the game's frame timer and set up the cap. Call once at startup.
 void ApplyFramePacing();
 
-// Block until the frame cap (FrameCap in mcm2fix.ini) allows another frame.
+// Block until the frame cap (FrameCap in mcm2max.ini) allows another frame.
 // Call without holding the renderer lock.
 void WaitForFrameSlot();
 

@@ -1148,7 +1148,7 @@ HRESULT Surface::QueryInterface(REFIID riid, void** out) {
 // because releasing the root destroys the whole chain. Forwarding those
 // references to the root (as before) kept every mipmapped texture and every
 // primary chain alive forever (refcounts in the thousands, ~1500 surfaces
-// and 30+ MB leaked per race). mcm2fix's own holds (the device's render
+// and 30+ MB leaked per race). MCM2MaX's own holds (the device's render
 // target and textures) use Hold/Unhold, which keep the root alive.
 ULONG Surface::AddRef() {
   if (root_) return static_cast<ULONG>(InterlockedIncrement(&refs_));
@@ -1351,7 +1351,7 @@ HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
     cur = cur->back_;
   }
   if (flags & DDFLIP_NOVSYNC) LogOnce("game flips with DDFLIP_NOVSYNC");
-  // VSync in mcm2fix.ini decides, whatever the game asked for.
+  // VSync in mcm2max.ini decides, whatever the game asked for.
   PresentFront(GetConfig().vsync ? 1 : 0);
   ShadowFrameEnd();
   SmoothFrameEnd();
@@ -1505,7 +1505,7 @@ HRESULT Surface::ReleaseDC(HDC dc) {
   return DD_OK;
 }
 
-// GDI drawing by mcm2fix on the GPU (gputext.cpp), for render targets.
+// GDI drawing by MCM2MaX on the GPU (gputext.cpp), for render targets.
 HDC Surface::TextDC(const char** why) {
   // Not for textures: the 3D pipeline samples the texture itself, without
   // the overlay. Other surfaces (also system-memory ones, like the tooltip

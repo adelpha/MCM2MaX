@@ -26,9 +26,9 @@ jobs:
         run: cmake --build build --config Release
       - uses: actions/upload-artifact@v4
         with:
-          name: mcm2fix-msvc
+          name: MCM2MaX-msvc
           path: |
-            build/Release/mcm2fix.dll
+            build/Release/MCM2MaX.dll
             tools/mcm2patch.py
 
   mingw:
@@ -49,17 +49,17 @@ jobs:
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: tools/build-ffmpeg.sh ffmpeg-work
       - name: Configure
-        run: cmake -S code -B build -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/code/toolchain-mingw32.cmake -DCMAKE_BUILD_TYPE=Release -DMCM2FIX_FFMPEG=$GITHUB_WORKSPACE/ffmpeg-work/install
+        run: cmake -S code -B build -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/code/toolchain-mingw32.cmake -DCMAKE_BUILD_TYPE=Release -DMCM2MaX_FFMPEG=$GITHUB_WORKSPACE/ffmpeg-work/install
       - name: Build
         run: cmake --build build
       - name: Check Windows XP imports
-        run: python3 tools/check-xp-imports.py build/mcm2fix.dll
+        run: python3 tools/check-xp-imports.py build/MCM2MaX.dll
       - name: Package
-        run: tools/package.sh build/mcm2fix.dll mcm2fix.zip
+        run: tools/package.sh build/MCM2MaX.dll MCM2MaX.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: mcm2fix-release
-          path: mcm2fix.zip
+          name: MCM2MaX-release
+          path: MCM2MaX.zip
       - name: Build mcm2sky (sky box tool)
         run: i686-w64-mingw32-g++ -O2 -std=c++17 -static -s -o mcm2sky.exe tools/mcm2sky/mcm2sky.cpp
       - uses: actions/upload-artifact@v4
