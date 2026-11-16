@@ -286,6 +286,7 @@ are welcome.
 
 ## Hypothetical future work
 
+- **Built-in track editor**: pretty much the holy grail.
 - **Split-screen multiplayer**: Needs checked for feasibility.
 - **3D skyboxes**: moving clouds, weather effects. Save this one for if I get really bored.
 
