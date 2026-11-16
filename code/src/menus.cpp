@@ -94,7 +94,10 @@ constexpr char kFootName[] = "Mcm2fixFootnote";
 // Fullscreen: Borderless / Exclusive in the Display Resolution box.
 constexpr const char* kFsNames[2] = {"Mcm2fixBorderless", "Mcm2fixExclusive"};
 constexpr const char* kFsLabels[2] = {"Borderless", "Exclusive"};
-int g_fs_value[2] = {};  // bound to the two checkboxes while the page is up
+constexpr int kFsGroup = 731;            // AttachId of the pair (unused by the game's pages)
+constexpr int kFindRadio = 4;            // FindControl type for radio buttons (0x4b73c8)
+constexpr uintptr_t kRadioSelect = 0x47A240;  // thiscall(int): checks it, clears the rest of its group
+constexpr uintptr_t kRadioState = 0x47A320;   // thiscall(): 2 = checked, 1 = not
 constexpr char kFootText[] = "* after restarting the game";
 // Page layout (control pixels; the page's controls are placed 20,35 menu
 // pixels further on). StOo: every box a border-only plate; the two columns
@@ -172,18 +175,19 @@ std::string OptGraphControls() {
                   g_checks[i].name, 22 + i, y * 15, g_checks[i].label, y);
     t += buf;
   }
-  // Borderless / Exclusive, side by side above the resolution dropdown
-  // (checkbox sprites, kept to one ticked by OptGraphEvent).
+  // Borderless / Exclusive: a radio button pair (the game's own, as on the
+  // Sound page: one group by AttachId, shared RadioButton sprites), side by
+  // side above the resolution dropdown.
   for (int i = 0; i < 2; ++i) {
     const int x = i ? 118 : 8, w = i ? 101 : 105;
     std::snprintf(buf, sizeof(buf),
-                  "[%s]\r\nNumStates=2\r\nType=MULTISTATE\r\nAnchor=DisplayResolutionBox\r\nRelAnchor=1\r\n"
-                  "Height=300\r\nLeft=%d\r\nTabIndex=%d\r\nTop=390\r\nWidth=%d\r\nDropColor=0\r\nTextDrop=-1'True\r\n"
-                  "TextAlignV=TOP\r\nTextAlign=RIGHT\r\nSourceBlit=-1'True\r\nSoundPush=\"Beep\"\r\n"
-                  "Broken_Enable=0'False\r\nState0=\"CheckBoxOff\"\r\nState1=\"CheckBoxOn\"\r\n"
-                  "StateDisable0=\"CheckBoxOffGrey\"\r\nStateDisable1=\"CheckBoxOnGrey\"\r\nText=\"%s\"\r\n"
-                  "TextColor=16777215\r\nTextLMargin=3\r\nXywh=%d,26,%d,20\r\n\r\n",
-                  kFsNames[i], x * 15, 60 + i, w * 15, kFsLabels[i], x, w);
+                  "[%s]\r\nType=RADIOBUTTON\r\nAnchor=DisplayResolutionBox\r\nRelAnchor=1\r\nHeight=255\r\n"
+                  "Left=%d\r\nTabIndex=%d\r\nTop=420\r\nWidth=%d\r\nDropColor=0\r\nTextDrop=-1'True\r\n"
+                  "TextAlignV=MIDDLE\r\nTextAlign=LEFT\r\nSourceBlit=-1'True\r\nBroken_Enable=0'False\r\n"
+                  "AttachId=%d\r\nAnimOn=\"RadioButtonOn\"\r\nAnimOff=\"RadioButtonOff\"\r\n"
+                  "AnimOnDisable=\"RadioButtonOnGrey\"\r\nAnimOffDisable=\"RadioButtonOffGrey\"\r\n"
+                  "TextColor=16777215\r\nText=\"%s\"\r\nTextLMargin=3\r\nXywh=%d,28,%d,17\r\n\r\n",
+                  kFsNames[i], x * 15, 60 + i, w * 15, kFsGroup, kFsLabels[i], x, w);
     t += buf;
   }
   std::snprintf(buf, sizeof(buf),
@@ -708,16 +712,6 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
       patch::Log("menus: slider %s (vtable %08x) bound at step %d (%s=%d)", m.name,
                  static_cast<unsigned>(*reinterpret_cast<uintptr_t*>(c)), m.pos, m.key, m.saved);
     }
-    for (int i = 0; i < 2; ++i) {
-      const uintptr_t box = FindCheckbox(self, kFsNames[i]);
-      g_fs_value[i] = (i == 1) == GetConfig().exclusive;
-      if (!box) {
-        patch::Log("menus: %s not on the page", kFsNames[i]);
-        continue;
-      }
-      const uintptr_t bind = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + kBindSlot);
-      reinterpret_cast<BindFn>(bind)(box, nullptr, &g_fs_value[i]);
-    }
     g_bound = bound > 0 || sbound > 0;
     patch::Log("menus: %d of %d checkboxes and %d of %d sliders bound", bound, kNumChecks, sbound, kNumSliders);
   }
@@ -726,6 +720,16 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
     SetLabel(self, "Mcm2fixBoxText", "Enhancements");
     for (const MenuCheck& m : g_checks) SetLabel(self, m.name, m.label);
     for (int i = 0; i < 2; ++i) SetLabel(self, kFsNames[i], kFsLabels[i]);
+    {
+      const int pick = GetConfig().exclusive ? 1 : 0;
+      const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(self, nullptr, kFsNames[pick], kFindRadio);
+      if (r && !IsBadReadPtr(reinterpret_cast<void*>(r), 4)) {
+        reinterpret_cast<EnableFn>(kRadioSelect)(r, nullptr, 0);
+        patch::Log("menus: %s selected (vtable %08x)", kFsNames[pick], static_cast<unsigned>(*reinterpret_cast<uintptr_t*>(r)));
+      } else {
+        patch::Log("menus: radio button %s not on the page", kFsNames[pick]);
+      }
+    }
     ResolutionFillDropdown(FindAny(self, "DisplayResolutionDropDown"));
     SetLabel(self, kFootName, kFootText);
     for (const MenuSlider& m : g_sliders) SliderLabel(self, m, m.pos);
@@ -756,19 +760,12 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   }
   if (type == 3) {
     const char* clicked = SafeName(event);
-    // Borderless / Exclusive: the clicked one is ticked, the other cleared
-    // (clicking the ticked one keeps it), and the switch happens now.
+    // Borderless / Exclusive (the radio group keeps one selected): switch now.
     for (int i = 0; i < 2; ++i) {
       if (std::strcmp(clicked, kFsNames[i]) != 0) continue;
-      g_fs_value[i] = 1;
-      g_fs_value[1 - i] = 0;
-      for (int k = 0; k < 2; ++k) {
-        if (const uintptr_t box = FindCheckbox(self, kFsNames[k])) {
-          CallSlot(box, kExchangeSlot, 0);  // bound value -> control
-          CallSlot(box, kRedrawSlot, 0);
-        }
-      }
-      patch::Log("menus: %s clicked", kFsNames[i]);
+      const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(self, nullptr, kFsNames[i], kFindRadio);
+      const int state = r ? reinterpret_cast<int(__fastcall*)(uintptr_t, void*)>(kRadioState)(r, nullptr) : -1;
+      patch::Log("menus: %s clicked (state %d)", kFsNames[i], state);
       ResolutionSetExclusive(i == 1, FindAny(self, "DisplayResolutionDropDown"));
     }
     for (MenuCheck& m : g_checks) {
