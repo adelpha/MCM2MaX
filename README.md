@@ -24,7 +24,7 @@ Motocross Madness 2 MaXimuM's core features are:
 
 See the [Featrures](#features) section for more details.
 
-It is a single DLL that the game loads in place of `d3drm.dll`, a library
+Motocross Madness 2 MaXimuM is a single DLL that the game loads in place of `d3drm.dll`, a library
 Windows no longer ships. When the DLL loads, it patches the game's code in
 memory. It brings its own DirectDraw 7 / Direct3D 7 implementation that draws
 with **Direct3D 11**, and it falls back to **Direct3D 9** where Direct3D 11 is
