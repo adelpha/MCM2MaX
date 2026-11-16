@@ -21,7 +21,7 @@ Here's just a few of Motocross Madness 2 MaXimuM's core features:
 | Graphical enhancements | Widescreen, AA, AF, FoV, Alpha-to-coverage, support for high-resolution replacement textures, environment mapped reflections on bikes and riders, soft shadows for all riders, and more! |
 | Audio | Drop in [DSOAL](https://github.com/kcat/dsoal) and the EAX effects will just work |
 | Music | Optional music tracks, either per-event or per-track (provide your own) |
-| Input | Native XInput support with analog and force-feedback to rumble translation |
+| Input | Native XInput support with analog and force-feedback-to-rumble translation |
 
 See the [Features](#features) section for more details.
 
