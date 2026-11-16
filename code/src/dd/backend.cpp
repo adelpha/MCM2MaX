@@ -31,6 +31,10 @@ Backend g_backend;
 Api g_api = Api::kD3D11;
 bool g_device_failed = false;
 bool g_tearing = false;  // swap chain made with ALLOW_TEARING (VSync=0)
+// The swap chain's creation flags; ResizeBuffers must pass the same ones.
+// ALLOW_MODE_SWITCH always: without it DXGI does not change the display
+// mode for exclusive fullscreen (it keeps the desktop mode and scales).
+UINT g_swap_flags = 0;
 RECT g_monitor_rect{};
 
 const char kBlitShader[] = R"(
@@ -408,7 +412,7 @@ bool ResizeSwapchain() {
     ContextTouched();
     b.ctx->Flush();
     if (FAILED(b.swapchain->ResizeBuffers(
-            0, w, h, DXGI_FORMAT_UNKNOWN, g_tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0)))
+            0, w, h, DXGI_FORMAT_UNKNOWN, g_swap_flags)))
       return false;
   } else {
     IDXGIDevice* dxgi_dev = nullptr;
@@ -445,17 +449,24 @@ bool ResizeSwapchain() {
       if (g_tearing) sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
       Log("VSync off, tearing %s", g_tearing ? "supported" : "not supported");
     }
+    sd.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
     HRESULT hr = factory->CreateSwapChainForHwnd(b.device, b.hwnd, &sd, nullptr, nullptr,
                                                  &b.swapchain);
     if (FAILED(hr)) {
       g_tearing = false;
-      sd.Flags = 0;
+      sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
       sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
       sd.BufferCount = 1;
       hr = factory->CreateSwapChainForHwnd(b.device, b.hwnd, &sd, nullptr, nullptr,
                                            &b.swapchain);
     }
-    if (SUCCEEDED(hr)) factory->MakeWindowAssociation(b.hwnd, DXGI_MWA_NO_ALT_ENTER);
+    if (SUCCEEDED(hr)) {
+      g_swap_flags = sd.Flags;
+      factory->MakeWindowAssociation(b.hwnd, DXGI_MWA_NO_ALT_ENTER);
+      Log("swap chain %ux%u, %s, flags %02x (mode switch%s)", w, h,
+          sd.SwapEffect == DXGI_SWAP_EFFECT_FLIP_DISCARD ? "flip discard" : "discard", sd.Flags,
+          g_tearing ? ", tearing" : "");
+    }
     factory->Release();
     if (FAILED(hr)) {
       Log("CreateSwapChainForHwnd failed %08lx", hr);
@@ -603,6 +614,16 @@ void EnterExclusive11() {
     return;
   }
   ++g_fs_enters;
+  // By the book (DXGI full-screen guidance): ResizeTarget before
+  // SetFullscreenState sizes the window; once fullscreen, ResizeTarget again
+  // with the same mode so the display mode itself is set to it.
+  if (g_fs_changed_mode) {
+    IDXGIOutput* out2 = nullptr;
+    b.swapchain->GetContainingOutput(&out2);
+    g_fs_target_w = g_fs_target_h = g_fs_target_hz = -1;  // log it
+    ApplyExclusiveMode11(out2, "after entering fullscreen");
+    SafeRelease(out2);
+  }
   // The buffers must be resized after a mode switch; ResizeSwapchain does
   // that on the next frame from the new client size.
   b.swap_w = b.swap_h = 0;
