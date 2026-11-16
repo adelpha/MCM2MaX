@@ -418,6 +418,7 @@ const ThisFn kStatePostFrame = reinterpret_cast<ThisFn>(0x46ABB0);
 const ThisFn kPostFrame10 = reinterpret_cast<ThisFn>(0x4EDA50);
 
 LONGLONG g_bike_seen = 0;  // QPC when a bike was last simulated (race running)
+LONGLONG g_player_seen = 0;  // QPC when the player's bike was last simulated
 double g_sim_acc = 0.0;
 bool g_sim_fixed = false;
 
@@ -555,7 +556,10 @@ void __stdcall NoteBikeSim(const void* bike) {
 // The player's bike (and crashed bikes) are simulated by 0x40d820 instead
 // (call at 0x497be8): MotionBlur reads the player's velocity there. Does not
 // count as "a bike was simulated" for the fixed-rate switch.
-void __stdcall NotePlayerSim(const void* bike) { dd::MotionBlurBikeStep(bike); }
+void __stdcall NotePlayerSim(const void* bike) {
+  g_player_seen = Now();  // MenuFpsCap: a race is running (not used for SimRate)
+  dd::MotionBlurBikeStep(bike);
+}
 
 // Stub for a bike simulation call (thiscall, ecx = bike):
 // pushad; push ecx; call note; popad; jmp target.
@@ -680,7 +684,8 @@ void ApplyFramePacing() {
   } else if (c.precise_timer || c.frame_fix || c.ai_steer_rate > 0) {
     PatchFrameTime();
   }
-  if (c.motion_blur || c.menu_options) PatchBikeSimNote(c.sim_rate <= 0);  // MenuOptions: can be switched on later
+  // MenuOptions: can be switched on later. MenuFpsCap: tells races from menus.
+  if (c.motion_blur || c.menu_options || c.menu_fps_cap > 0) PatchBikeSimNote(c.sim_rate <= 0);
   patch::Log("frame pacing: VSync=%d FrameCap=%d MenuFpsCap=%d PreciseTimer=%d FrameFix=%d RefRate=%d AiRate=%d "
              "AiSteerRate=%d SimRate=%d",
              c.vsync, c.frame_cap, c.menu_fps_cap, c.precise_timer, c.frame_fix, c.ref_rate, c.ai_rate,
@@ -735,17 +740,24 @@ void WaitForFrameSlot() {
   const Config& c = GetConfig();
   if (!g_freq.QuadPart) return;
   int cap = c.frame_cap;
-  // MenuFpsCap: menus and loading screens (no 3D scene drawn for half a
-  // second) don't need thousands of frames a second with VSync off.
-  const bool menu = c.menu_fps_cap > 0 && dd::MenuScreen();
+  // MenuFpsCap: anything but a running race (menus, rider/bike select,
+  // loading, pause, results) doesn't need thousands of frames a second with
+  // VSync off. A race is running while bikes are being simulated; the 3D
+  // test of the renderer label isn't enough (the rider select shows a bike).
+  const LONGLONG half = g_freq.QuadPart / 2;
+  const LONGLONG t = Now();
+  const bool bikes = g_bike_seen && t - g_bike_seen < half;
+  const bool player = g_player_seen && t - g_player_seen < half;
+  const bool menu = c.menu_fps_cap > 0 && !bikes && !player;
   if (menu && (cap <= 0 || c.menu_fps_cap < cap)) cap = c.menu_fps_cap;
   if (menu != g_menu_capped) {
     g_menu_capped = menu;
     g_menu_log_start = 0;
     g_menu_frames = 0;
     g_menu_slept = g_menu_late = g_menu_late_max = 0;
-    patch::Log("menu frame cap: %s (now %d fps%s)", menu ? "menu showing" : "3D scene showing, menu cap off",
-               cap, cap > 0 ? "" : " = no cap");
+    patch::Log("menu frame cap: %s (now %d fps%s; bikes simulated %d, player simulated %d, 3D scene %d)",
+               menu ? "not racing, cap on" : "race running, menu cap off", cap, cap > 0 ? "" : " = no cap",
+               bikes, player, !dd::MenuScreen());
   }
   if (cap <= 0) return;
   if (!g_timer) {
