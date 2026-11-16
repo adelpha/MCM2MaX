@@ -62,6 +62,7 @@
 #include <vector>
 
 #include "config.h"
+#include "mode_prompt.h"
 #include "patch.h"
 
 namespace {
@@ -420,7 +421,7 @@ HRESULT TryAcquire(Device& d, void* self, HRESULT why) {
   return hr;
 }
 
-HRESULT WINAPI MyGetData(void* self, DWORD cb, DiData* data, DWORD* inout, DWORD flags) {
+HRESULT WINAPI GetDataImpl(void* self, DWORD cb, DiData* data, DWORD* inout, DWORD flags) {
   Lock lock;
   Device* d = Find(self);
   auto get = reinterpret_cast<GetDataFn>(Orig(self, kSlotGetData));
@@ -524,7 +525,7 @@ unsigned OrButtons(const Device& d, LONGLONG from, LONGLONG to, uint8_t* state) 
   return added;
 }
 
-HRESULT WINAPI MyGetState(void* self, DWORD cb, void* out) {
+HRESULT WINAPI GetStateImpl(void* self, DWORD cb, void* out) {
   Lock lock;
   Device* d = Find(self);
   auto get = reinterpret_cast<GetStateFn>(Orig(self, kSlotGetState));
@@ -660,6 +661,53 @@ HRESULT WINAPI MySetFormat(void* self, const void* fmt) {
     patch::Log("input: %s %d: data format %lu bytes, %lu objects (hr=0x%08lx)", KindName(d->kind), d->number,
                d->format_size, fmt ? reinterpret_cast<const DWORD*>(fmt)[4] : 0, hr);
   }
+  return hr;
+}
+
+// "Keep this display mode?" (mode_prompt.h): Enter, Esc and the mouse
+// buttons answer the prompt and are kept from the game while it is up, so
+// they do not also act on the menu under it.
+bool PromptKey(DWORD ofs) { return ofs == 0x01 || ofs == 0x1C || ofs == 0x9C; }  // DIK_ESCAPE, RETURN, NUMPADENTER
+bool PromptMouse(DWORD ofs) { return ofs >= 12 && ofs < 20; }                    // DIMOFS_BUTTON0..7
+
+HRESULT WINAPI MyGetData(void* self, DWORD cb, DiData* data, DWORD* inout, DWORD flags) {
+  const HRESULT hr = GetDataImpl(self, cb, data, inout, flags);
+  if (FAILED(hr) || !data || !inout || cb != sizeof(DiData) || !ModePromptActive()) return hr;
+  int kind = -1;
+  {
+    Lock lock;
+    if (Device* d = Find(self)) kind = d->kind;
+  }
+  if (kind != kKeyboard && kind != kMouse) return hr;
+  DWORD k = 0;
+  for (DWORD i = 0; i < *inout; ++i) {
+    const DiData& e = data[i];
+    const bool ours = kind == kKeyboard ? PromptKey(e.ofs) : PromptMouse(e.ofs);
+    if (!ours) {
+      data[k++] = e;
+      continue;
+    }
+    if ((flags & kPeek) || !(e.data & 0x80)) continue;
+    if (kind == kKeyboard)
+      ModePromptAnswer(e.ofs == 0x01 ? kPromptRevert : kPromptKeep, e.ofs == 0x01 ? "Esc" : "Enter");
+    else if (e.ofs == 12)
+      ModePromptAnswer(kPromptClick, "left mouse button");
+  }
+  *inout = k;
+  return hr;
+}
+
+HRESULT WINAPI MyGetState(void* self, DWORD cb, void* out) {
+  const HRESULT hr = GetStateImpl(self, cb, out);
+  if (FAILED(hr) || !out || !ModePromptActive()) return hr;
+  int kind = -1;
+  {
+    Lock lock;
+    if (Device* d = Find(self)) kind = d->kind;
+  }
+  uint8_t* b = static_cast<uint8_t*>(out);
+  if (kind == kKeyboard && cb >= 256) b[0x01] = b[0x1C] = b[0x9C] = 0;
+  if (kind == kMouse && cb >= 16) std::memset(b + 12, 0, cb >= 20 ? 8 : 4);
   return hr;
 }
 

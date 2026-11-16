@@ -107,6 +107,7 @@ struct Overlay {
 
 std::map<const void*, Overlay> g_overlays;
 unsigned g_nonempty = 0;
+bool g_rescaled = false;  // an overlay with text was remade at a new scale
 
 void MarkUsed(Overlay& o) {
   if (o.empty) {
@@ -176,19 +177,16 @@ Overlay* EnsureOverlay(const void* native, UINT bw, UINT bh) {
   FitSize(bw, bh, &ow, &oh);
   Overlay& o = g_overlays[native];
   if (o.tex.Valid() && o.tex.width == ow && o.tex.height == oh && o.base_w == bw && o.base_h == bh) return &o;
-  // Same surface, new screen scale (the window or screen mode changed, e.g.
-  // Exclusive 640x480 -> Borderless 1920x1080): keep the text, stretched
-  // to the new size, until the game draws it again. Menus only redraw text
-  // when it changes, so clearing it left the Options page without labels.
-  const bool keep = o.tex.Valid() && !o.empty && o.base_w == bw && o.base_h == bh;
-  const float old_sx = o.sx;
+  // Same surface at a new screen scale (e.g. Exclusive 640x480 -> Borderless
+  // 1920x1080): its text is lost. Menus draw text only when it changes, so
+  // the menu code asks the page to redraw (GpuTextTakeRescaled).
+  if (o.tex.Valid() && !o.empty && o.base_w == bw && o.base_h == bh) g_rescaled = true;
   MarkEmpty(o);
   GpuTexture old = o.tex;  // reset below, outside the map's bookkeeping
   o.tex = GpuTexture{};
-  if (!keep) old.Reset();
+  old.Reset();
   if (!CreateGpuTexture(o.tex, ow, oh, 1, true, false, true)) {
     Log("text overlay %ux%u could not be made; GDI text is not drawn", ow, oh);
-    old.Reset();
     g_overlays.erase(native);
     return nullptr;
   }
@@ -199,23 +197,6 @@ Overlay* EnsureOverlay(const void* native, UINT bw, UINT bh) {
   o.empty = false;
   ++g_nonempty;
   ClearOverlay(o, nullptr);
-  if (keep) {
-    BlitParams p;
-    p.SetDst(o.tex);
-    p.dst_rect = {0, 0, static_cast<LONG>(ow), static_cast<LONG>(oh)};
-    p.SetSrc(old);
-    p.src_rect = {0, 0, static_cast<LONG>(old.width), static_cast<LONG>(old.height)};
-    p.linear = true;
-    p.opaque = false;
-    Blit(p);
-    old.Reset();
-    if (o.empty) {
-      o.empty = false;
-      ++g_nonempty;
-    }
-    Log("text overlay %ux%u for a %ux%u surface (x%.2f), text kept from x%.2f", ow, oh, bw, bh, o.sx, old_sx);
-    return &o;
-  }
   Log("text overlay %ux%u for a %ux%u surface (x%.2f)", ow, oh, bw, bh, o.sx);
   return &o;
 }
@@ -1118,6 +1099,14 @@ void GpuTextMemoryLog() {
   }
   Log("memory: GPU text: %u overlays (%u with text, %u MB of textures), %u fonts, %u known GDI fonts", n, used,
       static_cast<unsigned>(bytes >> 20), static_cast<unsigned>(g_fonts.size()), static_cast<unsigned>(g_known.size()));
+}
+
+void GpuTextRequestRedraw() { g_rescaled = true; }
+
+bool GpuTextTakeRescaled() {
+  const bool r = g_rescaled;
+  g_rescaled = false;
+  return r;
 }
 
 }  // namespace dd

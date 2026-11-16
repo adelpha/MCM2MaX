@@ -28,6 +28,7 @@
 #include "config.h"
 #include "patch.h"
 #include "xp_compat.h"
+#include "dd/gputext.h"
 #include "dd/menubg.h"
 
 namespace {
@@ -833,14 +834,45 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
 
 // Every frame (game thread): while Options > Graphics is open, switch
 // Borderless / Exclusive as soon as the player picks the other radio button.
+// Mark every control on a page for redrawing (vtable +0xc8, what the game
+// does after changing a control's text), walking the page's control list
+// the way FindControl 0x46fb20 does (iterator 0x46a880 / next 0x46a980 /
+// end 0x46a970 over [page+0x7f3c], every control: mode 1, class 0x5717a0).
+using IterInitFn = void(__fastcall*)(void* it, void* edx, uintptr_t list, int mode, uintptr_t cls);
+using IterNextFn = uintptr_t(__fastcall*)(void* it, void* edx);
+using IterEndFn = void(__fastcall*)(void* it, void* edx);
+
+int RedrawAllControls(uintptr_t page) {
+  const uintptr_t list = *reinterpret_cast<const uintptr_t*>(page + 0x7F3C);
+  if (!list) return -1;
+  alignas(16) uint8_t it[0x100] = {};
+  reinterpret_cast<IterInitFn>(0x46A880)(it, nullptr, list, 1, 0x5717A0);
+  int n = 0;
+  for (uintptr_t c; (c = reinterpret_cast<IterNextFn>(0x46A980)(it, nullptr)) != 0;) {
+    if (IsBadReadPtr(reinterpret_cast<void*>(c), 0x200)) continue;
+    const uintptr_t redraw = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(c) + kRedrawSlot);
+    reinterpret_cast<RedrawFn>(redraw)(c, nullptr);
+    ++n;
+  }
+  reinterpret_cast<IterEndFn>(0x46A970)(it, nullptr);
+  return n;
+}
+
 void MenusFrame() {
   const uintptr_t page = g_graph_page;
+  const bool rescaled = dd::GpuTextTakeRescaled();
   if (!page) return;
   if (IsBadReadPtr(reinterpret_cast<void*>(page), 4) || *reinterpret_cast<uintptr_t*>(page) != g_graph_vtable) {
     patch::Log("menus: Options > Graphics page gone without a close event; radio buttons no longer watched");
     g_graph_page = 0;
     return;
   }
+  // The screen scale changed (mode switch): the page's text was drawn at the
+  // old scale and is gone; the game redraws a control's text only when it
+  // changes, so ask every control to redraw.
+  if (rescaled) patch::Log("menus: screen scale changed, %d controls redrawn", RedrawAllControls(page));
+  // A resolution picked in the dropdown applies now, not when the page closes.
+  ResolutionPickNow(FindAny(page, "DisplayResolutionDropDown"));
   const bool excl = GetConfig().exclusive;
   // Each radio button's own state is at +0x1f0 (1 = checked; the game's
   // getter 0x479d00). 0x47a320 is NOT a per-button state: it returns the

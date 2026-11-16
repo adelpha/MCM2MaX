@@ -187,6 +187,9 @@ void ResolutionWanted(int* w, int* h, int* hz);
 // Options > Graphics Borderless / Exclusive: switches now, refills the game's
 // mode list and the resolution dropdown (its control, or 0).
 void ResolutionSetExclusive(bool exclusive, uintptr_t dropdown);
+// Options > Graphics, every frame: a new pick in the resolution dropdown
+// (its control, or 0) is applied and saved now.
+void ResolutionPickNow(uintptr_t dropdown);
 // Options > Graphics set-up: the resolution dropdown with "Desktop" first.
 void ResolutionFillDropdown(uintptr_t dropdown);
 // A value read from mcm2max.ini, replaced by the menus' choice if there is one.

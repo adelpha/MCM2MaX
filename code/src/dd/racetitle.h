@@ -4,6 +4,8 @@
 // ends, instead of the game's small green text in the bottom-left corner.
 #pragma once
 
+#include <windows.h>
+
 namespace dd {
 
 class Surface;
@@ -16,5 +18,8 @@ void RaceTitleDraw(Surface* rt);
 // A short debug message (debug keys), shown at the top of the screen for
 // three seconds (GPU text only). Any thread.
 void DebugNotice(const char* text);
+// The "Keep this display mode?" prompt, if one is up, over `rt` (the
+// frame about to be shown); area = where it was drawn (to erase after).
+bool ModePromptDraw(Surface* rt, RECT* area);
 
 }  // namespace dd

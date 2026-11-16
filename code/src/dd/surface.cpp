@@ -1353,8 +1353,12 @@ HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
     cur = cur->back_;
   }
   if (flags & DDFLIP_NOVSYNC) LogOnce("game flips with DDFLIP_NOVSYNC");
+  // "Keep this display mode?" over the frame, erased again once shown.
+  RECT prompt_area{};
+  const bool prompt = ModePromptDraw(this, &prompt_area);
   // VSync in mcm2max.ini decides, whatever the game asked for.
   PresentFront(GetConfig().vsync ? 1 : 0);
+  if (prompt) GpuTextOcclude(GpuKey(), &prompt_area, "mode prompt");
   ShadowFrameEnd();
   SmoothFrameEnd();
   ReplacementFrame(2.0);

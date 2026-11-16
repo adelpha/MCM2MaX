@@ -131,8 +131,9 @@ BorderlessResolution=Desktop
 ;   <width>x<height>         - e.g. 1920x1080, at the highest refresh rate.
 ;   <width>x<height>@<Hz>    - e.g. 1024x768@85.
 ; A mode the monitor doesn't have uses the desktop for that start. On
-; Direct3D 11 a new pick switches the screen at once; on Direct3D 9 at the
-; next start.
+; Direct3D 11 a new pick switches the screen at once and asks to keep it
+; (Enter/Keep, Esc/Revert; no answer in 10 s goes back); on Direct3D 9 at
+; the next start.
 ExclusiveResolution=Desktop
 
 ; CardTest: 0 = skip the game's video card test at start; MCM2MaX's renderer

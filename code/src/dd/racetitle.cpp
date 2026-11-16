@@ -8,6 +8,7 @@
 
 #include "../config.h"
 #include "../framerate.h"
+#include "../mode_prompt.h"
 #include "../music.h"
 #include "../patch.h"
 #include "backend.h"
@@ -831,6 +832,51 @@ void DrawNotice(Surface* rt) {
   GpuTextEndDC(dc);
 }
 }  // namespace
+
+// "Keep this display mode?" with Keep / Revert buttons and a countdown
+// (fixes_resolution.cpp runs it), drawn over the menu as GPU text.
+bool ModePromptDraw(Surface* rt, RECT* area) {
+  const int secs = ModePromptSeconds();
+  if (secs < 0 || !rt || !GpuTextActive()) return false;
+  const LONG W = static_cast<LONG>(rt->Width()), H = static_cast<LONG>(rt->Height());
+  if (W < 320 || H < 200) return false;
+  HDC dc = rt->BeginGpuText();
+  if (!dc) return false;
+  static HBRUSH panel = CreateSolidBrush(RGB(16, 20, 28));
+  static HBRUSH edge = CreateSolidBrush(RGB(230, 200, 60));
+  static HBRUSH button = CreateSolidBrush(RGB(60, 66, 80));
+  static HBRUSH hot = CreateSolidBrush(RGB(110, 120, 140));
+  const LONG pw = W * 56 / 100, ph = H * 30 / 100;
+  const RECT box{(W - pw) / 2, (H - ph) / 2, (W - pw) / 2 + pw, (H - ph) / 2 + ph};
+  const LONG b = std::max<LONG>(1, H / 240);
+  Fill(dc, box, edge);
+  const RECT inner{box.left + b, box.top + b, box.right - b, box.bottom - b};
+  Fill(dc, inner, panel);
+  const LONG bw = pw * 36 / 100, bh = ph * 24 / 100, gap = pw * 8 / 100;
+  const LONG by = box.bottom - bh - ph * 12 / 100;
+  const RECT keep{W / 2 - gap / 2 - bw, by, W / 2 - gap / 2, by + bh};
+  const RECT revert{W / 2 + gap / 2, by, W / 2 + gap / 2 + bw, by + bh};
+  ModePromptSetButtons(keep, revert, static_cast<UINT>(W), static_cast<UINT>(H));
+  POINT cur{};
+  const bool have = ModePromptCursor(&cur);
+  Fill(dc, keep, have && PtInRect(&keep, cur) ? hot : button);
+  Fill(dc, revert, have && PtInRect(&revert, cur) ? hot : button);
+  SetBkMode(dc, TRANSPARENT);
+  SetTextAlign(dc, TA_CENTER | TA_TOP | TA_NOUPDATECP);
+  const LONG big = std::max<LONG>(12, H * 45 / 1000), small = std::max<LONG>(10, H * 34 / 1000);
+  GpuTextSelectFont(dc, TitleFont(big));
+  Text(dc, "Keep this display mode?", W / 2, box.top + ph * 10 / 100, RGB(255, 255, 255));
+  GpuTextSelectFont(dc, TitleFont(small));
+  char line[64];
+  std::snprintf(line, sizeof(line), "Going back to the previous mode in %d s", secs);
+  Text(dc, line, W / 2, box.top + ph * 30 / 100, RGB(255, 230, 120));
+  Text(dc, "Keep (Enter)", (keep.left + keep.right) / 2, keep.top + (bh - small) / 2, RGB(255, 255, 255));
+  Text(dc, "Revert (Esc)", (revert.left + revert.right) / 2, revert.top + (bh - small) / 2, RGB(255, 255, 255));
+  GpuTextSelectFont(dc, GetStockObject(SYSTEM_FONT));
+  GpuTextEndDC(dc);
+  *area = box;
+  return true;
+}
 
 void DebugNotice(const char* text) {
   EnterCriticalSection(NoticeLock());

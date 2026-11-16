@@ -35,6 +35,9 @@
 #include "config.h"
 #include "display.h"
 #include "patch.h"
+#include "dd/backend.h"
+#include "dd/gputext.h"
+#include "mode_prompt.h"
 
 namespace {
 
@@ -43,6 +46,7 @@ bool g_want_desktop = true;  // ...because the ini says Desktop (the dropdown sh
 // The dropdown's "Desktop" entry: item data the game's mode positions never reach.
 constexpr int kDesktopData = 1000;
 bool g_logged_table = false;
+int g_shown_data = -2;  // the dropdown item (its data) last filled or applied
 int g_last_fixed = -2;  // last position written (for the log)
 bool g_ready = false;
 
@@ -375,8 +379,93 @@ void RefillDropdown(uintptr_t control) {
   // The page's working copy of the mode position stays a real position.
   *reinterpret_cast<int*>(0x68E918) = select;
   reinterpret_cast<SelectFn>(0x477AC0)(list, nullptr, g_want_desktop ? kDesktopData : select);
+  g_shown_data = g_want_desktop ? kDesktopData : select;
   patch::Log("resolution: dropdown filled: %d -> %d entries + Desktop, showing %s (position %d)", count, n,
              g_want_desktop ? "Desktop" : "the mode", select);
+}
+
+// ---- "Keep this display mode?" (Fullscreen=Exclusive) ----------------------
+// A mode picked in the dropdown is tried at once; unless the player keeps it
+// (Enter, or the Keep button) within 10 seconds, the previous mode comes
+// back (Esc, the Revert button, or doing nothing). Answers come from
+// ModePromptAnswer (keys / clicks seen by input_timing.cpp, or polled here).
+constexpr DWORD kPromptMs = 11500;  // 10 s shown, plus the ~1.5 s the switch itself takes
+struct Prompt {
+  bool on = false;
+  DWORD start = 0;
+  int prev_data = -2;      // the dropdown item to go back to
+  int select_data = -2;    // revert: put the dropdown back on this item (next frame with the page open)
+  RECT keep{}, revert{};   // the buttons, in surface pixels (drawn by racetitle.cpp)
+  UINT surf_w = 0, surf_h = 0;
+  bool keys_down = true;   // Enter/Esc/button held when the prompt opened: wait for release
+} g_prompt;
+CRITICAL_SECTION* PromptLock() {
+  static CRITICAL_SECTION cs;
+  static bool init = [] {
+    InitializeCriticalSection(&cs);
+    return true;
+  }();
+  (void)init;
+  return &cs;
+}
+
+// The menu mouse cursor (GUICursor, vtable 0x558f88; update 0x486100 =
+// GameCursor::Update 0x43fce0 puts the position at +0x54/+0x58).
+using CursorUpdateFn = void(__fastcall*)(uintptr_t self, void* edx);
+constexpr uintptr_t kCursorVtableSlot = 0x558F88 + 15 * 4;
+constexpr uintptr_t kCursorUpdate = 0x486100;
+volatile LONG g_cursor_x = -1, g_cursor_y = -1;
+void __fastcall CursorUpdateHook(uintptr_t self, void* edx) {
+  reinterpret_cast<CursorUpdateFn>(kCursorUpdate)(self, edx);
+  g_cursor_x = *reinterpret_cast<const int*>(self + 0x54);
+  g_cursor_y = *reinterpret_cast<const int*>(self + 0x58);
+}
+bool HookCursor() {
+  const uintptr_t want = kCursorUpdate;
+  if (!patch::Matches(kCursorVtableSlot, &want, 4)) {
+    patch::Log("resolution: menu cursor code differs; the mode prompt's buttons do not take clicks");
+    return false;
+  }
+  const uintptr_t fn = reinterpret_cast<uintptr_t>(&CursorUpdateHook);
+  patch::Write(kCursorVtableSlot, &fn, 4);
+  return true;
+}
+
+void ApplyData(int data);  // below
+
+void PromptEnd(bool keep, const char* how) {
+  if (!g_prompt.on) return;
+  g_prompt.on = false;
+  dd::GpuTextRequestRedraw();  // the prompt was drawn over the page's text
+  if (keep) {
+    patch::Log("resolution: mode kept (%s)", how);
+    return;
+  }
+  patch::Log("resolution: mode reverted (%s): back to dropdown item data %d", how, g_prompt.prev_data);
+  g_prompt.select_data = g_prompt.prev_data;
+  ApplyData(g_prompt.prev_data);
+}
+
+void PollPromptKeys() {
+  // Fallback for the DirectInput filter (input_timing.cpp): the keyboard
+  // state Windows keeps. A key must go up once after the prompt opened.
+  const bool enter = (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+  const bool esc = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+  const bool click = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+  static bool was_enter = true, was_esc = true, was_click = true;
+  if (g_prompt.keys_down) {
+    was_enter = enter;
+    was_esc = esc;
+    was_click = click;
+    g_prompt.keys_down = false;
+    return;
+  }
+  if (enter && !was_enter) ModePromptAnswer(kPromptKeep, "Enter (Windows key state)");
+  else if (esc && !was_esc) ModePromptAnswer(kPromptRevert, "Esc (Windows key state)");
+  else if (click && !was_click) ModePromptAnswer(kPromptClick, "mouse button (Windows key state)");
+  was_enter = enter;
+  was_esc = esc;
+  was_click = click;
 }
 
 }  // namespace
@@ -390,9 +479,10 @@ void ApplyResolutionDefault() {
   const bool b = HookPickSite(0x453846);
   const bool l1 = HookLabelSite(0x4B6BDB);
   const bool l2 = HookLabelSite(0x4B6C2C);
+  const bool cur = HookCursor();
   ChooseFromIni();
   g_ready = true;
-  patch::Log("resolution: hooks: Options graphics %d, other %d, labels %d/%d", a, b, l1, l2);
+  patch::Log("resolution: hooks: Options graphics %d, other %d, labels %d/%d, menu cursor %d", a, b, l1, l2, cur);
 }
 
 void ResolutionFillDropdown(uintptr_t dropdown) {
@@ -414,6 +504,99 @@ void ResolutionSetExclusive(bool exclusive, uintptr_t dropdown) {
              static_cast<unsigned long>(GetTickCount() - t1));
 }
 
+namespace {
+void ApplyData(int data) {
+  g_shown_data = data;
+  if (data != kDesktopData) *reinterpret_cast<int*>(0x68E918) = data;  // the page's working copy
+  NotePick(data);
+}
+}  // namespace
+
+void ResolutionPickNow(uintptr_t control) {
+  if (!g_ready || !control || IsBadReadPtr(reinterpret_cast<void*>(control), 0x200)) return;
+  const uintptr_t list = *reinterpret_cast<const uintptr_t*>(control + 0x1FC);
+  if (!list || IsBadReadPtr(reinterpret_cast<void*>(list), 0x218)) return;
+  EnterCriticalSection(PromptLock());
+  const int put_back = g_prompt.select_data;
+  g_prompt.select_data = -2;
+  LeaveCriticalSection(PromptLock());
+  if (put_back != -2) {
+    reinterpret_cast<SelectFn>(0x477AC0)(list, nullptr, put_back);
+    patch::Log("resolution: dropdown back on item data %d", put_back);
+    return;
+  }
+  const int count = *reinterpret_cast<const int*>(list + 0x1EC);
+  const int sel = *reinterpret_cast<const int*>(list + 0x1F4);
+  const uint8_t* items = *reinterpret_cast<uint8_t* const*>(list + 0x214);
+  if (!items || sel < 0 || sel >= count) return;
+  const int data = *reinterpret_cast<const int*>(items + sel * 0x38 + 0x1C);
+  if (data == g_shown_data) return;
+  const int before_w = g_want_w, before_h = g_want_h, before_hz = g_want_hz;
+  const int before_data = g_shown_data;
+  patch::Log("resolution: dropdown item %d (data %d) picked; applied now", sel, data);
+  ApplyData(data);
+  const bool changed = g_want_w != before_w || g_want_h != before_h || g_want_hz != before_hz;
+  // Direct3D 9 switches at the next start: nothing to confirm now.
+  if (!GetConfig().exclusive || !changed || dd::IsD3D9()) return;
+  EnterCriticalSection(PromptLock());
+  if (!g_prompt.on) g_prompt.prev_data = before_data;
+  g_prompt.on = true;
+  g_prompt.start = GetTickCount();
+  g_prompt.keys_down = true;
+  LeaveCriticalSection(PromptLock());
+  patch::Log("resolution: asking to keep %dx%d@%d (else back to item data %d in %lu s)", g_want_w, g_want_h,
+             g_want_hz, g_prompt.prev_data, static_cast<unsigned long>(kPromptMs / 1000));
+}
+
+int ModePromptSeconds() {
+  if (!g_prompt.on) return -1;
+  const DWORD gone = GetTickCount() - g_prompt.start;
+  if (gone >= kPromptMs) return 0;
+  const int left = static_cast<int>((kPromptMs - gone + 999) / 1000);
+  return left > 10 ? 10 : left;
+}
+
+void ModePromptSetButtons(const RECT& keep, const RECT& revert, UINT surf_w, UINT surf_h) {
+  EnterCriticalSection(PromptLock());
+  g_prompt.keep = keep;
+  g_prompt.revert = revert;
+  g_prompt.surf_w = surf_w;
+  g_prompt.surf_h = surf_h;
+  LeaveCriticalSection(PromptLock());
+}
+
+bool ModePromptCursor(POINT* p) {
+  if (g_cursor_x < 0 || g_cursor_y < 0) return false;
+  p->x = g_cursor_x;
+  p->y = g_cursor_y;
+  return true;
+}
+
+void ModePromptAnswer(int answer, const char* how) {
+  EnterCriticalSection(PromptLock());
+  if (!g_prompt.on || GetTickCount() - g_prompt.start < 300) {
+    LeaveCriticalSection(PromptLock());
+    return;
+  }
+  if (answer == kPromptClick) {
+    POINT p{};
+    const bool have = ModePromptCursor(&p);
+    patch::Log("resolution: click during the mode prompt at %ld,%ld (%s; surface %ux%u, keep %ld,%ld-%ld,%ld, revert "
+               "%ld,%ld-%ld,%ld)",
+               p.x, p.y, have ? "menu cursor" : "no cursor seen", g_prompt.surf_w, g_prompt.surf_h, g_prompt.keep.left,
+               g_prompt.keep.top, g_prompt.keep.right, g_prompt.keep.bottom, g_prompt.revert.left, g_prompt.revert.top,
+               g_prompt.revert.right, g_prompt.revert.bottom);
+    if (!have) answer = 0;
+    else if (PtInRect(&g_prompt.keep, p)) answer = kPromptKeep;
+    else if (PtInRect(&g_prompt.revert, p)) answer = kPromptRevert;
+    else answer = 0;
+  }
+  if (answer == kPromptKeep || answer == kPromptRevert) PromptEnd(answer == kPromptKeep, how);
+  LeaveCriticalSection(PromptLock());
+}
+
+bool ModePromptActive() { return g_prompt.on; }
+
 void ResolutionWanted(int* w, int* h, int* hz) {
   if (!g_ready) {
     const display::Mode d = display::Desktop();
@@ -430,6 +613,12 @@ void ResolutionWanted(int* w, int* h, int* hz) {
 // Called once a frame: point the game's saved position at the wanted mode.
 void ResolutionFrame() {
   if (!g_ready) return;
+  if (g_prompt.on) {
+    PollPromptKeys();
+    EnterCriticalSection(PromptLock());
+    if (g_prompt.on && GetTickCount() - g_prompt.start >= kPromptMs) PromptEnd(false, "no answer in 10 s");
+    LeaveCriticalSection(PromptLock());
+  }
   const uintptr_t game = *reinterpret_cast<const uintptr_t*>(0x5743AC);
   const uint8_t* arr = nullptr;
   const int n = Modes(&arr);
