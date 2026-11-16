@@ -260,10 +260,23 @@ Windows 10 and 11.
 These work in principle but have had little or no testing so far. Reports
 are welcome.
 
-- **Windows XP support**: barely tested, it's on the TODO list.
+- **Windows XP support**: barely tested, it's on the TODO list. The XP support is really only there for my own personal XP gaming rig, which is very powerful (for an XP machine) and probably doesn't represent a typical XP gaming rig, so YMMV.
 - **4:3, 16:10, 21:9, 32:9 and 64:27 aspect ratios** with the new HUD, text
   and other screen layout changes: not tested. Testing so far has been at
   16:9.
+
+## Future work
+
+- **More performance**: Squeeze every last drop. Move all objects to GPU where possible.
+- **Audio improvements**: Unified, low-latency audio subsystem, replacing DS7 and our current hacks.
+- **More menu options and enhancements**: Less digging in the ini file.
+- **Steamdeck optimisations**: Ensure it's playable and performant on Valve's handheld.
+- **Updated network multiplayer support**: Not sure what form this will take right now.
+
+## Hypothetical future work
+
+- **Split-screen multiplayer**: Needs checked for feasibility.
+- **3D skyboxes: moving clouds, weather effects. Save this one for if I get really bored.
 
 ## Installing
 
