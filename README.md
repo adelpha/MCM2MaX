@@ -269,6 +269,7 @@ are welcome.
 
 ## Future work
 
+- **Extend menu system**: More flexibility, more controls while retaining the original aestheic.
 - **More performance**: Squeeze every last drop. Move all objects to GPU where possible.
 - **Audio improvements**: Unified, low-latency audio subsystem, replacing DS7 and our current hacks.
 - **More menu options and enhancements**: Less digging in the ini file.
