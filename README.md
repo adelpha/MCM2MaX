@@ -34,7 +34,7 @@ memory. It brings its own DirectDraw 7 / Direct3D 7 implementation that draws
 with **Direct3D 11**, and it falls back to **Direct3D 9** where Direct3D 11 is
 missing. Your `Mcm2.exe` and the other game files are never modified.
 
-Fonts intended to be used in the game are included, but are optional and can be swapped out for fonts of your preference (can't guarantee they'll look good though!)
+Fonts intended to be used in the game are included, but are optional and can be swapped out for fonts of your preference (can't guarantee replacements will look good though!)
 
 The same DLL also runs on **Windows XP SP3**, where it uses Direct3D 9.
 
