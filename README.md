@@ -7,6 +7,8 @@ change the game's display resolution.
 
 Its core features are:
 
+| Feature | Description |
+|---|---|
 | Ease of use | Drop the files into your MCM2 directory with the no-CD exe and it just works |
 | No wrappers, codecs, external DLLs or compatibility settings required | Indeo5 decoder built-in for the game's video files, "Modern" rendering on the GPU using D3D11 or, for Windows XP compatibility, DX9 |
 | Performance | It can render a full Baja map at 10x view distance with maximum terrain quality across the entire map at hundreds of frames per second on a modern GPU |
