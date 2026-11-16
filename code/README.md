@@ -697,6 +697,11 @@ XInputRumble=100
 ; short bumps are lengthened so the pad's motors can spin up.
 XInputRumbleForces=0
 
+; XInputRumbleThreshold: with XInputRumbleForces=0, how sudden a change in
+; the game's stick force has to be to rumble, in percent of full force, 1-100.
+; Lower = more bumps felt (too low becomes a constant rumble). Default 10.
+XInputRumbleThreshold=10
+
 ; XInputTriggerButtons: 1 = the triggers also work as buttons 11 (LT) and
 ; 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the Z axis,
 ; Brake on button 11) works as it is (default). 0 = axes only. The game can't

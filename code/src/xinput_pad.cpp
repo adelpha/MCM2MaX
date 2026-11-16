@@ -162,6 +162,7 @@ int g_rumble_pct = 100;
 float g_deadzone = 0.15f;
 float g_curve = 1.0f;          // XInputSteerCurve / 100: left stick X response exponent
 bool g_rumble_forces = false;  // XInputRumbleForces: steady stick forces rumble too
+double g_kick_threshold = 1000;  // XInputRumbleThreshold * 100: force jump that rumbles
 float g_steer_smooth_us = 0;   // XInputSteerSmooth (ms) * 1000: steering follows the stick with this time constant
 LARGE_INTEGER g_freq;
 
@@ -284,7 +285,7 @@ class Effect final : public IDirectInputEffect {
   // A crash stops the force outright (the game's crash state); that rumbles
   // at least kCrashKick for kCrashUs. Short jolts (70 ms in the game) are too
   // brief for pad motors to spin up, so they last at least kMinPulseUs.
-  static constexpr double kKickThreshold = 2000, kKickUs = 400000, kCrashKick = 8000, kCrashUs = 700000,
+  static constexpr double kKickUs = 400000, kCrashKick = 8000, kCrashUs = 700000,
                           kMinPulseUs = 160000;
   double kick_len_us_ = kKickUs;
   double KickLevel(double now_us) const {
@@ -1083,7 +1084,7 @@ HRESULT Effect::SetParameters(LPCDIEFFECT eff, DWORD flags) {
     } else if (!periodic_ && !ramp_ && eff->cbTypeSpecificParams >= sizeof(DICONSTANTFORCE)) {
       const LONG m = static_cast<const DICONSTANTFORCE*>(eff->lpvTypeSpecificParams)->lMagnitude;
       const double jump = std::fabs(static_cast<double>(m) - magnitude_);
-      if (jump >= kKickThreshold) {
+      if (jump >= g_kick_threshold) {
         Kick(NowUs(), jump, kKickUs);
         if (g_log && steady_ && !g_rumble_forces)
           patch::Log("xinput: effect %p (ConstantForce): force jump %ld -> %ld, rumble kick %.0f",
@@ -1510,6 +1511,7 @@ void Apply() {
   g_deadzone = static_cast<float>(c.xinput_deadzone) / 100.0f;
   g_curve = static_cast<float>(c.xinput_steer_curve) / 100.0f;
   g_rumble_forces = c.xinput_rumble_forces;
+  g_kick_threshold = c.xinput_rumble_threshold * 100.0;
   g_steer_smooth_us = static_cast<float>(c.xinput_steer_smooth) * 1000.0f;
   g_trigger_buttons = c.xinput_trigger_buttons;
   constexpr uintptr_t kDirectInputCreateEx = 0x555028;  // DINPUT!DirectInputCreateEx
@@ -1519,9 +1521,9 @@ void Apply() {
   }
   g_create = reinterpret_cast<CreateExFn>(
       patch::HookIat(kDirectInputCreateEx, reinterpret_cast<void*>(&MyDirectInputCreateEx)));
-  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputDeadzone=%d XInputSteerCurve=%d XInputSteerSmooth=%d KeepControlPreset=%d "
+  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputRumbleThreshold=%d XInputDeadzone=%d XInputSteerCurve=%d XInputSteerSmooth=%d KeepControlPreset=%d "
              "XInputTriggerButtons=%d XInputLog=%d)",
-             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
+             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_rumble_threshold, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
              g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
 }
 
