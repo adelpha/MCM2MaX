@@ -1567,6 +1567,7 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
   }
   if (races.empty()) t.pictures.push_back(Join(t.dir, "ground.png"));
   t.pictures.push_back(Join(t.dir, "relief.png"));
+  t.pictures.push_back(Join(t.dir, "heightmap16.png"));
   if (!races.empty())
     info += "map_raceN.png: ground with race N's waypoints in order (white dot = waypoint 1)\n";
 
