@@ -55,11 +55,9 @@ struct Config {
   bool dd_stats = false;      // DDStats: log renderer activity every 2 seconds
   int renderer = 11;          // Renderer: 11 = Direct3D 11, 9 = Direct3D 9 (also used when D3D11 is missing)
   bool exclusive = false;     // Fullscreen: false = borderless window (default), true = exclusive fullscreen
-  int fs_width = 0, fs_height = 0, fs_hz = 0;  // FullscreenMode: 0 = the desktop's
-  bool fs_follow = true;  // FullscreenMode=Resolution: the screen mode follows Resolution / the player's pick
-  // Resolution: the game's resolution, by size; the game's Options write the
-  // player's pick here. -1 = Game (the game's own choice), 0 = Desktop.
-  int default_res_w = 0, default_res_h = 0;
+  int monitor = 1;            // Monitor: 1 = primary display, 2.. = the other displays
+  int bl_width = 0, bl_height = 0;             // BorderlessResolution: 0 = the desktop's
+  int fs_width = 0, fs_height = 0, fs_hz = 0;  // ExclusiveResolution: 0 = the desktop's; hz 0 = highest
   bool renderer_label = true;  // RendererLabel: name the active renderer in the corner of the menus
   bool gpu_text = true;       // GpuText: draw the game's GDI text on the GPU at screen resolution
   float hud_scale = 2.0f;     // HudScale: race HUD text panels drawn this many times larger (1..4)
@@ -174,8 +172,12 @@ const char* MenuIniPath();
 const char* SetFromMenu(const char* key, int value);
 // The same for a text value (e.g. Resolution=1920x1080).
 const char* SetStringFromMenu(const char* key, const char* value);
-// Resolution (fixes_resolution.cpp): the size the game renders races at,
-// the player's pick or Resolution=, else the desktop size at start.
-void ResolutionWanted(int* w, int* h);
+// Moves old Resolution= / FullscreenMode= values to BorderlessResolution= /
+// ExclusiveResolution= (once; logs).
+void MigrateDisplayKeys();
+// Resolution (fixes_resolution.cpp): the mode the game renders races at, and
+// with Fullscreen=Exclusive the screen mode: the player's pick or the ini's
+// BorderlessResolution / ExclusiveResolution, else the desktop's. hz 0 = any.
+void ResolutionWanted(int* w, int* h, int* hz);
 // A value read from mcm2max.ini, replaced by the menus' choice if there is one.
 int MenuOverride(const char* key, int value);

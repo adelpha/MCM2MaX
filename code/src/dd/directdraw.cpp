@@ -1,4 +1,5 @@
 #include "directdraw.h"
+#include "../display.h"
 
 #include <cstdio>
 #include <cstring>
@@ -166,33 +167,22 @@ HRESULT DirectDraw::DuplicateSurface(LPDIRECTDRAWSURFACE7, LPDIRECTDRAWSURFACE7*
 HRESULT DirectDraw::EnumDisplayModes(DWORD, LPDDSURFACEDESC2 filter, LPVOID ctx,
                                      LPDDENUMMODESCALLBACK2 cb) {
   if (!cb) return DDERR_INVALIDPARAMS;
-  // Display modes are virtual (the window stays at desktop size), so offer
-  // the classic 4:3 sizes plus widescreen sizes up to the desktop's.
-  std::vector<std::pair<UINT, UINT>> modes = {{640, 480},  {800, 600},   {1024, 768},
-                                              {1152, 864}, {1280, 960},  {1280, 1024},
-                                              {1600, 1200}};
-  static const UINT wide[][2] = {{1280, 720},  {1280, 800},  {1366, 768},  {1440, 900},
-                                 {1600, 900},  {1680, 1050}, {1920, 1080}, {1920, 1200},
-                                 {2560, 1080}, {2560, 1440}, {2560, 1600}, {3440, 1440},
-                                 {3840, 1600}, {3840, 2160}};
-  const UINT desk_w = static_cast<UINT>(GetSystemMetrics(SM_CXSCREEN));
-  const UINT desk_h = static_cast<UINT>(GetSystemMetrics(SM_CYSCREEN));
-  for (const auto& m : wide)
-    if (m[0] <= desk_w && m[1] <= desk_h) modes.push_back({m[0], m[1]});
-  if (desk_w >= 640 && desk_h >= 480) modes.push_back({desk_w, desk_h});
-  std::sort(modes.begin(), modes.end());
-  modes.erase(std::unique(modes.begin(), modes.end()), modes.end());
+  // Display modes are virtual (the window covers the monitor; with
+  // Fullscreen=Exclusive the screen mode is set from mcm2max.ini, see
+  // fixes_resolution.cpp). The list is the monitor's own (display.cpp):
+  // Borderless = each size up to the desktop's, Exclusive = every size and
+  // refresh rate. All are offered as 16-bit, the depth the game asks for.
   static const UINT depths[] = {16};
   for (UINT bpp : depths) {
-    for (const auto& mode : modes) {
-      const UINT m[2] = {mode.first, mode.second};
+    for (const display::Mode& mode : display::GameModes()) {
+      const UINT m[2] = {static_cast<UINT>(mode.w), static_cast<UINT>(mode.h)};
       if (filter && (filter->dwFlags & DDSD_WIDTH) && filter->dwWidth != m[0]) continue;
       if (filter && (filter->dwFlags & DDSD_HEIGHT) && filter->dwHeight != m[1]) continue;
       if (filter && (filter->dwFlags & DDSD_PIXELFORMAT) &&
           filter->ddpfPixelFormat.dwRGBBitCount != bpp)
         continue;
       DDSURFACEDESC2 d;
-      FillModeDesc(d, m[0], m[1], bpp, 60);
+      FillModeDesc(d, m[0], m[1], bpp, mode.hz ? mode.hz : 60);
       if (cb(&d, ctx) == DDENUMRET_CANCEL) return DD_OK;
     }
   }

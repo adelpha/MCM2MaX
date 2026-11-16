@@ -102,40 +102,37 @@ old `mcm2fix.ini` (section `[mcm2fix]`) is still read, until `mcm2max.ini` exist
 Renderer=D3D11
 
 ; Fullscreen: how the game fills the screen.
-;   Borderless - a borderless window covering the primary monitor at its
-;                current resolution (default). The desktop resolution never
-;                changes, and Alt+Tab is instant.
-;   Exclusive  - the game takes over the screen. Alt+Tab leaves fullscreen and
-;                it comes back when you return. Can help VSync on Windows XP.
-; Either way, the game renders at the resolution chosen in its own Options
-; and the picture is scaled to the screen with its shape kept.
+;   Borderless - a borderless window covering the monitor at its current
+;                resolution (default). The desktop resolution never changes,
+;                and Alt+Tab is instant.
+;   Exclusive  - the game takes over the screen and sets its mode to
+;                ExclusiveResolution. Alt+Tab leaves fullscreen and it comes
+;                back when you return. Can help VSync on Windows XP.
+; Each has its own resolution below. The game's Options list the monitor's
+; own resolutions for the current one (Exclusive: with refresh rates), and
+; picking one writes it here. The menus are always 640x480 inside, scaled to
+; the screen with black bars; races run at the chosen resolution.
 Fullscreen=Borderless
 
-; FullscreenMode: the screen mode used with Fullscreen=Exclusive (ignored when
-; Borderless).
-;   Resolution               - the game's resolution (see Resolution below),
-;                              at the highest refresh rate (default). Picking
-;                              another resolution in Options switches the
-;                              screen to it. Sizes the screen doesn't have
-;                              (e.g. 1600x1200 on a 1920x1080 screen) keep the
-;                              desktop mode and are scaled into it.
-;   Desktop                  - keep the current desktop mode.
+; Monitor: 1 = the primary monitor (default), 2 and up = the other monitors,
+; in Windows' order.
+Monitor=1
+
+; BorderlessResolution: the resolution the game renders at with
+; Fullscreen=Borderless, scaled to the monitor with its shape kept.
+;   Desktop                  - the desktop's size (default).
+;   <width>x<height>         - e.g. 1280x720 (up to the desktop's size).
+; A size that is no longer available uses the desktop for that start.
+BorderlessResolution=Desktop
+
+; ExclusiveResolution: the screen mode with Fullscreen=Exclusive.
+;   Desktop                  - the desktop's mode (default).
 ;   <width>x<height>         - e.g. 1920x1080, at the highest refresh rate.
 ;   <width>x<height>@<Hz>    - e.g. 1024x768@85.
-FullscreenMode=Resolution
-
-; Resolution: the game's resolution, by size. Until you pick one, the game
-; runs at the desktop's size. Picking a resolution in the game's Options
-; writes it here (or to MCM2MaX-menu.ini in your user folder when this file
-; can't be written), so it is kept from one start to the next and survives
-; changes to the game's list of resolutions.
-;   Desktop                  - the desktop's size (default).
-;   <width>x<height>         - e.g. 1280x720.
-;   Game                     - the game's own choice (640x480 at first),
-;                              saved by the game by list position.
-; The game's menus are always 640x480, scaled to the screen; this is the size
-; of the races.
-Resolution=Desktop
+; A mode the monitor doesn't have uses the desktop for that start. On
+; Direct3D 11 a new pick switches the screen at once; on Direct3D 9 at the
+; next start.
+ExclusiveResolution=Desktop
 
 ; VSync: 1 = wait for the monitor's refresh before showing each frame: no
 ; tearing, frame rate limited to the refresh rate (default).

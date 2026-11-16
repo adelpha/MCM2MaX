@@ -125,22 +125,16 @@ void SeedUserKey() {
   // Renderer Selector at Startup" option off; it would do nothing.
   SetDword(key, "UseLastVideoCard", 1);
 
-  // The game tests the video card once and caches the result, including the
-  // list of display modes, under DriverInfo. MCM2MaX's renderer provides
-  // those modes, so drop the cache whenever the list would change (new
-  // MCM2MaX mode list or a different desktop size); the game then tests
-  // once and skips the test on later launches.
-  char stamp[64];
-  std::snprintf(stamp, sizeof(stamp), "modes-2 %dx%d", GetSystemMetrics(SM_CXSCREEN),
-                GetSystemMetrics(SM_CYSCREEN));
-  char old_stamp[64] = {};
-  DWORD stamp_size = sizeof(old_stamp) - 1;
-  if (RegQueryValueExA(key, "MCM2MaXModeList", nullptr, nullptr,
-                       reinterpret_cast<BYTE*>(old_stamp), &stamp_size) != ERROR_SUCCESS ||
-      std::strcmp(old_stamp, stamp) != 0) {
+  // The game tests the video card and caches the result, including the list
+  // of display modes, under DriverInfo. MCM2MaX's renderer provides both the
+  // card and the modes (display.cpp), so the cache is never used: dropped at
+  // every start, the game's quick test (all in MCM2MaX's renderer, no real
+  // mode change) runs again and sees the current list.
+  {
     LONG r = xp::DeleteRegTree(key, "DriverInfo");
-    patch::Log("registry: display modes changed (%s), video card will be re-tested (%ld)", stamp, r);
-    SetString(key, "MCM2MaXModeList", stamp);
+    patch::Log("registry: video card cache (DriverInfo) cleared (%ld)", r);
+    RegDeleteValueA(key, "MCM2MaXModeList");
+    RegDeleteValueA(key, "mcm2fixModeList");
   }
 
   // Carry over the CD key from an existing install, if there is one.

@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "../config.h"
+#include "../display.h"
 #include "../patch.h"
 #include "../prof.h"
 #include "gdihook.h"
@@ -418,6 +419,13 @@ bool InitDevice9() {
   }
   const UINT count = b.d3d9->GetAdapterCount();
   b.adapter9 = D3DADAPTER_DEFAULT;
+  // Monitor= (display.cpp): Direct3D 9 has one adapter per monitor.
+  for (UINT i = 0; i < count; ++i)
+    if (b.d3d9->GetAdapterMonitor(i) == display::Monitor()) {
+      if (i != b.adapter9) Log("adapter %u drives the chosen monitor %s", i, display::DeviceName());
+      b.adapter9 = i;
+      break;
+    }
   for (UINT i = 0; i < count; ++i) {
     D3DADAPTER_IDENTIFIER9 id{};
     b.d3d9->GetAdapterIdentifier(i, 0, &id);
@@ -460,8 +468,8 @@ bool InitDevice9() {
 
 namespace {
 
-// Picks the fullscreen mode: the game's resolution (FullscreenMode=Resolution)
-// or FullscreenMode, if the card has that size (wanted refresh rate, else the
+// Picks the fullscreen mode: ExclusiveResolution or the player's pick
+// (fixes_resolution.cpp), if the card has that size (wanted refresh rate, else the
 // highest), else the desktop's. Direct3D 9 sets it once, when the device is
 // made: a resolution picked later reaches the screen at the next start.
 D3DDISPLAYMODE PickMode9() {
@@ -471,12 +479,12 @@ D3DDISPLAYMODE PickMode9() {
   b.d3d9->GetAdapterDisplayMode(b.adapter9, &desk);
   D3DDISPLAYMODE pick = desk;
   pick.Format = D3DFMT_X8R8G8B8;
-  int w = c.fs_width, h = c.fs_height, hz = c.fs_hz;
-  if (c.fs_follow) {
-    ResolutionWanted(&w, &h);
-    hz = 0;
-    if (static_cast<UINT>(w) == desk.Width && static_cast<UINT>(h) == desk.Height) w = h = 0;
-  }
+  (void)c;
+  int w = 0, h = 0, hz = 0;
+  ResolutionWanted(&w, &h, &hz);
+  if (static_cast<UINT>(w) == desk.Width && static_cast<UINT>(h) == desk.Height &&
+      (!hz || static_cast<UINT>(hz) == desk.RefreshRate))
+    w = h = 0;
   if (w) {
     const UINT n = b.d3d9->GetAdapterModeCount(b.adapter9, D3DFMT_X8R8G8B8);
     bool found = false;
@@ -492,7 +500,7 @@ D3DDISPLAYMODE PickMode9() {
         found = true;
       }
     }
-    Log("exclusive: %s %dx%d@%d -> %s %ux%u@%u", c.fs_follow ? "Resolution" : "FullscreenMode", w, h, hz,
+    Log("exclusive: ExclusiveResolution %dx%d@%d -> %s %ux%u@%u", w, h, hz,
         found ? "mode" : "not available, desktop", pick.Width, pick.Height, pick.RefreshRate);
   } else {
     Log("exclusive: desktop mode %ux%u@%u", pick.Width, pick.Height, pick.RefreshRate);

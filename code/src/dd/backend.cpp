@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "../config.h"
+#include "../display.h"
 #include "../patch.h"
 #include "../prof.h"
 
@@ -372,11 +373,8 @@ bool InitDevice11() {
 }  // namespace
 
 void ApplyBorderless(HWND hwnd) {
-  HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
-  MONITORINFO mi{};
-  mi.cbSize = sizeof(mi);
-  GetMonitorInfoA(mon, &mi);
-  g_monitor_rect = mi.rcMonitor;
+  // The monitor chosen with Monitor= (display.cpp), at its current size.
+  g_monitor_rect = display::MonitorRect();
   LONG style = GetWindowLongA(hwnd, GWL_STYLE);
   LONG want = (style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX |
                          WS_MAXIMIZEBOX | WS_BORDER | WS_DLGFRAME)) |
@@ -490,20 +488,15 @@ bool ResizeSwapchain() {
 // focus (alt-tab); Present puts it back once the window is in front.
 DWORD g_fs_last_try = 0;
 unsigned g_fs_enters = 0, g_fs_failures = 0;
-int g_fs_target_w = -1, g_fs_target_h = -1;  // the size last asked for (0 = desktop)
+int g_fs_target_w = -1, g_fs_target_h = -1, g_fs_target_hz = -1;  // the mode last asked for (0 = desktop)
 bool g_fs_changed_mode = false;              // ResizeTarget moved the screen off the desktop mode
 
-// The screen mode wanted: width/height 0 = the desktop's.
+// The screen mode wanted: ExclusiveResolution or the player's pick
+// (fixes_resolution.cpp); width/height 0 = the desktop's.
 void ExclusiveTarget(int* w, int* h, int* hz) {
-  const Config& c = GetConfig();
-  *hz = 0;
-  if (c.fs_follow) {
-    ResolutionWanted(w, h);
-  } else {
-    *w = c.fs_width;
-    *h = c.fs_height;
-    *hz = c.fs_hz;
-  }
+  ResolutionWanted(w, h, hz);
+  const display::Mode d = display::Desktop();
+  if (*w == d.w && *h == d.h && (!*hz || *hz == d.hz)) *w = *h = *hz = 0;
 }
 
 double Hz(const DXGI_RATIONAL& r) {
@@ -551,20 +544,8 @@ bool PickMode11(IDXGIOutput* out, int w, int h, int hz, DXGI_MODE_DESC* got) {
     }
   }
   if (found) return true;
-  if (GetConfig().fs_follow) {
-    Log("exclusive: the screen has no %dx%d mode (%u modes listed); keeping the desktop mode, picture scaled", w, h,
-        n);
-    return false;
-  }
-  DXGI_MODE_DESC want{};
-  want.Width = w;
-  want.Height = h;
-  want.RefreshRate.Numerator = hz;
-  want.RefreshRate.Denominator = hz ? 1 : 0;
-  want.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-  const HRESULT hr = out->FindClosestMatchingMode(&want, got, g_backend.device);
-  if (SUCCEEDED(hr)) return true;
-  Log("exclusive: no mode close to %dx%d@%d (%08lx); using the desktop's", w, h, hz, hr);
+  Log("exclusive: the screen has no %dx%d@%d mode (%u modes listed); keeping the desktop mode, picture scaled", w, h,
+      hz, n);
   return false;
 }
 
@@ -574,9 +555,10 @@ void ApplyExclusiveMode11(IDXGIOutput* out, const char* why) {
   Backend& b = g_backend;
   int w = 0, h = 0, hz = 0;
   ExclusiveTarget(&w, &h, &hz);
-  const bool changed = w != g_fs_target_w || h != g_fs_target_h;
+  const bool changed = w != g_fs_target_w || h != g_fs_target_h || hz != g_fs_target_hz;
   g_fs_target_w = w;
   g_fs_target_h = h;
+  g_fs_target_hz = hz;
   if (!out) return;
   DXGI_MODE_DESC m{};
   const bool own = PickMode11(out, w, h, hz, &m);
@@ -592,7 +574,7 @@ void ApplyExclusiveMode11(IDXGIOutput* out, const char* why) {
   g_fs_changed_mode = own;
   if (changed || FAILED(hr))
     Log("exclusive: %s: screen mode %ux%u@%.2f Hz for %s %dx%d (ResizeTarget %08lx)", why, m.Width, m.Height,
-        Hz(m.RefreshRate), GetConfig().fs_follow ? "Resolution" : "FullscreenMode", w, h, hr);
+        Hz(m.RefreshRate), "ExclusiveResolution", w, h, hr);
   b.swap_w = b.swap_h = 0;  // buffers follow the new size on the next frame
 }
 
@@ -638,16 +620,14 @@ void TrackExclusive11() {
     EnterExclusive11();
     return;
   }
-  // The player picked another resolution: switch the screen to it now.
-  if (GetConfig().fs_follow) {
-    int w = 0, h = 0;
-    ResolutionWanted(&w, &h);
-    if (w != g_fs_target_w || h != g_fs_target_h) {
-      IDXGIOutput* out = nullptr;
-      b.swapchain->GetContainingOutput(&out);
-      ApplyExclusiveMode11(out, "resolution picked");
-      SafeRelease(out);
-    }
+  // The player picked another mode: switch the screen to it now.
+  int w = 0, h = 0, hz = 0;
+  ExclusiveTarget(&w, &h, &hz);
+  if (w != g_fs_target_w || h != g_fs_target_h || hz != g_fs_target_hz) {
+    IDXGIOutput* out = nullptr;
+    b.swapchain->GetContainingOutput(&out);
+    ApplyExclusiveMode11(out, "mode picked");
+    SafeRelease(out);
   }
 }
 
