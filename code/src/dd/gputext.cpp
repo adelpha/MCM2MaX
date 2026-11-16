@@ -176,12 +176,19 @@ Overlay* EnsureOverlay(const void* native, UINT bw, UINT bh) {
   FitSize(bw, bh, &ow, &oh);
   Overlay& o = g_overlays[native];
   if (o.tex.Valid() && o.tex.width == ow && o.tex.height == oh && o.base_w == bw && o.base_h == bh) return &o;
+  // Same surface, new screen scale (the window or screen mode changed, e.g.
+  // Exclusive 640x480 -> Borderless 1920x1080): keep the text, stretched
+  // to the new size, until the game draws it again. Menus only redraw text
+  // when it changes, so clearing it left the Options page without labels.
+  const bool keep = o.tex.Valid() && !o.empty && o.base_w == bw && o.base_h == bh;
+  const float old_sx = o.sx;
   MarkEmpty(o);
   GpuTexture old = o.tex;  // reset below, outside the map's bookkeeping
   o.tex = GpuTexture{};
-  old.Reset();
+  if (!keep) old.Reset();
   if (!CreateGpuTexture(o.tex, ow, oh, 1, true, false, true)) {
     Log("text overlay %ux%u could not be made; GDI text is not drawn", ow, oh);
+    old.Reset();
     g_overlays.erase(native);
     return nullptr;
   }
@@ -192,6 +199,23 @@ Overlay* EnsureOverlay(const void* native, UINT bw, UINT bh) {
   o.empty = false;
   ++g_nonempty;
   ClearOverlay(o, nullptr);
+  if (keep) {
+    BlitParams p;
+    p.SetDst(o.tex);
+    p.dst_rect = {0, 0, static_cast<LONG>(ow), static_cast<LONG>(oh)};
+    p.SetSrc(old);
+    p.src_rect = {0, 0, static_cast<LONG>(old.width), static_cast<LONG>(old.height)};
+    p.linear = true;
+    p.opaque = false;
+    Blit(p);
+    old.Reset();
+    if (o.empty) {
+      o.empty = false;
+      ++g_nonempty;
+    }
+    Log("text overlay %ux%u for a %ux%u surface (x%.2f), text kept from x%.2f", ow, oh, bw, bh, o.sx, old_sx);
+    return &o;
+  }
   Log("text overlay %ux%u for a %ux%u surface (x%.2f)", ow, oh, bw, bh, o.sx);
   return &o;
 }
