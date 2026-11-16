@@ -490,7 +490,8 @@ DWORD g_fs_last_try = 0;
 unsigned g_fs_enters = 0, g_fs_failures = 0;
 int g_fs_target_w = -1, g_fs_target_h = -1, g_fs_target_hz = -1;  // the mode last asked for (0 = desktop)
 DWORD g_fs_check_at = 0;  // when to log the screen mode Windows reports after a switch
-bool g_fs_changed_mode = false;              // ResizeTarget moved the screen off the desktop mode
+bool g_fs_changed_mode = false;
+void RestoreDesktopMode11(const char* why);              // ResizeTarget moved the screen off the desktop mode
 
 // The screen mode wanted: ExclusiveResolution or the player's pick
 // (fixes_resolution.cpp); width/height 0 = the desktop's.
@@ -634,6 +635,7 @@ void TrackExclusive11() {
     // Switched to Borderless in Options: leave fullscreen (Windows puts the
     // desktop mode back), the window then covers the monitor again.
     if (was) {
+      RestoreDesktopMode11("Borderless chosen");
       b.swapchain->SetFullscreenState(FALSE, nullptr);
       was = FALSE;
       g_fs_target_w = g_fs_target_h = g_fs_target_hz = -1;
@@ -662,10 +664,29 @@ void TrackExclusive11() {
   }
 }
 
+// Before leaving fullscreen: put the screen back at the desktop mode
+// ourselves. Leaving with SetFullscreenState alone left StOo's monitor at
+// the picked 60 Hz after the game quit, while Windows showed 144 Hz.
+void RestoreDesktopMode11(const char* why) {
+  Backend& b = g_backend;
+  if (!b.swapchain || !g_fs_changed_mode) return;
+  IDXGIOutput* out = nullptr;
+  b.swapchain->GetContainingOutput(&out);
+  DXGI_MODE_DESC m{};
+  if (out && DesktopMode11(out, &m)) {
+    const HRESULT hr = b.swapchain->ResizeTarget(&m);
+    Log("exclusive: %s: screen back to the desktop mode %ux%u@%.2f Hz (ResizeTarget %08lx)", why, m.Width, m.Height,
+        Hz(m.RefreshRate), hr);
+  }
+  SafeRelease(out);
+  g_fs_changed_mode = false;
+}
+
 void LeaveExclusive11() {
   Backend& b = g_backend;
   BOOL fs = FALSE;
   if (b.swapchain && SUCCEEDED(b.swapchain->GetFullscreenState(&fs, nullptr)) && fs) {
+    RestoreDesktopMode11("swap chain released");
     b.swapchain->SetFullscreenState(FALSE, nullptr);
     Log("exclusive: left fullscreen (swap chain released)");
   }
@@ -692,6 +713,31 @@ bool AttachWindow(HWND hwnd) {
     ResizeSwapchain();
   }
   return true;
+}
+
+// The game is quitting (its ExitProcess call, on the game thread): leave
+// exclusive fullscreen and give the monitor its desktop mode back. Windows
+// does not always do that itself when the process ends.
+void RestoreDisplayAtExit() {
+  const Config& c = GetConfig();
+  Backend& b = g_backend;
+  bool fs_left = false;
+  if (!IsD3D9() && b.swapchain) {
+    BOOL fs = FALSE;
+    if (SUCCEEDED(b.swapchain->GetFullscreenState(&fs, nullptr)) && fs) {
+      RestoreDesktopMode11("game closing");
+      b.swapchain->SetFullscreenState(FALSE, nullptr);
+      fs_left = true;
+    }
+  }
+  if (!c.exclusive && !fs_left) return;
+  const char* dev = display::DeviceName();
+  const LONG r = ChangeDisplaySettingsExA(dev[0] ? dev : nullptr, nullptr, nullptr, 0, nullptr);
+  DEVMODEA dm{};
+  dm.dmSize = sizeof(dm);
+  EnumDisplaySettingsA(dev[0] ? dev : nullptr, ENUM_CURRENT_SETTINGS, &dm);
+  Log("exclusive: game closing: %sdisplay mode reset to the saved one (%ld), now %lux%lu@%lu Hz",
+      fs_left ? "left fullscreen, " : "", r, dm.dmPelsWidth, dm.dmPelsHeight, dm.dmDisplayFrequency);
 }
 
 void KeepBorderless() {
