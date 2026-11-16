@@ -105,6 +105,18 @@ else()
   target_sources(MCM2MaX PRIVATE src/pad_hub_stub.cpp)
 endif()
 
+# MenuMaX screens need static RmlUi + FreeType (tools/build-rmlui.sh). Without
+# them the DLL has stubs and the new screens are off.
+set(MCM2MaX_RMLUI "" CACHE PATH "RmlUi + FreeType install prefix from tools/build-rmlui.sh")
+if(MCM2MaX_RMLUI)
+  target_sources(MCM2MaX PRIVATE src/ui/ui.cpp src/ui/render_d3d11.cpp)
+  target_include_directories(MCM2MaX PRIVATE "${MCM2MaX_RMLUI}/include")
+  target_compile_definitions(MCM2MaX PRIVATE RMLUI_STATIC_LIB)
+  target_link_libraries(MCM2MaX PRIVATE "${MCM2MaX_RMLUI}/lib/librmlui.a" "${MCM2MaX_RMLUI}/lib/libfreetype.a")
+else()
+  target_sources(MCM2MaX PRIVATE src/ui/ui_stub.cpp)
+endif()
+
 set_target_properties(MCM2MaX PROPERTIES PREFIX "" OUTPUT_NAME "MCM2MaX")
 
 # d3d11.dll, dxgi.dll and d3d9.dll are loaded at run time (dd/backend*.cpp),

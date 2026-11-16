@@ -1,5 +1,6 @@
 #include "../smooth.h"
 #include "surface.h"
+#include "../ui/ui.h"
 
 #include "../simd.h"
 #include "drawlog.h"
@@ -1332,8 +1333,27 @@ struct CursorSprite {
   BlitParams p;
 } g_cursor_sprite;
 
+// MenuMaX screens (ui/ui.h) cover the picture the cursor is drawn into, so
+// the last cursor sprite drawn is kept (its source AddRef'd) for them to
+// draw again on top.
+BlitParams g_ui_cursor;
+bool g_ui_cursor_set = false;
+
+void ForgetUiCursor() {
+  if (!g_ui_cursor_set) return;
+  SafeRelease(g_ui_cursor.src);
+  g_ui_cursor_set = false;
+}
+
+bool UiCursorSprite(BlitParams* p) {
+  if (!g_ui_cursor_set || !g_ui_cursor.src) return false;
+  *p = g_ui_cursor;
+  return true;
+}
+
 void NoteCursorSprite(const void* native, const BlitParams& p) {
-  if (!ModePromptActive()) return;
+  const bool ui_on = ui::Active();
+  if (!ModePromptActive() && !ui_on) return;
   POINT c{};
   if (!ModePromptCursor(&c)) return;
   const RECT& r = p.dst_rect;
@@ -1341,6 +1361,19 @@ void NoteCursorSprite(const void* native, const BlitParams& p) {
   if (r.right - r.left > 64 || r.bottom - r.top > 64) return;  // not a cursor-sized sprite
   g_cursor_sprite.native = native;
   g_cursor_sprite.p = p;
+  if (ui_on && p.src) {
+    ID3D11ShaderResourceView* keep = p.src;
+    keep->AddRef();
+    ForgetUiCursor();
+    g_ui_cursor = p;
+    g_ui_cursor.src = keep;
+    g_ui_cursor_set = true;
+    static int logged = 0;
+    if (logged < 3) {
+      ++logged;
+      Log("MenuMaX: cursor sprite %ldx%ld at %ld,%ld kept for the screen", r.right - r.left, r.bottom - r.top, r.left, r.top);
+    }
+  }
 }
 
 HRESULT Surface::Flip(LPDIRECTDRAWSURFACE7 s, DWORD flags) {
@@ -1394,6 +1427,7 @@ HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
     if (cut) GpuTextOccludeSprite(GpuKey(), g_cursor_sprite.p);
   }
   if (!prompt) g_cursor_sprite.native = nullptr;
+  if (!ui::Active()) ForgetUiCursor();
   // VSync in mcm2max.ini decides, whatever the game asked for.
   PresentFront(GetConfig().vsync ? 1 : 0);
   if (prompt) GpuTextOcclude(GpuKey(), &prompt_area, "mode prompt");

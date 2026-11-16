@@ -21,6 +21,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -30,6 +31,7 @@
 #include "xp_compat.h"
 #include "dd/gputext.h"
 #include "dd/menubg.h"
+#include "ui/ui.h"
 
 namespace {
 
@@ -115,8 +117,20 @@ constexpr int kFeaturesH = kRowTop + 2 * kRowStep + 20 + 7;
 constexpr int kRows = kNumSliders + kNumChecks;
 constexpr int kBoxH = kRowTop + kRows * kRowStep + 22;
 constexpr int kSliderLabelW = 140, kSliderX = 148, kSliderW = 70;
+// MenuMaX: the button that opens the new settings screen (the size of the
+// AdvancedBttnUp/Down sprites).
+constexpr char kMaxButton[] = "Mcm2fixMaX";
+constexpr char kMaxButtonLabel[] = "More Settings";
+constexpr int kMaxButtonW = 117, kMaxButtonH = 33;
 
 int CurrentValue(const char* key) {
+  // As saved (MenuMaX screens may have changed it since start-up), else the
+  // value in use.
+  std::string saved;
+  if (ReadSetting(key, &saved) && !saved.empty()) {
+    const double v = std::atof(saved.c_str());
+    return static_cast<int>(!std::strcmp(key, "ViewDistance") ? v * 100.0 + 0.5 : v);
+  }
   const Config& c = GetConfig();
   if (!std::strcmp(key, "MotionBlur")) return c.motion_blur ? 1 : 0;
   if (!std::strcmp(key, "AlphaToCoverage")) return c.alpha_to_coverage;
@@ -189,6 +203,20 @@ std::string OptGraphControls() {
                   "AnimOnDisable=\"RadioButtonOnGrey\"\r\nAnimOffDisable=\"RadioButtonOffGrey\"\r\n"
                   "TextColor=16777215\r\nText=\"%s\"\r\nTextLMargin=3\r\nXywh=%d,28,%d,17\r\n\r\n",
                   kFsNames[i], x * 15, 60 + i, w * 15, kFsGroup, kFsLabels[i], x, w);
+    t += buf;
+  }
+  // MenuMaX: a button that opens the new settings screen (ui/ui.h), in the
+  // free space under Graphic Features, on the game's unused Advanced button.
+  if (GetConfig().menu_max) {
+    const int x = kLeftX + (kBoxW - kMaxButtonW) / 2, y = kLowY + kFeaturesH + kGap + 12;
+    std::snprintf(buf, sizeof(buf),
+                  "[%s]\r\nType=BUTTON\r\nHeight=%d\r\nLeft=%d\r\nTabIndex=70\r\nTop=%d\r\nWidth=%d\r\n"
+                  "TextDrop=-1'True\r\nTextColor=16777215\r\nTextAlignV=MIDDLE\r\nTextAlign=CENTER\r\n"
+                  "SoundPush=\"Beep13\"\r\nSoundFocus=\"Beep09\"\r\nShow=-1'True\r\nBroken_Enable=0'False\r\n"
+                  "AnimPush=\"AdvancedBttnDown\"\r\nAnimNorm=\"AdvancedBttnUp\"\r\nAnimFocus=\"AdvancedBttnUp\"\r\n"
+                  "AnimDisable=\"AdvancedBttnUp\"\r\nText=\"%s\"\r\nXywh=%d,%d,%d,%d\r\n\r\n",
+                  kMaxButton, kMaxButtonH * 15, x * 15, y * 15, kMaxButtonW * 15, kMaxButtonLabel, x, y, kMaxButtonW,
+                  kMaxButtonH);
     t += buf;
   }
   std::snprintf(buf, sizeof(buf),
@@ -667,9 +695,6 @@ int PosOf(const MenuSlider& m, int value) {
 }
 
 void InitChecks() {
-  static bool done = false;
-  if (done) return;
-  done = true;
   for (MenuCheck& m : g_checks) {
     const int v = CurrentValue(m.key);
     m.saved = v;
@@ -767,6 +792,11 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   if (type == 6 || type == 4) {  // page closing (6) or being built again (4)
     if (g_graph_page) patch::Log("menus: Options > Graphics closed (event %d)", type);
     g_graph_page = 0;
+    ui::Close("Options > Graphics closed");
+  }
+  if ((type == 1 || type == 3) && std::strcmp(SafeName(event), kMaxButton) == 0) {
+    patch::Log("menus: %s clicked (event %d)", kMaxButton, type);
+    if (!ui::Active()) ui::Open("settings", "Options > Graphics button");
   }
   reinterpret_cast<EventFn>(kOptGraphEvent)(self, edx, event);
   if (type == 5) {
@@ -787,6 +817,7 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
     g_graph_page = self;
     g_graph_vtable = *reinterpret_cast<uintptr_t*>(self);
     SetLabel(self, kFootName, kFootText);
+    if (GetConfig().menu_max) SetLabel(self, kMaxButton, kMaxButtonLabel);
     for (const MenuSlider& m : g_sliders) SliderLabel(self, m, m.pos);
     UpdateGreying(self, g_sliders[kMsaaSlider].pos);
     return;
@@ -886,6 +917,68 @@ void MenusFrame() {
   if (want == excl) return;
   patch::Log("menus: %s picked", kFsNames[want ? 1 : 0]);
   ResolutionSetExclusive(want, FindAny(page, "DisplayResolutionDropDown"));
+}
+
+// MenuMaX: the game's own checkboxes on the open Options > Graphics page,
+// read and set by name (ui/ui.cpp, game="SkyCheckBox"). Setting one puts
+// its state in, redraws it and tells the page as if it had been clicked.
+bool MenusGameGet(const char* name, int* value) {
+  const uintptr_t page = g_graph_page;
+  if (!page) return false;
+  const uintptr_t box = FindCheckbox(page, name);
+  if (!box) return false;
+  *value = *reinterpret_cast<const int*>(box + kStateOffset);
+  return true;
+}
+
+bool MenusGameSet(const char* name, int value) {
+  const uintptr_t page = g_graph_page;
+  if (!page) return false;
+  const uintptr_t box = FindCheckbox(page, name);
+  if (!box) return false;
+  int* state = reinterpret_cast<int*>(box + kStateOffset);
+  const int before = *state;
+  *state = value ? 1 : 0;
+  const uintptr_t redraw = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + kRedrawSlot);
+  reinterpret_cast<RedrawFn>(redraw)(box, nullptr);
+  // The event the page gets for a click: +0 id, +4 name, +8 type, +0xc sender.
+  uintptr_t ev[4] = {0, reinterpret_cast<uintptr_t>(name), 3, box};
+  const uintptr_t handler = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(page) + 29 * 4);
+  reinterpret_cast<EventFn>(handler)(page, nullptr, reinterpret_cast<uintptr_t>(ev));
+  patch::Log("menus: game control %s set %d -> %d (now %d after the page's click handling)", name, before, value ? 1 : 0,
+             *state);
+  return true;
+}
+
+// MenuMaX: a screen over Options > Graphics closed; it may have saved
+// settings the Enhancements box shows, so the box is brought up to date.
+void MenusRefreshFromIni() {
+  const uintptr_t page = g_graph_page;
+  if (!page || !g_bound) return;
+  InitChecks();
+  int changed = 0;
+  for (MenuCheck& m : g_checks) {
+    const int want = m.saved ? 1 : 0;
+    const uintptr_t box = FindCheckbox(page, m.name);
+    if (!box) continue;
+    m.value = want;
+    int* state = reinterpret_cast<int*>(box + kStateOffset);
+    if (*state == want) continue;
+    *state = want;
+    const uintptr_t redraw = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + kRedrawSlot);
+    reinterpret_cast<RedrawFn>(redraw)(box, nullptr);
+    ++changed;
+  }
+  for (MenuSlider& m : g_sliders) {
+    const int pos = PosOf(m, m.saved);
+    if (pos == m.pos) continue;
+    m.pos = pos;
+    if (const uintptr_t c = FindAny(page, m.name)) CallSlot(c, kExchangeSlot, 0);  // bound value -> control
+    SliderLabel(page, m, m.pos);
+    ++changed;
+  }
+  UpdateGreying(page, g_sliders[kMsaaSlider].pos);
+  patch::Log("menus: Enhancements box brought up to date after a MenuMaX screen (%d controls changed)", changed);
 }
 
 void ApplyMenuOptions() {

@@ -414,6 +414,13 @@ MenuOptions=1
 ; scaled up, as before. Default 1.
 MenuHiRes3D=1
 
+; MenuMaX: 1 = new menu screens made from text files in UI\MaX\ (RmlUi,
+; HTML/CSS-style; see UI\MaX\README.txt), drawn at the window's resolution
+; and usable with the mouse, keyboard and controllers. For now: "More
+; Settings" on Options > Graphics. Edit the files while a screen is open and it
+; reloads. Needs the Direct3D 11 renderer. 0 = no new screens. Default 1.
+MenuMaX=1
+
 ; MenuFlag: 1 = a waving dark blue chequered flag behind the main menu, seen
 ; through the transparent parts of MenuBackground (fills the whole window,
 ; also the sides of a wide screen). Needs the MenuBackground picture and the

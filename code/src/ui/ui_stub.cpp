@@ -1,0 +1,19 @@
+// MenuMaX without RmlUi (built without -DMCM2MaX_RMLUI): the new screens are off.
+#include "ui.h"
+
+#include "../config.h"
+#include "../patch.h"
+
+namespace ui {
+void Install() {
+  if (GetConfig().menu_max) patch::Log("MenuMaX: this build has no RmlUi; the new menu screens are off");
+}
+bool Active() { return false; }
+bool Open(const char*, const char*) { return false; }
+void Close(const char*) {}
+void Present11(ID3D11RenderTargetView*, UINT, UINT, const RECT&) {}
+void KeyEvent(unsigned, bool) {}
+void MouseButton(int, bool) {}
+void MouseWheel(int) {}
+void JoyState(DWORD, DWORD) {}
+}  // namespace ui
