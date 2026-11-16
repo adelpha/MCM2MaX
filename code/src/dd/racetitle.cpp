@@ -7,6 +7,7 @@
 #include <string>
 
 #include "../config.h"
+#include "../framerate.h"
 #include "../music.h"
 #include "../patch.h"
 #include "backend.h"
@@ -267,6 +268,7 @@ void __fastcall CountdownInitHook(uintptr_t race, void* edx) {
   reinterpret_cast<InitFn>(kCountdownInit)(race, edx);
   if (GetConfig().race_title || GetConfig().announcer) Start(race);
   music::RaceStart(race);
+  ::RaceAlive(race);  // MenuFpsCap
 }
 
 // 0x418cb3: a BikeRace is being destroyed (quitting from the pause menu, the
@@ -289,6 +291,7 @@ void __fastcall RaceDtorHook(uintptr_t race, void* edx) {
     g.vtable = 0;
   }
   music::RaceEnd(race);
+  ::RaceGone(race);  // MenuFpsCap
   ShadowRaceGone(race);
   reinterpret_cast<InitFn>(kRaceDtor)(race, edx);
 }
@@ -546,8 +549,8 @@ void InstallRaceTitleHooks() {
   const Config& c = GetConfig();
   if (!c.race_title && !c.announcer) {
     Log("race title: off (RaceTitle=0, Announcer=0), the game's corner text stays");
-    if (music::Enabled() || c.rider_shadows > 0) {
-      // Music and the GPU rider shadows still need to know when races start and end.
+    if (music::Enabled() || c.rider_shadows > 0 || c.menu_fps_cap > 0) {
+      // Music, the GPU rider shadows and MenuFpsCap still need to know when races start and end.
       int calls = 0;
       for (uintptr_t site : kCountdownCalls)
         calls += PatchCall(site, kCountdownInit, reinterpret_cast<const void*>(&CountdownInitHook)) ? 1 : 0;

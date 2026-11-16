@@ -418,6 +418,7 @@ const ThisFn kStatePostFrame = reinterpret_cast<ThisFn>(0x46ABB0);
 const ThisFn kPostFrame10 = reinterpret_cast<ThisFn>(0x4EDA50);
 
 LONGLONG g_bike_seen = 0;  // QPC when a bike was last simulated (race running)
+LONGLONG g_player_seen = 0;  // QPC when the player's bike was last simulated
 double g_sim_acc = 0.0;
 bool g_sim_fixed = false;
 
@@ -555,7 +556,10 @@ void __stdcall NoteBikeSim(const void* bike) {
 // The player's bike (and crashed bikes) are simulated by 0x40d820 instead
 // (call at 0x497be8): MotionBlur reads the player's velocity there. Does not
 // count as "a bike was simulated" for the fixed-rate switch.
-void __stdcall NotePlayerSim(const void* bike) { dd::MotionBlurBikeStep(bike); }
+void __stdcall NotePlayerSim(const void* bike) {
+  g_player_seen = Now();  // MenuFpsCap: a race is running (not used for SimRate)
+  dd::MotionBlurBikeStep(bike);
+}
 
 // Stub for a bike simulation call (thiscall, ecx = bike):
 // pushad; push ecx; call note; popad; jmp target.
@@ -659,7 +663,7 @@ void SleepUntil(LONGLONG target) {
 void ApplyFramePacing() {
   QueryPerformanceFrequency(&g_freq);
   const Config& c = GetConfig();
-  if (c.frame_cap > 0) {
+  if (c.frame_cap > 0 || c.menu_fps_cap > 0) {
     g_timer = xp::CreateFrameTimer();
   }
   g_fix_frames = c.frame_fix;
@@ -680,10 +684,11 @@ void ApplyFramePacing() {
   } else if (c.precise_timer || c.frame_fix || c.ai_steer_rate > 0) {
     PatchFrameTime();
   }
-  if (c.motion_blur || c.menu_options) PatchBikeSimNote(c.sim_rate <= 0);  // MenuOptions: can be switched on later
-  patch::Log("frame pacing: VSync=%d FrameCap=%d PreciseTimer=%d FrameFix=%d RefRate=%d AiRate=%d "
+  // MenuOptions: can be switched on later. MenuFpsCap: tells races from menus.
+  if (c.motion_blur || c.menu_options || c.menu_fps_cap > 0) PatchBikeSimNote(c.sim_rate <= 0);
+  patch::Log("frame pacing: VSync=%d FrameCap=%d MenuFpsCap=%d PreciseTimer=%d FrameFix=%d RefRate=%d AiRate=%d "
              "AiSteerRate=%d SimRate=%d",
-             c.vsync, c.frame_cap, c.precise_timer, c.frame_fix, c.ref_rate, c.ai_rate,
+             c.vsync, c.frame_cap, c.menu_fps_cap, c.precise_timer, c.frame_fix, c.ref_rate, c.ai_rate,
              c.ai_steer_rate, c.sim_rate);
 }
 
@@ -700,15 +705,107 @@ bool SimDrawPoint(unsigned* tick, float* alpha) {
   return true;
 }
 
+namespace dd {
+bool MenuScreen();  // dd/backend.cpp
+}
+
+namespace {
+uintptr_t g_live_race = 0;  // BikeRace from its countdown to its destructor
+
+// MenuFpsCap bookkeeping, for the log.
+bool g_menu_capped = false;
+LONGLONG g_menu_log_start = 0;  // QPC at the start of the current log window
+unsigned g_menu_frames = 0;     // frames shown in it
+LONGLONG g_menu_slept = 0;      // QPC ticks spent waiting in it
+LONGLONG g_menu_late = 0;       // QPC ticks woken past the target, summed
+LONGLONG g_menu_late_max = 0;
+
+void MenuCapLog(LONGLONG now, int cap) {
+  if (!g_menu_log_start) {
+    g_menu_log_start = now;
+    return;
+  }
+  const double secs = static_cast<double>(now - g_menu_log_start) / g_freq.QuadPart;
+  if (secs < 5.0) return;
+  const double ms = 1000.0 / g_freq.QuadPart;
+  patch::Log("menu frame cap: %.1f fps over %.1f s (cap %d), waited %.0f%% of the time, "
+             "woke late by %.3f ms on average, %.3f ms at most",
+             g_menu_frames / secs, secs, cap, 100.0 * g_menu_slept / (now - g_menu_log_start),
+             g_menu_frames ? g_menu_late * ms / g_menu_frames : 0.0, g_menu_late_max * ms);
+  g_menu_log_start = now;
+  g_menu_frames = 0;
+  g_menu_slept = g_menu_late = g_menu_late_max = 0;
+}
+}  // namespace
+
+void RaceAlive(uintptr_t race) {
+  if (g_live_race != race) patch::Log("menu frame cap: race %08x countdown set", static_cast<unsigned>(race));
+  g_live_race = race;
+}
+
+void RaceGone(uintptr_t race) {
+  if (race && race == g_live_race) {
+    patch::Log("menu frame cap: race %08x destroyed", static_cast<unsigned>(race));
+    g_live_race = 0;
+  }
+}
+
 void WaitForFrameSlot() {
-  const int cap = GetConfig().frame_cap;
-  if (cap <= 0 || !g_freq.QuadPart) return;
+  const Config& c = GetConfig();
+  if (!g_freq.QuadPart) return;
+  int cap = c.frame_cap;
+  // MenuFpsCap: anything but a race (menus, rider/bike select, loading,
+  // pause) doesn't need thousands of frames a second with VSync off. A race
+  // runs from its countdown being set (intro, countdown) until the BikeRace
+  // is destroyed; once started (race+0x18a) it counts only while bikes are
+  // simulated, so the pause menu is capped. The 3D test of the renderer
+  // label isn't enough (the rider select shows a bike).
+  const LONGLONG half = g_freq.QuadPart / 2;
+  const LONGLONG t = Now();
+  const bool bikes = g_bike_seen && t - g_bike_seen < half;
+  const bool player = g_player_seen && t - g_player_seen < half;
+  const uintptr_t race = g_live_race;
+  const bool started = race && *reinterpret_cast<const uint8_t*>(race + 0x18A) != 0;
+  // The podium cutscene (game+0x3430 set, top three) also counts as racing.
+  const uintptr_t game = *reinterpret_cast<const uintptr_t*>(0x5743AC);
+  const bool podium = race && game && *reinterpret_cast<const int*>(game + 0x3430) != 0;
+  const bool in_race = bikes || player || (race && (!started || podium));
+  const bool menu = c.menu_fps_cap > 0 && !in_race;
+  if (menu && (cap <= 0 || c.menu_fps_cap < cap)) cap = c.menu_fps_cap;
+  if (menu != g_menu_capped) {
+    g_menu_capped = menu;
+    g_menu_log_start = 0;
+    g_menu_frames = 0;
+    g_menu_slept = g_menu_late = g_menu_late_max = 0;
+    patch::Log("menu frame cap: %s (now %d fps%s; race %08x started %d, podium %d, bikes simulated %d, player simulated %d, "
+               "3D scene %d)",
+               menu ? "not racing, cap on" : "race running, menu cap off", cap, cap > 0 ? "" : " = no cap",
+               static_cast<unsigned>(race), started, podium, bikes, player, !dd::MenuScreen());
+  }
+  if (cap <= 0) return;
+  if (!g_timer) {
+    g_timer = xp::CreateFrameTimer();
+    patch::Log("frame cap: wait timer %s", g_timer ? "created" : "unavailable, using Sleep(1)");
+  }
   const LONGLONG period = g_freq.QuadPart / cap;
   LONGLONG now = Now();
+  if (menu) {
+    ++g_menu_frames;
+    MenuCapLog(now, cap);
+  }
   if (g_next_frame == 0 || now - g_next_frame > period) {
     g_next_frame = now + period;  // first frame, or fell behind: start over
     return;
   }
   SleepUntil(g_next_frame);
+  if (menu) {
+    const LONGLONG after = Now();
+    const LONGLONG late = after - g_next_frame;
+    g_menu_slept += after - now;
+    if (late > 0) {
+      g_menu_late += late;
+      if (late > g_menu_late_max) g_menu_late_max = late;
+    }
+  }
   g_next_frame += period;
 }

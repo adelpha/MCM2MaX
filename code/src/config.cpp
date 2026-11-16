@@ -203,8 +203,10 @@ void LoadConfig() {
   if (g_config.alpha_to_coverage < 0 || g_config.alpha_to_coverage > 2) g_config.alpha_to_coverage = 2;
   g_config.alpha_log = GetPrivateProfileIntA(sec, "AlphaLog", 0, ini) != 0;
   g_config.vsync = ReadMenuInt("VSync", GetPrivateProfileIntA(sec, "VSync", 1, ini)) != 0;
-  g_config.frame_cap = GetPrivateProfileIntA(sec, "FrameCap", 0, ini);
+  g_config.frame_cap = GetPrivateProfileIntA(sec, "FrameCap", 500, ini);
   if (g_config.frame_cap < 0) g_config.frame_cap = 0;
+  g_config.menu_fps_cap = GetPrivateProfileIntA(sec, "MenuFpsCap", 240, ini);
+  if (g_config.menu_fps_cap < 0) g_config.menu_fps_cap = 0;
   g_config.precise_timer = GetPrivateProfileIntA(sec, "PreciseTimer", 1, ini) != 0;
   g_config.frame_fix = GetPrivateProfileIntA(sec, "FrameFix", 1, ini) != 0;
   g_config.ref_rate = GetPrivateProfileIntA(sec, "RefRate", 30, ini);

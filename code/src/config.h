@@ -80,7 +80,8 @@ struct Config {
   bool d3d9_log = false;      // D3D9Log: extra logging from the Direct3D 9 renderer (first frames, fallbacks)
   bool wide_fov = true;       // WideFov: wide modes show more to the sides instead of cropping
   bool vsync = true;          // VSync: wait for the monitor's refresh when showing a frame
-  int frame_cap = 0;          // FrameCap: most frames per second (0 = no cap beyond VSync)
+  int frame_cap = 500;        // FrameCap: most frames per second (0 = no cap beyond VSync)
+  int menu_fps_cap = 240;     // MenuFpsCap: most frames per second in the menus (0 = no menu cap)
   bool precise_timer = true;  // PreciseTimer: frame time from QueryPerformanceCounter, not whole ms
   bool frame_fix = true;      // FrameFix: per-frame animation/physics steps scale with frame time
   int ai_rate = 30;           // AiRate: computer riders re-plan this many times a second (0 = every frame)

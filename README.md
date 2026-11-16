@@ -117,7 +117,8 @@ Windows 10 and 11.
 - **Widescreen field of view** (`WideFov`): wider screens show more to the
   sides instead of cropping the top and bottom. The speedometer stays round.
   `Fov` sets the base field of view.
-- **VSync and frame cap** (`VSync`, `FrameCap`).
+- **VSync and frame cap** (`VSync`, `FrameCap`), and a **240 fps cap in the
+  menus** (`MenuFpsCap`) so they don't run at thousands of frames a second.
 
 ### Graphics
 - **Multisample antialiasing** of the 3D scene, up to 8x (`Antialiasing`,
@@ -493,7 +494,8 @@ The file has three parts:
 | `ExclusiveResolution` | `Desktop` | `Desktop`, `<w>x<h>`, `<w>x<h>@<Hz>` | The screen mode in Exclusive. Picking one in the game's Options writes it here and (Direct3D 11) switches the screen at once. Without `@<Hz>`, the highest refresh rate is used. A mode the monitor doesn't have uses the desktop for that start. The menus stay at this mode too, scaled. |
 | `CardTest` | `0` | `0`, `1` | `0` skips the game's video card test at start (MCM2MaX's renderer always gives the same answers, so the card gets them directly). `1` runs the game's own test, as before. |
 | `VSync` | `1` | `0`, `1` | `1` waits for the monitor's refresh before showing each frame: no tearing, and the frame rate is limited to the refresh rate. `0` shows frames as soon as they are ready, with tearing where Windows allows it. |
-| `FrameCap` | `0` | `0`, frames/s | The most frames per second, on top of VSync. `0` = no cap. Useful with `VSync=0`. It does not change game speed. |
+| `FrameCap` | `500` | `0`, frames/s | The most frames per second, on top of VSync. `0` = no cap. It matters with `VSync=0`. It does not change game speed. |
+| `MenuFpsCap` | `240` | `0`, frames/s | The most frames per second outside races (menus, rider and bike select, loading, the pause menu), even with `VSync=0`. Races, including the intro, countdown and podium cutscene, are not affected. `0` = no menu cap. If `FrameCap` is lower, that wins. |
 | `WideFov` | `1` | `0`, `1` | `1` widens the view on widescreen resolutions, so you see more to the sides. `0` keeps the 4:3 width and crops the top and bottom, like the original. |
 | `Fov` | `0` | `0`, 20-150 | Field of view in degrees, as a 4:3 screen would show it. `0` = the game's default (77). `WideFov` widens it further on widescreen, and the zoom keys still step from it. |
 | `RendererLabel` | `1` | `0`, `1` | Shows "Direct3D 11" or "Direct3D 9" in the bottom right corner of the menus, only while no 3D scene is being drawn. |

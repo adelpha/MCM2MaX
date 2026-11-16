@@ -199,6 +199,9 @@ void Present9(const GpuTexture& src, UINT src_w, UINT src_h, UINT interval);
 // has been drawn for a moment (menus), Present shows which renderer is
 // active in the bottom right corner (ini RendererLabel).
 void Note3DDraw();
+// No 3D scene drawn for half a second: a menu or loading screen is showing
+// (used for the label and for MenuFpsCap).
+bool MenuScreen();
 // Draws that label into a window-sized target, if it is due.
 void DrawRendererLabel(ID3D11RenderTargetView* dst, IDirect3DSurface9* dst9, UINT w, UINT h);
 // Per-second activity counters, written to the log (helps debugging).
