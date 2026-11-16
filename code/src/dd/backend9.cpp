@@ -460,8 +460,10 @@ bool InitDevice9() {
 
 namespace {
 
-// Picks the fullscreen mode: FullscreenMode if the card has it (closest
-// refresh rate), else the desktop's.
+// Picks the fullscreen mode: the game's resolution (FullscreenMode=Resolution)
+// or FullscreenMode, if the card has that size (wanted refresh rate, else the
+// highest), else the desktop's. Direct3D 9 sets it once, when the device is
+// made: a resolution picked later reaches the screen at the next start.
 D3DDISPLAYMODE PickMode9() {
   Backend& b = B();
   const Config& c = GetConfig();
@@ -469,23 +471,31 @@ D3DDISPLAYMODE PickMode9() {
   b.d3d9->GetAdapterDisplayMode(b.adapter9, &desk);
   D3DDISPLAYMODE pick = desk;
   pick.Format = D3DFMT_X8R8G8B8;
-  if (c.fs_width) {
+  int w = c.fs_width, h = c.fs_height, hz = c.fs_hz;
+  if (c.fs_follow) {
+    ResolutionWanted(&w, &h);
+    hz = 0;
+    if (static_cast<UINT>(w) == desk.Width && static_cast<UINT>(h) == desk.Height) w = h = 0;
+  }
+  if (w) {
     const UINT n = b.d3d9->GetAdapterModeCount(b.adapter9, D3DFMT_X8R8G8B8);
     bool found = false;
     for (UINT i = 0; i < n; ++i) {
       D3DDISPLAYMODE m{};
       if (FAILED(b.d3d9->EnumAdapterModes(b.adapter9, D3DFMT_X8R8G8B8, i, &m))) continue;
-      if (m.Width != static_cast<UINT>(c.fs_width) || m.Height != static_cast<UINT>(c.fs_height)) continue;
+      if (m.Width != static_cast<UINT>(w) || m.Height != static_cast<UINT>(h)) continue;
       // Wanted refresh rate, or else the highest.
-      const int want = c.fs_hz ? c.fs_hz : 100000;
+      const int want = hz ? hz : 100000;
       if (!found || std::abs(static_cast<int>(m.RefreshRate) - want) <
                         std::abs(static_cast<int>(pick.RefreshRate) - want)) {
         pick = m;
         found = true;
       }
     }
-    Log("exclusive: FullscreenMode %dx%d@%d -> %s %ux%u@%u", c.fs_width, c.fs_height, c.fs_hz,
+    Log("exclusive: %s %dx%d@%d -> %s %ux%u@%u", c.fs_follow ? "Resolution" : "FullscreenMode", w, h, hz,
         found ? "mode" : "not available, desktop", pick.Width, pick.Height, pick.RefreshRate);
+  } else {
+    Log("exclusive: desktop mode %ux%u@%u", pick.Width, pick.Height, pick.RefreshRate);
   }
   return pick;
 }

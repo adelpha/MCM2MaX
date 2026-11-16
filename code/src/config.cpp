@@ -303,12 +303,14 @@ void LoadConfig() {
     GetPrivateProfileStringA(sec, "Fullscreen", "Borderless", r, sizeof(r), ini);
     r[std::strcspn(r, " \t;")] = 0;
     g_config.exclusive = _strnicmp(r, "Excl", 4) == 0;
-    // FullscreenMode=Desktop or <width>x<height>[@<hz>], e.g. 1024x768@85.
+    // FullscreenMode=Resolution (the screen follows Resolution, default),
+    // Desktop, or <width>x<height>[@<hz>], e.g. 1024x768@85.
     char m[48] = {};
-    GetPrivateProfileStringA(sec, "FullscreenMode", "Desktop", m, sizeof(m), ini);
+    GetPrivateProfileStringA(sec, "FullscreenMode", "Resolution", m, sizeof(m), ini);
     m[std::strcspn(m, " \t;")] = 0;
     int w = 0, h = 0, hz = 0;
-    if (std::sscanf(m, "%dx%d@%d", &w, &h, &hz) >= 2 && w >= 320 && h >= 200 && w <= 16384 && h <= 16384) {
+    g_config.fs_follow = !_strnicmp(m, "Res", 3) || !_stricmp(m, "Game");
+    if (!g_config.fs_follow && std::sscanf(m, "%dx%d@%d", &w, &h, &hz) >= 2 && w >= 320 && h >= 200 && w <= 16384 && h <= 16384) {
       g_config.fs_width = w;
       g_config.fs_height = h;
       g_config.fs_hz = hz > 0 && hz <= 1000 ? hz : 0;

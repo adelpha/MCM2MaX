@@ -7,6 +7,7 @@
 #include <dxgi1_6.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -14,6 +15,7 @@
 #include <set>
 #include <unordered_map>
 #include <string>
+#include <vector>
 
 #include "../config.h"
 #include "../patch.h"
@@ -482,12 +484,117 @@ bool ResizeSwapchain() {
 }
 
 // ---- Exclusive fullscreen (ini Fullscreen=Exclusive) ----------------------
-// The swap chain owns the screen: DXGI changes the display mode if
-// FullscreenMode asks for one, and leaves fullscreen by itself when the game
-// loses focus (alt-tab); Present puts it back once the window is in front.
+// The swap chain owns the screen: DXGI changes the display mode to the
+// game's resolution (FullscreenMode=Resolution, see fixes_resolution.cpp)
+// or to FullscreenMode, and leaves fullscreen by itself when the game loses
+// focus (alt-tab); Present puts it back once the window is in front.
 DWORD g_fs_last_try = 0;
-bool g_fs_logged_mode = false;
 unsigned g_fs_enters = 0, g_fs_failures = 0;
+int g_fs_target_w = -1, g_fs_target_h = -1;  // the size last asked for (0 = desktop)
+bool g_fs_changed_mode = false;              // ResizeTarget moved the screen off the desktop mode
+
+// The screen mode wanted: width/height 0 = the desktop's.
+void ExclusiveTarget(int* w, int* h, int* hz) {
+  const Config& c = GetConfig();
+  *hz = 0;
+  if (c.fs_follow) {
+    ResolutionWanted(w, h);
+  } else {
+    *w = c.fs_width;
+    *h = c.fs_height;
+    *hz = c.fs_hz;
+  }
+}
+
+double Hz(const DXGI_RATIONAL& r) {
+  return r.Denominator ? static_cast<double>(r.Numerator) / r.Denominator : 0.0;
+}
+
+// The desktop's own mode on this output (what Windows restores after us).
+bool DesktopMode11(IDXGIOutput* out, DXGI_MODE_DESC* m) {
+  DXGI_OUTPUT_DESC od{};
+  if (FAILED(out->GetDesc(&od))) return false;
+  DEVMODEW dm{};
+  dm.dmSize = sizeof(dm);
+  if (!EnumDisplaySettingsW(od.DeviceName, ENUM_REGISTRY_SETTINGS, &dm)) return false;
+  *m = DXGI_MODE_DESC{};
+  m->Width = dm.dmPelsWidth;
+  m->Height = dm.dmPelsHeight;
+  m->RefreshRate.Numerator = dm.dmDisplayFrequency > 1 ? dm.dmDisplayFrequency : 0;
+  m->RefreshRate.Denominator = m->RefreshRate.Numerator ? 1 : 0;
+  m->Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  return true;
+}
+
+// Picks the screen mode for the wanted size: that exact size at the wanted
+// refresh rate (or the highest); a fixed FullscreenMode the card lacks gets
+// the closest mode; a Resolution the screen lacks (e.g. 1600x1200 on a
+// 1920x1080 screen) keeps the desktop mode and is scaled into it.
+// Returns false for "the desktop mode".
+bool PickMode11(IDXGIOutput* out, int w, int h, int hz, DXGI_MODE_DESC* got) {
+  if (!w || !out) return false;
+  UINT n = 0;
+  std::vector<DXGI_MODE_DESC> list;
+  if (SUCCEEDED(out->GetDisplayModeList(DXGI_FORMAT_B8G8R8A8_UNORM, 0, &n, nullptr)) && n) {
+    list.resize(n);
+    if (FAILED(out->GetDisplayModeList(DXGI_FORMAT_B8G8R8A8_UNORM, 0, &n, list.data()))) n = 0;
+    list.resize(n);
+  }
+  bool found = false;
+  for (const DXGI_MODE_DESC& m : list) {
+    if (m.Width != static_cast<UINT>(w) || m.Height != static_cast<UINT>(h)) continue;
+    const double r = Hz(m.RefreshRate), best = found ? Hz(got->RefreshRate) : 0;
+    const bool better = !found || (hz ? std::abs(r - hz) < std::abs(best - hz) : r > best + 0.01);
+    if (better) {
+      *got = m;
+      found = true;
+    }
+  }
+  if (found) return true;
+  if (GetConfig().fs_follow) {
+    Log("exclusive: the screen has no %dx%d mode (%u modes listed); keeping the desktop mode, picture scaled", w, h,
+        n);
+    return false;
+  }
+  DXGI_MODE_DESC want{};
+  want.Width = w;
+  want.Height = h;
+  want.RefreshRate.Numerator = hz;
+  want.RefreshRate.Denominator = hz ? 1 : 0;
+  want.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  const HRESULT hr = out->FindClosestMatchingMode(&want, got, g_backend.device);
+  if (SUCCEEDED(hr)) return true;
+  Log("exclusive: no mode close to %dx%d@%d (%08lx); using the desktop's", w, h, hz, hr);
+  return false;
+}
+
+// Sets the screen mode for the current target (also while fullscreen, which
+// switches the monitor at once).
+void ApplyExclusiveMode11(IDXGIOutput* out, const char* why) {
+  Backend& b = g_backend;
+  int w = 0, h = 0, hz = 0;
+  ExclusiveTarget(&w, &h, &hz);
+  const bool changed = w != g_fs_target_w || h != g_fs_target_h;
+  g_fs_target_w = w;
+  g_fs_target_h = h;
+  if (!out) return;
+  DXGI_MODE_DESC m{};
+  const bool own = PickMode11(out, w, h, hz, &m);
+  if (!own) {
+    // Desktop mode: only needs asking for when an earlier pick moved the
+    // screen off it; otherwise the window already has the desktop size.
+    if (!g_fs_changed_mode || !DesktopMode11(out, &m)) {
+      if (changed) Log("exclusive: %s: screen stays at the desktop mode", why);
+      return;
+    }
+  }
+  const HRESULT hr = b.swapchain->ResizeTarget(&m);
+  g_fs_changed_mode = own;
+  if (changed || FAILED(hr))
+    Log("exclusive: %s: screen mode %ux%u@%.2f Hz for %s %dx%d (ResizeTarget %08lx)", why, m.Width, m.Height,
+        Hz(m.RefreshRate), GetConfig().fs_follow ? "Resolution" : "FullscreenMode", w, h, hr);
+  b.swap_w = b.swap_h = 0;  // buffers follow the new size on the next frame
+}
 
 void EnterExclusive11() {
   Backend& b = g_backend;
@@ -498,32 +605,10 @@ void EnterExclusive11() {
   const DWORD now = GetTickCount();
   if (g_fs_last_try && now - g_fs_last_try < 1000) return;  // retry at most once a second
   g_fs_last_try = now;
-  const Config& c = GetConfig();
   IDXGIOutput* out = nullptr;
   b.swapchain->GetContainingOutput(&out);
-  if (c.fs_width && out) {
-    DXGI_MODE_DESC want{};
-    want.Width = c.fs_width;
-    want.Height = c.fs_height;
-    want.RefreshRate.Numerator = c.fs_hz;
-    want.RefreshRate.Denominator = c.fs_hz ? 1 : 0;
-    want.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    DXGI_MODE_DESC got{};
-    HRESULT hr = out->FindClosestMatchingMode(&want, &got, b.device);
-    if (SUCCEEDED(hr)) {
-      hr = b.swapchain->ResizeTarget(&got);
-      if (!g_fs_logged_mode)
-        Log("exclusive: FullscreenMode %dx%d@%d -> closest mode %ux%u@%.2f Hz (ResizeTarget %08lx)", c.fs_width,
-            c.fs_height, c.fs_hz, got.Width, got.Height,
-            got.RefreshRate.Denominator ? static_cast<double>(got.RefreshRate.Numerator) / got.RefreshRate.Denominator
-                                        : 0.0,
-            hr);
-    } else if (!g_fs_logged_mode) {
-      Log("exclusive: no mode close to %dx%d@%d (%08lx); using the desktop's", c.fs_width, c.fs_height, c.fs_hz,
-          hr);
-    }
-    g_fs_logged_mode = true;
-  }
+  g_fs_changed_mode = false;  // the screen is at the desktop mode while windowed
+  ApplyExclusiveMode11(out, "entering fullscreen");
   HRESULT hr = b.swapchain->SetFullscreenState(TRUE, out);
   SafeRelease(out);
   if (FAILED(hr)) {
@@ -549,7 +634,21 @@ void TrackExclusive11() {
   b.swapchain->GetFullscreenState(&fs, nullptr);
   if (was && !fs) Log("exclusive: left fullscreen (focus lost or alt-tab)");
   was = fs;
-  if (!fs) EnterExclusive11();
+  if (!fs) {
+    EnterExclusive11();
+    return;
+  }
+  // The player picked another resolution: switch the screen to it now.
+  if (GetConfig().fs_follow) {
+    int w = 0, h = 0;
+    ResolutionWanted(&w, &h);
+    if (w != g_fs_target_w || h != g_fs_target_h) {
+      IDXGIOutput* out = nullptr;
+      b.swapchain->GetContainingOutput(&out);
+      ApplyExclusiveMode11(out, "resolution picked");
+      SafeRelease(out);
+    }
+  }
 }
 
 void LeaveExclusive11() {

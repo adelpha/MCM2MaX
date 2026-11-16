@@ -113,19 +113,28 @@ Fullscreen=Borderless
 
 ; FullscreenMode: the screen mode used with Fullscreen=Exclusive (ignored when
 ; Borderless).
-;   Desktop                  - keep the current desktop mode (default).
+;   Resolution               - the game's resolution (see Resolution below),
+;                              at the highest refresh rate (default). Picking
+;                              another resolution in Options switches the
+;                              screen to it. Sizes the screen doesn't have
+;                              (e.g. 1600x1200 on a 1920x1080 screen) keep the
+;                              desktop mode and are scaled into it.
+;   Desktop                  - keep the current desktop mode.
 ;   <width>x<height>         - e.g. 1920x1080, at the highest refresh rate.
 ;   <width>x<height>@<Hz>    - e.g. 1024x768@85.
-FullscreenMode=Desktop
+FullscreenMode=Resolution
 
-; Resolution: the game's resolution, by size. Picking a resolution in the
-; game's Options writes it here, so it survives changes to the game's list of
-; resolutions (another desktop size, a video card re-test).
+; Resolution: the game's resolution, by size. Until you pick one, the game
+; runs at the desktop's size. Picking a resolution in the game's Options
+; writes it here (or to MCM2MaX-menu.ini in your user folder when this file
+; can't be written), so it is kept from one start to the next and survives
+; changes to the game's list of resolutions.
 ;   Desktop                  - the desktop's size (default).
 ;   <width>x<height>         - e.g. 1280x720.
 ;   Game                     - the game's own choice (640x480 at first),
 ;                              saved by the game by list position.
-; With Fullscreen=Exclusive the screen itself stays at FullscreenMode.
+; The game's menus are always 640x480, scaled to the screen; this is the size
+; of the races.
 Resolution=Desktop
 
 ; VSync: 1 = wait for the monitor's refresh before showing each frame: no

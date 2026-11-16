@@ -75,8 +75,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
                  c.one_core, c.startup, c.registry, c.files, c.activate_log, c.reg_log, c.dd_stats, c.draw_log, c.draw_batch, c.batch_log,
                  c.alpha_cut, c.alpha_to_coverage, c.wide_fov, c.arrow_heading, static_cast<double>(c.arrow_scale),
                  c.restart_fix, c.restart_log);
-      patch::Log("display: Fullscreen=%s FullscreenMode=%dx%d@%d (0 = desktop) VSync=%d",
-                 c.exclusive ? "Exclusive" : "Borderless", c.fs_width, c.fs_height, c.fs_hz, c.vsync ? 1 : 0);
+      patch::Log("display: Fullscreen=%s FullscreenMode=%s %dx%d@%d (0 = desktop) VSync=%d",
+                 c.exclusive ? "Exclusive" : "Borderless", c.fs_follow ? "Resolution" : "fixed", c.fs_width,
+                 c.fs_height, c.fs_hz, c.vsync ? 1 : 0);
       patch::Log("graphics: Fov=%.1f Anisotropy=%d Antialiasing=%d MipBias=%.2f FogDistance=%.2f "
                  "ViewDistance=%.2f ModelLod=%.2f TreeDetailDistance=%d TextureReplace=%d TextureDump=%d "
                  "Renderer=D3D%d RendererLabel=%d D3D9Log=%d",

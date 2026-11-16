@@ -14,6 +14,11 @@
 // size, or at the desktop while Resolution=Desktop. The game switches modes
 // itself by comparing that position with the current one.
 //
+// With Fullscreen=Exclusive and FullscreenMode=Resolution the screen mode
+// follows this too (ResolutionWanted, used by dd/backend*.cpp). The game
+// itself shows its menus at 640x480 and switches to the chosen size for
+// races; those switches stay virtual, only the chosen size reaches the screen.
+//
 // Exe (2008 no-CD Mcm2.exe):
 //   [0x5743ac] = game; game+0xfc4 = saved mode position;
 //   [game+0xc] = display device: +0x8 mode count, +0x10 mode array of
@@ -32,6 +37,9 @@
 namespace {
 
 int g_pick_w = 0, g_pick_h = 0;  // Resolution=WxH or the player's pick (0 = desktop)
+// The desktop size when the game started. Read once: with
+// Fullscreen=Exclusive the screen mode (and GetSystemMetrics) can change later.
+int g_desk_w = 0, g_desk_h = 0;
 bool g_logged_table = false;
 int g_last_fixed = -2;           // last position written (for the log)
 bool g_off = false;
@@ -74,6 +82,10 @@ void __stdcall NotePick(int pos) {
     std::snprintf(v, sizeof(v), "%dx%d", m.w, m.h);
     const char* file = SetStringFromMenu("Resolution", v);
     patch::Log("resolution: player picked %s (position %d); saved as Resolution=%s in %s", v, pos, v, file);
+    const Config& c = GetConfig();
+    if (c.exclusive && c.fs_follow)
+      patch::Log("resolution: Fullscreen=Exclusive, FullscreenMode=Resolution: the screen switches to %s now "
+                 "(Direct3D 11) or at the next start (Direct3D 9)", v);
   }
 }
 
@@ -111,6 +123,8 @@ bool HookPickSite(uintptr_t site) {
 
 void ApplyResolutionDefault() {
   const Config& c = GetConfig();
+  g_desk_w = GetSystemMetrics(SM_CXSCREEN);
+  g_desk_h = GetSystemMetrics(SM_CYSCREEN);
   if (c.default_res_w < 0) {
     g_off = true;
     patch::Log("resolution: Resolution=Game, the game's own saved position is used");
@@ -128,8 +142,22 @@ void ApplyResolutionDefault() {
   if (g_pick_w)
     patch::Log("resolution: Resolution=%dx%d (Options hooks: graphics %d, other %d)", g_pick_w, g_pick_h, a, b);
   else
-    patch::Log("resolution: Resolution=Desktop (%dx%d) (Options hooks: graphics %d, other %d)",
-               GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), a, b);
+    patch::Log("resolution: Resolution=Desktop (%dx%d) (Options hooks: graphics %d, other %d)", g_desk_w, g_desk_h,
+               a, b);
+}
+
+void ResolutionWanted(int* w, int* h) {
+  if (!g_desk_w) {
+    g_desk_w = GetSystemMetrics(SM_CXSCREEN);
+    g_desk_h = GetSystemMetrics(SM_CYSCREEN);
+  }
+  if (!g_off && g_pick_w) {
+    *w = g_pick_w;
+    *h = g_pick_h;
+  } else {
+    *w = g_desk_w;
+    *h = g_desk_h;
+  }
 }
 
 // Called once a frame: point the game's saved position at the wanted size.
@@ -152,8 +180,8 @@ void ResolutionFrame() {
   int w = g_pick_w, h = g_pick_h;
   const char* why = "Resolution";
   if (!w) {
-    w = GetSystemMetrics(SM_CXSCREEN);
-    h = GetSystemMetrics(SM_CYSCREEN);
+    w = g_desk_w;
+    h = g_desk_h;
     why = "desktop";
   }
   // Exact size, else the largest mode that fits inside it.
