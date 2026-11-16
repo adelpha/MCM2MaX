@@ -257,7 +257,7 @@ Windows 10 and 11.
 These work in principle but have had little or no testing so far. Reports
 are welcome.
 
-- **Windows XP support**: barely tested.
+- **Windows XP support**: barely tested, it's on the TODO list.
 - **4:3, 16:10, 21:9, 32:9 and 64:27 aspect ratios** with the new HUD, text
   and other screen layout changes: not tested. Testing so far has been at
   16:9.
