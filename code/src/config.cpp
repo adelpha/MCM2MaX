@@ -118,6 +118,8 @@ void LoadConfig() {
   g_config.vsync = ReadMenuInt("VSync", GetPrivateProfileIntA("mcm2fix", "VSync", 1, ini)) != 0;
   g_config.frame_cap = GetPrivateProfileIntA("mcm2fix", "FrameCap", 0, ini);
   if (g_config.frame_cap < 0) g_config.frame_cap = 0;
+  g_config.menu_fps_cap = GetPrivateProfileIntA("mcm2fix", "MenuFpsCap", 240, ini);
+  if (g_config.menu_fps_cap < 0) g_config.menu_fps_cap = 0;
   g_config.precise_timer = GetPrivateProfileIntA("mcm2fix", "PreciseTimer", 1, ini) != 0;
   g_config.frame_fix = GetPrivateProfileIntA("mcm2fix", "FrameFix", 1, ini) != 0;
   g_config.ref_rate = GetPrivateProfileIntA("mcm2fix", "RefRate", 30, ini);

@@ -659,7 +659,7 @@ void SleepUntil(LONGLONG target) {
 void ApplyFramePacing() {
   QueryPerformanceFrequency(&g_freq);
   const Config& c = GetConfig();
-  if (c.frame_cap > 0) {
+  if (c.frame_cap > 0 || c.menu_fps_cap > 0) {
     g_timer = xp::CreateFrameTimer();
   }
   g_fix_frames = c.frame_fix;
@@ -681,9 +681,9 @@ void ApplyFramePacing() {
     PatchFrameTime();
   }
   if (c.motion_blur || c.menu_options) PatchBikeSimNote(c.sim_rate <= 0);  // MenuOptions: can be switched on later
-  patch::Log("frame pacing: VSync=%d FrameCap=%d PreciseTimer=%d FrameFix=%d RefRate=%d AiRate=%d "
+  patch::Log("frame pacing: VSync=%d FrameCap=%d MenuFpsCap=%d PreciseTimer=%d FrameFix=%d RefRate=%d AiRate=%d "
              "AiSteerRate=%d SimRate=%d",
-             c.vsync, c.frame_cap, c.precise_timer, c.frame_fix, c.ref_rate, c.ai_rate,
+             c.vsync, c.frame_cap, c.menu_fps_cap, c.precise_timer, c.frame_fix, c.ref_rate, c.ai_rate,
              c.ai_steer_rate, c.sim_rate);
 }
 
@@ -700,15 +700,77 @@ bool SimDrawPoint(unsigned* tick, float* alpha) {
   return true;
 }
 
+namespace dd {
+bool MenuScreen();  // dd/backend.cpp
+}
+
+namespace {
+// MenuFpsCap bookkeeping, for the log.
+bool g_menu_capped = false;
+LONGLONG g_menu_log_start = 0;  // QPC at the start of the current log window
+unsigned g_menu_frames = 0;     // frames shown in it
+LONGLONG g_menu_slept = 0;      // QPC ticks spent waiting in it
+LONGLONG g_menu_late = 0;       // QPC ticks woken past the target, summed
+LONGLONG g_menu_late_max = 0;
+
+void MenuCapLog(LONGLONG now, int cap) {
+  if (!g_menu_log_start) {
+    g_menu_log_start = now;
+    return;
+  }
+  const double secs = static_cast<double>(now - g_menu_log_start) / g_freq.QuadPart;
+  if (secs < 5.0) return;
+  const double ms = 1000.0 / g_freq.QuadPart;
+  patch::Log("menu frame cap: %.1f fps over %.1f s (cap %d), waited %.0f%% of the time, "
+             "woke late by %.3f ms on average, %.3f ms at most",
+             g_menu_frames / secs, secs, cap, 100.0 * g_menu_slept / (now - g_menu_log_start),
+             g_menu_frames ? g_menu_late * ms / g_menu_frames : 0.0, g_menu_late_max * ms);
+  g_menu_log_start = now;
+  g_menu_frames = 0;
+  g_menu_slept = g_menu_late = g_menu_late_max = 0;
+}
+}  // namespace
+
 void WaitForFrameSlot() {
-  const int cap = GetConfig().frame_cap;
-  if (cap <= 0 || !g_freq.QuadPart) return;
+  const Config& c = GetConfig();
+  if (!g_freq.QuadPart) return;
+  int cap = c.frame_cap;
+  // MenuFpsCap: menus and loading screens (no 3D scene drawn for half a
+  // second) don't need thousands of frames a second with VSync off.
+  const bool menu = c.menu_fps_cap > 0 && dd::MenuScreen();
+  if (menu && (cap <= 0 || c.menu_fps_cap < cap)) cap = c.menu_fps_cap;
+  if (menu != g_menu_capped) {
+    g_menu_capped = menu;
+    g_menu_log_start = 0;
+    g_menu_frames = 0;
+    g_menu_slept = g_menu_late = g_menu_late_max = 0;
+    patch::Log("menu frame cap: %s (now %d fps%s)", menu ? "menu showing" : "3D scene showing, menu cap off",
+               cap, cap > 0 ? "" : " = no cap");
+  }
+  if (cap <= 0) return;
+  if (!g_timer) {
+    g_timer = xp::CreateFrameTimer();
+    patch::Log("frame cap: wait timer %s", g_timer ? "created" : "unavailable, using Sleep(1)");
+  }
   const LONGLONG period = g_freq.QuadPart / cap;
   LONGLONG now = Now();
+  if (menu) {
+    ++g_menu_frames;
+    MenuCapLog(now, cap);
+  }
   if (g_next_frame == 0 || now - g_next_frame > period) {
     g_next_frame = now + period;  // first frame, or fell behind: start over
     return;
   }
   SleepUntil(g_next_frame);
+  if (menu) {
+    const LONGLONG after = Now();
+    const LONGLONG late = after - g_next_frame;
+    g_menu_slept += after - now;
+    if (late > 0) {
+      g_menu_late += late;
+      if (late > g_menu_late_max) g_menu_late_max = late;
+    }
+  }
   g_next_frame += period;
 }

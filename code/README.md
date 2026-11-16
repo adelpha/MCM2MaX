@@ -127,6 +127,11 @@ VSync=1
 ; Useful with VSync=0, e.g. FrameCap=120. Does not change game speed.
 FrameCap=0
 
+; MenuFpsCap: the most frames per second in the menus and loading screens
+; (whenever no 3D scene is drawn), even with VSync=0. Races are not affected.
+; 0 = no menu cap. Default 240. If FrameCap is lower, that wins.
+MenuFpsCap=240
+
 ; WideFov: 1 = on widescreen resolutions, the view is widened so you see more
 ; to the sides (default). 0 = keep the 4:3 view width and crop the top and
 ; bottom, like the original game.
