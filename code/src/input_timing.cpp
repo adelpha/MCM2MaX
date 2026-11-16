@@ -671,6 +671,12 @@ HRESULT WINAPI MySetFormat(void* self, const void* fmt) {
 bool PromptKey(DWORD ofs) { return ofs == 0x01 || ofs == 0x1C || ofs == 0x9C; }  // DIK_ESCAPE, RETURN, NUMPADENTER
 bool PromptMouse(DWORD ofs) { return ofs >= 12 && ofs < 20; }                    // DIMOFS_BUTTON0..7
 
+// The game reads the keyboard (and mouse) both buffered and immediately;
+// while a screen is open only one of the two may feed it, or every key
+// press counts twice. Buffered reads win while the game makes them.
+DWORD g_ui_kb_buffered = 0, g_ui_mouse_buffered = 0;
+bool UiUseState(DWORD buffered_at) { return GetTickCount() - buffered_at > 1000; }
+
 // MenuMaX screens (ui/ui.h): while one is open, keys and all mouse input go
 // to it and not to the game (its cursor stays put; the screen has its own).
 HRESULT UiFilterData(void* self, DiData* data, DWORD* inout, DWORD flags, HRESULT hr) {
@@ -680,6 +686,7 @@ HRESULT UiFilterData(void* self, DiData* data, DWORD* inout, DWORD flags, HRESUL
     if (Device* d = Find(self)) kind = d->kind;
   }
   if (kind != kKeyboard && kind != kMouse) return hr;
+  if (!(flags & kPeek)) (kind == kKeyboard ? g_ui_kb_buffered : g_ui_mouse_buffered) = GetTickCount();
   DWORD k = 0;
   for (DWORD i = 0; i < *inout; ++i) {
     const DiData& e = data[i];
@@ -707,23 +714,24 @@ HRESULT UiFilterState(void* self, DWORD cb, void* out, HRESULT hr) {
   if (kind == kKeyboard && cb >= 256) {
     for (unsigned i = 0; i < 256; ++i) {
       const bool down = (b[i] & 0x80) != 0;
-      if (down != ((keys[i] & 0x80) != 0)) ui::KeyEvent(i, down);
+      if (down != ((keys[i] & 0x80) != 0) && UiUseState(g_ui_kb_buffered)) ui::KeyEvent(i, down);
       keys[i] = b[i];
       b[i] = 0;
     }
   } else if (kind == kMouse && cb >= 16) {
+    const bool use = UiUseState(g_ui_mouse_buffered);
     LONG mx, my, z;
     std::memcpy(&mx, b, 4);
     std::memcpy(&my, b + 4, 4);
-    if (mx || my) ui::MouseMove(mx, my);
+    if ((mx || my) && use) ui::MouseMove(mx, my);
     std::memset(b, 0, 8);
     std::memcpy(&z, b + 8, 4);
-    if (z) ui::MouseWheel(z);
+    if (z && use) ui::MouseWheel(z);
     std::memset(b + 8, 0, 4);
     const unsigned n = cb >= 20 ? 8 : 4;
     for (unsigned i = 0; i < n; ++i) {
       const bool down = (b[12 + i] & 0x80) != 0;
-      if (down != ((mouse[i] & 0x80) != 0)) ui::MouseButton(static_cast<int>(i), down);
+      if (down != ((mouse[i] & 0x80) != 0) && use) ui::MouseButton(static_cast<int>(i), down);
       mouse[i] = b[12 + i];
       b[12 + i] = 0;
     }

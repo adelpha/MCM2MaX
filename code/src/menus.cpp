@@ -941,8 +941,22 @@ bool MenusGameSet(const char* name, int value) {
   *state = value ? 1 : 0;
   const uintptr_t redraw = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + kRedrawSlot);
   reinterpret_cast<RedrawFn>(redraw)(box, nullptr);
+  // The checkbox's own click sound (SoundPush): vtable +0xE8 plays the sound
+  // of a state (3 = pushed, as the box's mouse-down 0x473180 does; 2 if the
+  // box has none for 3). Event type 3 is a slider / list change on this page
+  // (its handler plays "Ratchet03" for it), so the click goes as type 1, the
+  // type the box's mouse-up 0x479d10 sends.
+  {
+    const uintptr_t* snd = reinterpret_cast<const uintptr_t*>(box + 0x194);
+    const int idx = snd[3] ? 3 : (snd[2] ? 2 : -1);
+    if (idx >= 0) {
+      using PlayFn = void(__fastcall*)(uintptr_t self, void* edx, int state, int unused);
+      reinterpret_cast<PlayFn>(*reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + 0xE8))(box, nullptr, idx, 0);
+    }
+    patch::Log("menus: game control %s click sound %d", name, idx);
+  }
   // The event the page gets for a click: +0 id, +4 name, +8 type, +0xc sender.
-  uintptr_t ev[4] = {0, reinterpret_cast<uintptr_t>(name), 3, box};
+  uintptr_t ev[4] = {0, reinterpret_cast<uintptr_t>(name), 1, box};
   const uintptr_t handler = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(page) + 29 * 4);
   reinterpret_cast<EventFn>(handler)(page, nullptr, reinterpret_cast<uintptr_t>(ev));
   patch::Log("menus: game control %s set %d -> %d (now %d after the page's click handling)", name, before, value ? 1 : 0,

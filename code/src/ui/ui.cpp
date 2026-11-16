@@ -163,8 +163,17 @@ struct State {
   // Held direction (keys, d-pad, stick) repeats.
   Rml::Input::KeyIdentifier held = Rml::Input::KI_UNKNOWN;
   DWORD held_since = 0, held_last = 0;
-  WORD pad_prev = 0;
+  WORD pad_prev[4] = {};
   int pad_dir_prev = -1;
+  // One press seen through two devices at once (a keyboard that is also an
+  // XInput pad, the game reading the keyboard two ways) counts once.
+  bool key_down[256] = {};
+  Rml::Input::KeyIdentifier last_key = Rml::Input::KI_UNKNOWN;
+  int last_key_source = -1;
+  DWORD last_key_at = 0;
+  unsigned dup_keys = 0;
+  // The control that had focus last: a click on empty space or text keeps it.
+  Rml::Element* last_focus = nullptr;
   bool shift = false;
   // Pointer.
   // The screen's own pointer (window pixels), moved by the mouse movement
@@ -475,6 +484,7 @@ void CloseDoc() {
   g.doc->RemoveEventListener(Rml::EventId::Change, &g_change);
   g.doc->Close();
   g.doc = nullptr;
+  g.last_focus = nullptr;
   g.settings.clear();
   g.context->Update();  // documents go away at the next update
 }
@@ -560,8 +570,54 @@ bool Repeats(Rml::Input::KeyIdentifier k) {
   return k == KI_UP || k == KI_DOWN || k == KI_LEFT || k == KI_RIGHT || k == KI_TAB;
 }
 
+bool IsControl(Rml::Element* e) {
+  if (!e) return false;
+  const Rml::String& t = e->GetTagName();
+  return t == "input" || t == "select" || t == "button";
+}
+
+// After any input: remember the focused control, or give focus back to the
+// last one when a click on empty space or text took it away.
+void KeepFocus(const char* why) {
+  if (!g.context || !g.doc) return;
+  Rml::Element* f = g.context->GetFocusElement();
+  if (IsControl(f)) {
+    g.last_focus = f;
+    return;
+  }
+  if (g.last_focus) {
+    g.last_focus->Focus();
+    if (GetConfig().menu_log) patch::Log("MenuMaX: focus kept on %s#%s (%s)", g.last_focus->GetTagName().c_str(),
+                                         g.last_focus->GetId().c_str(), why);
+  }
+}
+
+// Where a press came from: 0 keyboard, 1 controller, 2 other.
+int SourceOf(const char* from) {
+  if (std::strcmp(from, "keyboard") == 0) return 0;
+  if (std::strncmp(from, "controller", 10) == 0 || std::strncmp(from, "joystick", 8) == 0) return 1;
+  return 2;
+}
+
 void Press(Rml::Input::KeyIdentifier k, const char* from) {
   using namespace Rml::Input;
+  {
+    const int src = SourceOf(from);
+    const DWORD now = GetTickCount();
+    if (src < 2 && k == g.last_key && g.last_key_source >= 0 && g.last_key_source != src && now - g.last_key_at < 150) {
+      ++g.dup_keys;
+      if (GetConfig().menu_log || g.dup_keys <= 10)
+        patch::Log("MenuMaX: key %d from %s ignored: the same press came from the %s %lu ms before", static_cast<int>(k),
+                   from, g.last_key_source == 0 ? "keyboard" : "controller", static_cast<unsigned long>(now - g.last_key_at));
+      g.last_key_at = now;
+      return;
+    }
+    if (src < 2) {
+      g.last_key = k;
+      g.last_key_source = src;
+      g.last_key_at = now;
+    }
+  }
   ++g.key_events;
   auto* select = g.context ? dynamic_cast<Rml::ElementFormControlSelect*>(g.context->GetFocusElement()) : nullptr;
   if (select && select->IsSelectBoxVisible() && (k == KI_ESCAPE || k == KI_BACK)) {
@@ -586,9 +642,11 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
     return;
   }
   if (!g.context) return;
+  if (!IsControl(g.context->GetFocusElement()) && g.last_focus) g.last_focus->Focus(true);
   const int mods = g.shift ? KM_SHIFT : 0;
   g.context->ProcessKeyDown(k, mods);
   g.context->ProcessKeyUp(k, mods);
+  if (g.doc) KeepFocus("key");
   if (GetConfig().menu_log) {
     Rml::Element* f = g.context->GetFocusElement();
     patch::Log("MenuMaX: key %d (%s) -> focus %s#%s", static_cast<int>(k), from, f ? f->GetTagName().c_str() : "-",
@@ -628,30 +686,32 @@ void PollPads() {
   // (an Xbox pad shows up as both).
   bool xpad = false;
   if (XInputGetStateFn get = LoadXInput()) {
+    // Every connected pad counts (a keyboard can show up as one too); the
+    // first one held in a direction steers.
+    int dir = -1;
+    const bool settling = GetTickCount() - g.opened_at < 200;  // held when the screen opened
     for (DWORD i = 0; i < 4; ++i) {
       XPad s{};
       if (get(i, &s) != ERROR_SUCCESS) continue;
       xpad = true;
-      if (GetTickCount() - g.opened_at < 200) {  // held when the screen opened
-        g.pad_prev = s.buttons;
-        break;
-      }
-      int dir = -1;
-      if (s.buttons & 0x0001) dir = 0;
-      else if (s.buttons & 0x0008) dir = 1;
-      else if (s.buttons & 0x0002) dir = 2;
-      else if (s.buttons & 0x0004) dir = 3;
-      else if (s.ly > 20000) dir = 0;
-      else if (s.lx > 20000) dir = 1;
-      else if (s.ly < -20000) dir = 2;
-      else if (s.lx < -20000) dir = 3;
-      PadDir(dir, "controller");
-      const WORD pressed = s.buttons & ~g.pad_prev;
+      const WORD pressed = settling ? 0 : static_cast<WORD>(s.buttons & ~g.pad_prev[i]);
+      g.pad_prev[i] = s.buttons;
+      if (settling) continue;
+      int d = -1;
+      if (s.buttons & 0x0001) d = 0;
+      else if (s.buttons & 0x0008) d = 1;
+      else if (s.buttons & 0x0002) d = 2;
+      else if (s.buttons & 0x0004) d = 3;
+      else if (s.ly > 20000) d = 0;
+      else if (s.lx > 20000) d = 1;
+      else if (s.ly < -20000) d = 2;
+      else if (s.lx < -20000) d = 3;
+      if (dir < 0) dir = d;
       if (pressed & 0x1000) Press(Rml::Input::KI_RETURN, "controller A");
       if (pressed & 0x2000) Press(Rml::Input::KI_ESCAPE, "controller B");
-      g.pad_prev = s.buttons;
-      break;  // the first pad
+      if (pressed && GetConfig().menu_log) patch::Log("MenuMaX: XInput pad %lu buttons %04x", i, s.buttons);
     }
+    if (xpad && !settling) PadDir(dir, "controller");
   }
   if (!xpad && g.joy_seen) {
     PadDir(PovDir(g.joy_pov), "joystick");
@@ -722,6 +782,8 @@ void DoInput(const RECT& game_rect) {
                    h ? h->GetId().c_str() : "");
     }
     if (b.second && b.first == 1) Press(Rml::Input::KI_ESCAPE, "right mouse button");
+    if (!g.doc) return;
+    if (b.first == 0) KeepFocus("click");
   }
   if (wheel) g.context->ProcessMouseWheel(Rml::Vector2f(0.0f, -wheel / 120.0f), 0);
   for (const auto& k : keys) {
@@ -770,11 +832,11 @@ void Report(bool force) {
   g.last_report = now;
   RenderD3D11::Stats& s = g.render->GetStats();
   patch::Log("MenuMaX: %s: %u frames, %u draws, %u new geometry, %u textures (%u failed), %u keys, %u clicks, %u saves, "
-             "%u reloads, %u mouse moves, pointer %d,%d",
+             "%u reloads, %u mouse moves, pointer %d,%d, %u doubled key presses ignored",
              g.open_name.c_str(), g.frames, s.draws, s.geometry, s.textures, s.texture_failures, g.key_events, g.clicks,
-             g.saves, g.reloads, g.moves, g.mouse_x, g.mouse_y);
+             g.saves, g.reloads, g.moves, g.mouse_x, g.mouse_y, g.dup_keys);
   s = RenderD3D11::Stats{};
-  g.frames = g.key_events = g.clicks = g.saves = g.reloads = g.moves = 0;
+  g.frames = g.key_events = g.clicks = g.saves = g.reloads = g.moves = g.dup_keys = 0;
 }
 
 }  // namespace
@@ -811,6 +873,9 @@ bool Open(const char* name, const char* why) {
   g.active = true;
   g.keys.clear();
   g.buttons.clear();
+  std::memset(g.key_down, 0, sizeof g.key_down);
+  g.last_key = Rml::Input::KI_UNKNOWN;
+  g.last_key_source = -1;
   patch::Log("MenuMaX: open %s (%s)", name, why);
   return true;
 }
@@ -889,6 +954,11 @@ void KeyEvent(unsigned dik, bool down) {
   const Rml::Input::KeyIdentifier k = FromDik(dik);
   if (k == Rml::Input::KI_UNKNOWN) return;
   std::lock_guard<std::recursive_mutex> l(g.mu);
+  // The same change reported twice (two ways of reading the keyboard).
+  if (dik < 256) {
+    if (g.key_down[dik] == down) return;
+    g.key_down[dik] = down;
+  }
   if (g.keys.size() < 256) g.keys.push_back({k, down});
 }
 
