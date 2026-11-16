@@ -727,8 +727,8 @@ XInputSteerCurve=33
 
 ; XInputSteerSmooth: how long, in milliseconds, the steering takes to catch
 ; up with the left stick, 0-500. Takes the edge off small thumb movements;
-; too much feels sluggish. 0 = off. Default 40.
-XInputSteerSmooth=40
+; too much feels sluggish. 0 = off. Default 60.
+XInputSteerSmooth=60
 
 ; KeepControlPreset: 1 = the control preset you chose (Options > Controls)
 ; is kept between runs as long as the same controller is used (default). The

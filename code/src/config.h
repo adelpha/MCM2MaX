@@ -102,7 +102,7 @@ struct Config {
   int xinput_rumble = 100;    // XInputRumble: rumble strength in percent (0 = off, no force feedback offered)
   int xinput_deadzone = 15;   // XInputDeadzone: stick dead zone in percent of the stick's travel
   int xinput_steer_curve = 33;    // XInputSteerCurve: left stick X exponent in percent (game cubes it on top)
-  int xinput_steer_smooth = 40;    // XInputSteerSmooth: ms the steering takes to ease toward the stick (0 = off)
+  int xinput_steer_smooth = 60;    // XInputSteerSmooth: ms the steering takes to ease toward the stick (0 = off)
   bool keep_control_preset = true;  // KeepControlPreset: keep the chosen control preset between runs
   int xinput_rumble_min_ms = 150;   // XInputRumbleMinMs: shortest rumble, held at full strength before fading
   int xinput_rumble_threshold = 10;  // XInputRumbleThreshold: % jump in the game's stick force that rumbles

@@ -626,7 +626,7 @@ The file has three parts:
 | `XInputRumbleThreshold` | `10` | 1-100, percent | With `XInputRumbleForces=0`, how sudden a change in the game's force has to be to rumble. Lower = more bumps felt; too low becomes a constant rumble. |
 | `XInputRumbleMinMs` | `150` | 0-1000, ms | Shortest rumble: each bump is held at full strength this long before it fades (bumps fade over 0.4 s, crashes over 0.7 s). |
 | `XInputSteerCurve` | `33` | 33-300, percent | Left stick steering response. The game already curves joystick steering (gentle near the centre, steep near the edge). `33` = straight line from stick to bike; `100` = the game's own curve; higher is softer near the centre and steeper at the edge. |
-| `XInputSteerSmooth` | `40` | 0-500, ms | How long the steering takes to catch up with the left stick. Takes the edge off small thumb movements; too much feels sluggish. `0` = off. |
+| `XInputSteerSmooth` | `60` | 0-500, ms | How long the steering takes to catch up with the left stick. Takes the edge off small thumb movements; too much feels sluggish. `0` = off. |
 | `KeepControlPreset` | `1` | `0`/`1` | Keep the chosen control preset between runs while the same controller is used. The game itself only keeps it when its "use last controller" setting is on. |
 | `XInputDeadzone` | `15` | 0-50, percent | How far either stick has to move from the centre before it counts. Raise it if the bike steers by itself. |
 

@@ -292,7 +292,7 @@ void LoadConfig() {
   g_config.xinput_steer_curve = GetPrivateProfileIntA(sec, "XInputSteerCurve", 33, ini);
   if (g_config.xinput_steer_curve < 33) g_config.xinput_steer_curve = 33;
   if (g_config.xinput_steer_curve > 300) g_config.xinput_steer_curve = 300;
-  g_config.xinput_steer_smooth = GetPrivateProfileIntA(sec, "XInputSteerSmooth", 40, ini);
+  g_config.xinput_steer_smooth = GetPrivateProfileIntA(sec, "XInputSteerSmooth", 60, ini);
   if (g_config.xinput_steer_smooth < 0) g_config.xinput_steer_smooth = 0;
   if (g_config.xinput_steer_smooth > 500) g_config.xinput_steer_smooth = 500;
   g_config.keep_control_preset = GetPrivateProfileIntA(sec, "KeepControlPreset", 1, ini) != 0;
