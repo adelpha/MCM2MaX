@@ -5,6 +5,17 @@ on modern Windows by double-clicking `Mcm2.exe`. You don't need compatibility
 settings, administrator rights, DirectX wrappers or old codecs, and you don't
 change the game's display resolution.
 
+Its core features are:
+
+|Ease of use|Drop the files into your MCM2 directory with the no-CD exe and it just works|
+|No wrappers, codecs, external DLLs or compatibility settings required|Indeo5 decoder built-in for the game's video files, "Modern" rendering on the GPU using D3D11 or, for Windows XP compatibility, DX9|
+|Performance|It can render a full Baja map at 10x view distance with maximum terrain quality across the entire map at hundreds of frames per second on a modern GPU|
+|Graphical enhancements|Widescreen, AA, AF, FoV, Alpha-to-coverage, replacement textures, environment mapped reflections, soft shadows for all riders, and more!|
+|Audio|Drop in DSOAL and the EAX effects will just work|
+|Music|Optional music tracks, either per-event or per-track (provide your own)|
+
+See the [Featrures](#features) section for more details.
+
 > ***You need the no-CD `Mcm2.exe`.*** mcm2fix only works with the widely
 > available no-CD exe (1,577,005 bytes; see [Requirements](#requirements)).
 > The original `Mcm2.exe` from the CD uses SafeDisc copy protection, which
