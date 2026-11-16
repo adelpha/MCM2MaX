@@ -93,7 +93,7 @@ Please include the newest one in any report.
 
 Source and licences
 -------------------
-Source: https://github.com/adelpha/mcm2fix
+Source: https://github.com/adelpha/MCM2MaX
 
 The video decoder is FFmpeg (https://ffmpeg.org), version n7.1, built with
 only its Indeo 5 decoder. It is linked statically, under the GNU Lesser
