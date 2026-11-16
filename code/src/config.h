@@ -1,9 +1,9 @@
-// Settings from mcm2fix.ini next to the exe (all optional; see README.md).
+// Settings from mcm2max.ini next to the exe (all optional; see README.md).
 #pragma once
 
 struct Config {
   bool one_core = false;      // OneCore: pin the game to one CPU core (old stopgap)
-  bool log = true;            // Log: write logs\mcm2fix-<date>-<time>.log
+  bool log = true;            // Log: write logs\MCM2MaX-<date>-<time>.log
   bool startup = true;        // Startup: auto-pick the video card, skip the hardware-change box
   bool registry = true;       // Registry: keep settings in HKCU instead of HKLM
   bool files = true;          // Files: send file writes to the per-user folder
@@ -13,7 +13,7 @@ struct Config {
   int profile_sample_us = 1000;  // ProfileSampleUs: sampling profiler interval (0 = off)
   bool fast_crt = true;
   bool fast_ftol = true;      // FastFtol: the C runtime's float-to-integer call done with one instruction (SSE3)
-  bool simd = true;           // Simd: SSE2 fast paths for mcm2fix's own pixel and vertex work, when the CPU has SSE2 (simd.cpp)
+  bool simd = true;           // Simd: SSE2 fast paths for MCM2MaX's own pixel and vertex work, when the CPU has SSE2 (simd.cpp)
   bool simd_log = false;      // SimdLog: time the SSE2 and plain paths at start-up, and log their use every 5 s
   bool pause_on_focus_loss = true;  // PauseOnFocusLoss: alt-tabbing out of a race opens the pause menu (diagnostics.cpp)
   bool dpi_aware = true;     // DpiAware: tell Windows the game is DPI aware (no scaling blur, no mouse drift) (fixes_startup.cpp)
@@ -134,8 +134,8 @@ struct Config {
   int texture_preload_mb = 256;       // TexturePreloadMB: most decoded picture memory preloaded
   bool true_color_textures = true;  // TrueColorTextures: load textures as 24/32-bit instead of 16-bit
   bool texture_log = false;         // TextureLog: log the format of each texture the game creates
-  bool menu_options = true;   // MenuOptions: mcm2fix settings added to the game's own Options pages (menus.cpp)
-  bool menu_log = false;      // MenuLog: log every event on the pages mcm2fix adds settings to
+  bool menu_options = true;   // MenuOptions: MCM2MaX settings added to the game's own Options pages (menus.cpp)
+  bool menu_log = false;      // MenuLog: log every event on the pages MCM2MaX adds settings to
   bool menu_flag = true;      // MenuFlag: waving flag behind the main menu, under MenuBackground (dd/menubg.cpp)
   int menu_flag_speed = 100;       // MenuFlagSpeed: % of the default movement speed
   int menu_flag_brightness = 68;   // MenuFlagBrightness: % (100 = preview-5 colours)
@@ -147,13 +147,27 @@ struct Config {
 const Config& GetConfig();
 void LoadConfig();
 
+// Settings file names. Until 2026-11 the project was called mcm2fix; a game
+// folder with only the old mcm2fix.ini (section [mcm2fix]) still works.
+constexpr char kIniFile[] = "mcm2max.ini";
+constexpr char kIniSection[] = "MCM2MaX";
+constexpr char kMenuIniFile[] = "MCM2MaX-menu.ini";
+constexpr char kLegacyIniFile[] = "mcm2fix.ini";
+constexpr char kLegacyIniSection[] = "mcm2fix";
+constexpr char kLegacyMenuIniFile[] = "mcm2fix-menu.ini";
+
+// The settings file in use: mcm2max.ini next to Mcm2.exe, or mcm2fix.ini if
+// only that exists. Its section: [MCM2MaX], or [mcm2fix] in an old file.
+const char* IniPath();
+const char* IniSection();
+
 // Settings changed from the game's menus (MenuOptions) are saved in
-// %LOCALAPPDATA%\Motocross Madness 2\mcm2fix-menu.ini and win over mcm2fix.ini.
+// %LOCALAPPDATA%\Motocross Madness 2\MCM2MaX-menu.ini and win over mcm2max.ini.
 // Empty if there is no per-user folder.
 const char* MenuIniPath();
-// Save a setting chosen in the menus: to mcm2fix.ini when it can be written,
+// Save a setting chosen in the menus: to mcm2max.ini when it can be written,
 // else to MenuIniPath(); returns the file used. MotionBlur, VSync and
 // AlphaToCoverage and Anisotropy also change at once; the rest apply at the next start.
 const char* SetFromMenu(const char* key, int value);
-// A value read from mcm2fix.ini, replaced by the menus' choice if there is one.
+// A value read from mcm2max.ini, replaced by the menus' choice if there is one.
 int MenuOverride(const char* key, int value);

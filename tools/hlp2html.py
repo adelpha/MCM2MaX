@@ -2,7 +2,7 @@
 """Convert a Windows Help file (.HLP, WinHelp 3.1/4.0) to one self-contained HTML page.
 
 Written for MCM2HELP.HLP from Motocross Madness 2: Windows 10 and 11 cannot
-open .HLP files, so mcm2fix opens the converted MCM2HELP.html instead (see
+open .HLP files, so MCM2MaX opens the converted MCM2HELP.html instead (see
 code/src/fixes_help.cpp).
 
     python3 tools/hlp2html.py MCM2HELP.HLP MCM2HELP.html

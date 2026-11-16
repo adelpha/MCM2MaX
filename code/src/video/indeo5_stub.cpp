@@ -1,4 +1,4 @@
-// Used when mcm2fix is built without FFmpeg (e.g. with Visual Studio): no
+// Used when MCM2MaX is built without FFmpeg (e.g. with Visual Studio): no
 // Indeo 5 decoder, so the game's videos are skipped.
 #include "indeo5.h"
 

@@ -5,7 +5,7 @@
 // Madness 2, opened with KEY_ALL_ACCESS for writes. A standard user can't
 // write there; Windows only made it work through registry virtualization.
 // We hook those two imports and send that key to
-// HKCU\Software\mcm2fix\Motocross Madness 2 instead. On first run the new
+// HKCU\Software\MCM2MaX\Motocross Madness 2 instead. On first run the new
 // key is seeded with the install values the game expects, pointing at the
 // folder the exe runs from, so no installer is needed.
 #include <windows.h>
@@ -22,7 +22,10 @@ constexpr uintptr_t kIatRegOpenKeyExA = 0x555008;
 constexpr uintptr_t kIatRegCreateKeyExA = 0x55500C;
 
 const char kGameKey[] = "Software\\Microsoft\\Microsoft Games\\Motocross Madness 2";
-const char kUserKey[] = "Software\\mcm2fix\\Motocross Madness 2";
+const char kUserKey[] = "Software\\MCM2MaX\\Motocross Madness 2";
+// Where settings were kept before the project was renamed from mcm2fix.
+const char kLegacyRoot[] = "Software\\mcm2fix";
+const char kUserRoot[] = "Software\\MCM2MaX";
 
 using RegOpenKeyExAFn = LONG(WINAPI*)(HKEY, LPCSTR, DWORD, REGSAM, PHKEY);
 using RegCreateKeyExAFn = LONG(WINAPI*)(HKEY, LPCSTR, DWORD, LPSTR, DWORD, REGSAM,
@@ -94,7 +97,7 @@ void SeedUserKey() {
   // First run: copy everything an existing install has (including what
   // Windows registry virtualization stored for it), so the game keeps
   // its settings and hardware profile.
-  if (!HasValue(key, "mcm2fixImported")) {
+  if (!HasValue(key, "MCM2MaXImported") && !HasValue(key, "mcm2fixImported")) {  // (mcm2fix...: copied from before the rename)
     HKEY old;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, kGameKey, 0, KEY_READ, &old) == ERROR_SUCCESS) {
       LONG r = xp::CopyRegTree(old, key);
@@ -103,7 +106,7 @@ void SeedUserKey() {
     } else {
       patch::Log("registry: no existing install in HKLM");
     }
-    SetDword(key, "mcm2fixImported", 1);
+    SetDword(key, "MCM2MaXImported", 1);
   }
 
   const std::string folder = GameFolder();
@@ -118,26 +121,26 @@ void SeedUserKey() {
   // Reuse the last input device instead of asking on every launch (the
   // game's own "show controller picker" option, unset on most installs).
   if (!HasValue(key, "UseLastController")) SetDword(key, "UseLastController", 1);
-  // mcm2fix always picks the video card itself, so keep the game's "Show 3-D
+  // MCM2MaX always picks the video card itself, so keep the game's "Show 3-D
   // Renderer Selector at Startup" option off; it would do nothing.
   SetDword(key, "UseLastVideoCard", 1);
 
   // The game tests the video card once and caches the result, including the
-  // list of display modes, under DriverInfo. mcm2fix's renderer provides
+  // list of display modes, under DriverInfo. MCM2MaX's renderer provides
   // those modes, so drop the cache whenever the list would change (new
-  // mcm2fix mode list or a different desktop size); the game then tests
+  // MCM2MaX mode list or a different desktop size); the game then tests
   // once and skips the test on later launches.
   char stamp[64];
   std::snprintf(stamp, sizeof(stamp), "modes-2 %dx%d", GetSystemMetrics(SM_CXSCREEN),
                 GetSystemMetrics(SM_CYSCREEN));
   char old_stamp[64] = {};
   DWORD stamp_size = sizeof(old_stamp) - 1;
-  if (RegQueryValueExA(key, "mcm2fixModeList", nullptr, nullptr,
+  if (RegQueryValueExA(key, "MCM2MaXModeList", nullptr, nullptr,
                        reinterpret_cast<BYTE*>(old_stamp), &stamp_size) != ERROR_SUCCESS ||
       std::strcmp(old_stamp, stamp) != 0) {
     LONG r = xp::DeleteRegTree(key, "DriverInfo");
     patch::Log("registry: display modes changed (%s), video card will be re-tested (%ld)", stamp, r);
-    SetString(key, "mcm2fixModeList", stamp);
+    SetString(key, "MCM2MaXModeList", stamp);
   }
 
   // Carry over the CD key from an existing install, if there is one.
@@ -158,6 +161,29 @@ void SeedUserKey() {
 }
 
 }  // namespace
+
+// First run after the rename from mcm2fix: copy HKCU\Software\mcm2fix
+// (the game's settings, plus a saved power plan to restore) to
+// HKCU\Software\MCM2MaX. The old key is left as it is.
+void MigrateLegacySettings() {
+  HKEY probe;
+  if (RegOpenKeyExA(HKEY_CURRENT_USER, kUserRoot, 0, KEY_READ, &probe) == ERROR_SUCCESS) {
+    RegCloseKey(probe);
+    return;
+  }
+  HKEY old;
+  if (RegOpenKeyExA(HKEY_CURRENT_USER, kLegacyRoot, 0, KEY_READ, &old) != ERROR_SUCCESS) return;
+  HKEY key;
+  if (RegCreateKeyExA(HKEY_CURRENT_USER, kUserRoot, 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &key, nullptr) ==
+      ERROR_SUCCESS) {
+    const LONG r = xp::CopyRegTree(old, key);
+    patch::Log("registry: copied settings from HKCU\\%s to HKCU\\%s (result %ld)", kLegacyRoot, kUserRoot, r);
+    RegCloseKey(key);
+  } else {
+    patch::Log("registry: cannot create HKCU\\%s to copy HKCU\\%s", kUserRoot, kLegacyRoot);
+  }
+  RegCloseKey(old);
+}
 
 void ApplyRegistryFixes() {
   SeedUserKey();

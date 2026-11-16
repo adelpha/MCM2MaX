@@ -24,7 +24,7 @@
 // its TextQueueOverlay (HUD object +0x6c) with "add item" 0x520b90, called
 // from 0x4e539b. Item: char text[0x80], float seconds (+0x80, 3.25).
 //
-// Instead, mcm2fix draws it in the middle of the screen with GPU text:
+// Instead, MCM2MaX draws it in the middle of the screen with GPU text:
 // a white line grows from a dot to the text's width + 30%, the name slides
 // up out of the line and the lap count (stunts: time limit) slides down out
 // of it, they hold, and the same runs backwards at the same speed so it is

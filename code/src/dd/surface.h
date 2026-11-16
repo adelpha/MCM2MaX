@@ -98,7 +98,7 @@ class Surface : public IDirectDrawSurface7 {
 
   // ---- backend helpers ----
   static Surface* From(IDirectDrawSurface7* s);  // nullptr if not ours
-  // mcm2fix's own reference (device render target / texture): keeps the
+  // MCM2MaX's own reference (device render target / texture): keeps the
   // whole chain (its root) alive, unlike a game AddRef on an attachment.
   void Hold();
   void Unhold();

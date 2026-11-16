@@ -1,7 +1,7 @@
 # Step 3: Direct3D 11 renderer
 
 Mcm2.exe draws through DirectDraw 7 and Direct3D 7 (immediate mode, from
-`DirectDrawCreateEx`). mcm2fix.dll points that import (IAT 0x5553EC) at its
+`DirectDrawCreateEx`). MCM2MaX.dll points that import (IAT 0x5553EC) at its
 own implementation in `code/src/dd/`, which draws with Direct3D 11.
 
 ## Layout

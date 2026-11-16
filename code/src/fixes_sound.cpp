@@ -9,7 +9,7 @@
 // keep playing quietly: looped bits of old engine and crash sounds that
 // repeat as riders move out of range.
 //
-// mcm2fix does the muting itself. DirectSoundCreate (the game's import) is
+// MCM2MaX does the muting itself. DirectSoundCreate (the game's import) is
 // wrapped and the COM vtables of the device, its buffers, their
 // IDirectSound3DBuffer interfaces and the listener are hooked, so we see each
 // buffer's position, max distance and mode and the listener position. A
@@ -1082,7 +1082,7 @@ void Snapshot(const char* tag) {
                  tag, e.second.id, buf, primary ? "PRIMARY" : (e.second.flags & kCapsCtrl3D) ? "3D" : "2D",
                  e.second.bytes, st, (st & 1) ? " playing" : "", (st & 4) ? " looping" : "", (st & 2) ? " LOST" : "",
                  static_cast<unsigned long>(hs), vol, static_cast<unsigned long>(hv),
-                 t ? (t->muted ? " [muted by mcm2fix]" : "") : "", freq, static_cast<unsigned long>(hf),
+                 t ? (t->muted ? " [muted by MCM2MaX]" : "") : "", freq, static_cast<unsigned long>(hf),
                  t ? (t->playing ? " [game started it]" : " [game stopped it]") : "");
     if (t && ((st & 3) || t->muted || g_pause_events <= 2 || t->id < 4)) {
       // What DirectSound itself holds for the buffer (deferred values included).
@@ -1102,7 +1102,7 @@ void Snapshot(const char* tag) {
                  "(%u mutes, %u unmutes so far), game volume %ld; DirectSound has pos %.1f %.1f %.1f (hr %08lx), "
                  "max %.1f, mode %lu",
                  tag, t->id, Distance(*t), t->pos.x, t->pos.y, t->pos.z, t->max_dist, t->mode,
-                 t->muted ? "MUTED by mcm2fix" : "not muted", t->mutes, t->unmutes, t->volume, dp.x, dp.y, dp.z,
+                 t->muted ? "MUTED by MCM2MaX" : "not muted", t->mutes, t->unmutes, t->volume, dp.x, dp.y, dp.z,
                  static_cast<unsigned long>(hp), dmax, dmode);
     }
   }

@@ -1,4 +1,4 @@
-// MenuOptions=1: mcm2fix settings on the game's own Options pages.
+// MenuOptions=1: MCM2MaX settings on the game's own Options pages.
 //
 // Each menu page is UI\<NAME>.DAT, an "RS2" archive of the page's sprites
 // plus one <Name>.dtm: INI-like text from a Visual Basic form designer that
@@ -16,7 +16,7 @@
 //   each checkbox is bound to an int of ours (UIControl::Bind, vtable +0xd8),
 //   before the game loads every bound value into its control. After any event
 //   the checkbox states (control +0x1f0) are compared with the settings; a
-//   change is saved to mcm2fix-menu.ini (config.cpp) and, for live settings,
+//   change is saved to MCM2MaX-menu.ini (config.cpp) and, for live settings,
 //   applied at once.
 #include <windows.h>
 
@@ -41,7 +41,7 @@ constexpr uintptr_t kUIMultiStateVtable = 0x5582C8;
 constexpr size_t kBindSlot = 0xD8;         // UIControl::Bind(int* value)
 constexpr size_t kStateOffset = 0x1F0;     // UIMultiState current state
 
-// The Enhancements box (Options > Graphics): mcm2fix switches as checkboxes.
+// The Enhancements box (Options > Graphics): MCM2MaX switches as checkboxes.
 // Live ones change at once; the others are saved and apply at the next start
 // (their hooks are put in when the game starts), marked with a '*'.
 struct MenuCheck {

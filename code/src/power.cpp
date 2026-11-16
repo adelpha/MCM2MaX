@@ -15,7 +15,7 @@
 // It is left alone when the plan is already High performance or Ultimate
 // Performance, on battery, or when Windows has no High performance plan.
 //
-// The plan we replaced is kept in HKCU\Software\mcm2fix PowerPlanRestore
+// The plan we replaced is kept in HKCU\Software\MCM2MaX PowerPlanRestore
 // while switched, so a crash or a killed game is put right at the next
 // start. We only switch back if the plan is still the one we set (the user
 // may have changed it meanwhile). The calls are looked up at run time
@@ -32,7 +32,7 @@ namespace {
 
 const GUID kHighPerf = {0x8c5e7fda, 0xe8bf, 0x4a96, {0x9a, 0x85, 0xa6, 0xe2, 0x3a, 0x8c, 0x63, 0x5c}};
 const GUID kUltimate = {0xe9a42b02, 0xd5df, 0x448d, {0xaa, 0x00, 0x03, 0xf1, 0x47, 0x49, 0xeb, 0x61}};
-const char kKey[] = "Software\\mcm2fix";
+const char kKey[] = "Software\\MCM2MaX";
 const char kValue[] = "PowerPlanRestore";
 const DWORD kRestoreAfterMs = 10000;
 

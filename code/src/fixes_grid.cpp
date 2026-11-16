@@ -108,7 +108,7 @@ __declspec(naked) void GridClampB() {
 #else
 extern "C" void GridClampA();
 extern "C" void GridClampB();
-#define MCM2FIX_GRID_STUB(NAME, SITE, TEST, TAIL)  \
+#define MCM2MAX_GRID_STUB(NAME, SITE, TEST, TAIL)  \
   ".globl _" NAME "\n"                             \
   "_" NAME ":\n"                                   \
   "  movl -0x14(%ebp), %ecx\n"                     \
@@ -132,8 +132,8 @@ extern "C" void GridClampB();
   TAIL                                             \
   "  ret\n"
 asm(".text\n"
-    MCM2FIX_GRID_STUB("GridClampA", "0x485440", "  cmpl $15, %ecx\n  ja 1f\n  cmpl $15, %eax\n  ja 1f\n", "")
-    MCM2FIX_GRID_STUB("GridClampB", "0x485609", "  testl %ecx, %ecx\n  js 1f\n  testl %eax, %eax\n  js 1f\n",
+    MCM2MAX_GRID_STUB("GridClampA", "0x485440", "  cmpl $15, %ecx\n  ja 1f\n  cmpl $15, %eax\n  ja 1f\n", "")
+    MCM2MAX_GRID_STUB("GridClampB", "0x485609", "  testl %ecx, %ecx\n  js 1f\n  testl %eax, %eax\n  js 1f\n",
                       "  xorl %ebx, %ebx\n"));
 #endif
 

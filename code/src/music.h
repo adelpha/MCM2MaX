@@ -1,4 +1,4 @@
-// Optional music for the menus and races ([Music] section of mcm2fix.ini).
+// Optional music for the menus and races ([Music] section of mcm2max.ini).
 #pragma once
 
 #include <cstdint>

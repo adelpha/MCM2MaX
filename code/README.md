@@ -1,4 +1,4 @@
-# mcm2fix.dll
+# MCM2MaX.dll
 
 Loaded by `Mcm2.exe` in place of `d3drm.dll` (see `tools/mcm2patch.py`).
 It provides `D3DRMVectorRotate`, the only function the game used from
@@ -11,11 +11,11 @@ What it does:
   on `DDERR_SURFACELOST`, skips the administrator probe, auto-picks the
   video card and skips the "hardware changed" box.
 - Per-user writes (`src/fixes_registry.cpp`, `src/fixes_files.cpp`): settings
-  in `HKCU\Software\mcm2fix\Motocross Madness 2`, saved files in
+  in `HKCU\Software\MCM2MaX\Motocross Madness 2`, saved files in
   `%LOCALAPPDATA%\Motocross Madness 2`. Nothing is written to HKLM or the
   game folder.
 - Renderer (`src/dd/`): the game's `DirectDrawCreateEx` import is pointed at
-  mcm2fix's own DirectDraw 7 / Direct3D 7 implementation on Direct3D 11. The
+  MCM2MaX's own DirectDraw 7 / Direct3D 7 implementation on Direct3D 11. The
   game keeps its 640x480 / 1280x1024 (etc.) modes virtually; the real window
   stays borderless at desktop resolution and the picture is scaled with the
   aspect ratio kept. No display mode change and no exclusive fullscreen
@@ -25,12 +25,12 @@ What it does:
   frame timer, and frame-rate independence for the few simulation, rider
   animation and camera steps that the game applied once per frame.
 - Videos (intro, credits, menu event previews; Indeo 5 with MS ADPCM sound)
-  play through mcm2fix's own player (`src/video/`): the AVI is read and
+  play through MCM2MaX's own player (`src/video/`): the AVI is read and
   decoded with FFmpeg's Indeo 5 decoder, sound goes through waveOut, and no
   DirectShow or Indeo codec is needed. A build without FFmpeg skips the
   videos.
 
-Each run writes its own log, `%LOCALAPPDATA%\Motocross Madness 2\logs\mcm2fix-YYYYMMDD-HHMMSS.log`; the newest 50 are kept.
+Each run writes its own log, `%LOCALAPPDATA%\Motocross Madness 2\logs\MCM2MaX-YYYYMMDD-HHMMSS.log`; the newest 50 are kept.
 
 ## Building
 
@@ -44,39 +44,40 @@ Visual Studio:
 MinGW cross-compile (Linux), with the video decoder:
 
     tools/build-ffmpeg.sh ffmpeg-work
-    cmake -S code -B build -DCMAKE_TOOLCHAIN_FILE=code/toolchain-mingw32.cmake -DCMAKE_BUILD_TYPE=Release -DMCM2FIX_FFMPEG=$PWD/ffmpeg-work/install
+    cmake -S code -B build -DCMAKE_TOOLCHAIN_FILE=code/toolchain-mingw32.cmake -DCMAKE_BUILD_TYPE=Release -DMCM2MaX_FFMPEG=$PWD/ffmpeg-work/install
     cmake --build build
 
 `tools/build-ffmpeg.sh` builds a static libavcodec with only the Indeo 5
 decoder. FFmpeg is licensed under the LGPL 2.1 or later; its source is the
-tagged FFmpeg release the script downloads, and mcm2fix's own source is
+tagged FFmpeg release the script downloads, and MCM2MaX's own source is
 here, so the DLL can be rebuilt against a modified FFmpeg. Without
-`MCM2FIX_FFMPEG` (e.g. the Visual Studio build) the videos are skipped.
+`MCM2MaX_FFMPEG` (e.g. the Visual Studio build) the videos are skipped.
 
 ## Installing
 
 The game imports `d3drm.dll`, which Windows no longer ships, and Windows
-looks for it in the game folder first. So mcm2fix installs as a drop-in:
-copy the DLL into the game folder as `d3drm.dll`, with `mcm2fix.ini`, and
+looks for it in the game folder first. So MCM2MaX installs as a drop-in:
+copy the DLL into the game folder as `d3drm.dll`, with `mcm2max.ini`, and
 start the unmodified `Mcm2.exe`. `tools/package.sh` builds the release zip
 that way (with `package/README.txt` for players).
 
 Alternatively, `python tools/mcm2patch.py Mcm2.exe Mcm2_fixed.exe` makes a
-copy of the exe that imports `mcm2fix.dll` by that name instead.
+copy of the exe that imports `MCM2MaX.dll` by that name instead.
 
 `docs/clean-machine-test.md` is the check to run on a fresh Windows 11
 install before a release.
 
-## mcm2fix.ini (optional, next to Mcm2.exe)
+## mcm2max.ini (optional, next to Mcm2.exe)
 
 All settings default to the values shown. The file is grouped into preferences,
 advanced settings that are best left alone (physics, timing, compatibility),
 and logging, where everything but the main log is off. `tools/package.sh`
-ships this block as the release `mcm2fix.ini`.
+ships this block as the release `mcm2max.ini`. A game folder with only the
+old `mcm2fix.ini` (section `[mcm2fix]`) is still read, until `mcm2max.ini` exists.
 
 ```ini
-[mcm2fix]
-; mcm2fix settings for Motocross Madness 2.
+[MCM2MaX]
+; MCM2MaX (Motocross Madness 2 MaXimuM) settings.
 ;
 ; Every setting is optional: delete a line, or the whole file, and the default
 ; shown here is used. On/off settings take 1 (on) or 0 (off). Lines starting
@@ -192,7 +193,7 @@ TerrainDetail=2
 ; FastTerrain: 1 = the game's per-frame terrain code (how detailed each
 ; block is, which of its points are used, building its triangles when that
 ; changes, and the walk that draws it) runs
-; as mcm2fix's own rewrite, which gives exactly the same results, bit for
+; as MCM2MaX's own rewrite, which gives exactly the same results, bit for
 ; bit, but reads ahead in memory and avoids the old maths' slow spots
 ; (default). Ctrl+F8 switches it on and off while racing (shown on screen).
 ; 0 = the game's own code.
@@ -370,7 +371,7 @@ LiquidMetal=0
 ; Graphics page (see MenuOptions).
 MotionBlur=1
 
-; MenuOptions: 1 = mcm2fix settings on the game's own Options pages. Options >
+; MenuOptions: 1 = MCM2MaX settings on the game's own Options pages. Options >
 ; Graphics gets an "Enhancements" box: Anisotropy, Antialiasing and View Distance (ViewDistance) sliders,
 ; VSync, Widescreen View (WideFov), Motion Blur, Smooth Tree Edges
 ; (AlphaToCoverage), Soft Rider Shadows (RiderShadows), Bike Reflections
@@ -379,7 +380,7 @@ MotionBlur=1
 ; Reflections and Replacement Textures apply when the game is next started.
 ; What you pick there is written into this file. If this file can't be
 ; written (read-only, or a protected folder), it goes to
-; %LOCALAPPDATA%\Motocross Madness 2\mcm2fix-menu.ini instead, which then
+; %LOCALAPPDATA%\Motocross Madness 2\MCM2MaX-menu.ini instead, which then
 ; wins over this file (delete it to go back to this one).
 ; 0 = the menus as they were. Default 1.
 MenuOptions=1
@@ -487,7 +488,7 @@ ShadowSoftness=100
 GpuText=1
 
 ; HudText: 1 = the race HUD panels (position, lap, times, stunt score) and the
-; rider name labels are redrawn sharp by mcm2fix, using HudScale, LabelScale
+; rider name labels are redrawn sharp by MCM2MaX, using HudScale, LabelScale
 ; and the HUD fonts below (default). Needs GpuText=1. 0 = the game's panels.
 HudText=1
 
@@ -601,7 +602,7 @@ AiTopSpeedHard=100
 Startup=1
 
 ; Registry: 1 = the game's settings are kept in
-; HKEY_CURRENT_USER\Software\mcm2fix\Motocross Madness 2 (default). On first
+; HKEY_CURRENT_USER\Software\MCM2MaX\Motocross Madness 2 (default). On first
 ; run, settings from an earlier install in HKLM are copied there.
 ; 0 = the original HKLM key, which needs administrator rights to write.
 Registry=1
@@ -698,10 +699,10 @@ RestartFix=1
 AsyncSound=2
 
 ; SoundMaxDistanceMute: 1 = 3D sounds further away than their maximum distance
-; are muted by mcm2fix when the DirectSound in use is a replacement such as
+; are muted by MCM2MaX when the DirectSound in use is a replacement such as
 ; DSOAL, which ignores that rule and otherwise leaves distant riders' sounds
 ; playing quietly (default). Windows' own DirectSound mutes them itself, so
-; with it mcm2fix leaves them alone. 3 = mute them with any DirectSound (with
+; with it MCM2MaX leaves them alone. 3 = mute them with any DirectSound (with
 ; Windows' own this silences the bike engines after a pause). 0 = never.
 ; 2 = change nothing but log each 3D sound that goes beyond its maximum
 ; distance, and how often the game restarts a sound that is still playing.
@@ -711,7 +712,7 @@ SoundMaxDistanceMute=1
 ; the game while it is in the background (default; Windows' own DirectSound
 ; does this itself). 0 = leave the sound alone: the game stops while in the
 ; background and its sounds keep repeating their last fraction of a second.
-; With any DirectSound, 1 also pauses mcm2fix's music ([Music]) while the
+; With any DirectSound, 1 also pauses MCM2MaX's music ([Music]) while the
 ; game is in the background.
 BackgroundMute=1
 
@@ -746,7 +747,7 @@ FastCrt=1
 ; exactly the same. 0 = the game's own code.
 FastFtol=1
 
-; Simd: 1 = mcm2fix's own per-frame work (converting vertices for the GPU,
+; Simd: 1 = MCM2MaX's own per-frame work (converting vertices for the GPU,
 ; blending objects between simulation steps, 16-bit texture uploads, the
 ; pause menu's copy of the frame) uses SSE2 when the CPU has it (default).
 ; The CPU is checked at start-up and a self test makes sure both versions
@@ -857,10 +858,10 @@ FarTreeCells=1
 ; Logs go to %LOCALAPPDATA%\Motocross Madness 2\logs.
 ; =============================================================================
 
-; Log: 1 = write logs\mcm2fix-<date>-<time>.log each run; the newest 50 are
+; Log: 1 = write logs\MCM2MaX-<date>-<time>.log each run; the newest 50 are
 ; kept (default). It records the Windows version, these settings, the
 ; renderer chosen and any problems. If the game crashes it also records where
-; and why, and writes a crash dump (mcm2fix-<date>-<time>.dmp) next to the
+; and why, and writes a crash dump (MCM2MaX-<date>-<time>.dmp) next to the
 ; log. 0 = no log.
 Log=1
 
@@ -984,7 +985,7 @@ RestartLog=0
 ; start. Default 0.
 ArrowLog=0
 
-; FovLog: every change to a camera's field of view: who set it, what mcm2fix
+; FovLog: every change to a camera's field of view: who set it, what MCM2MaX
 ; widened it to for the screen shape and the smoothing cull margin. Default 0.
 FovLog=0
 
@@ -1002,7 +1003,7 @@ ReflectLog=0
 ; that reflects (no Fresnel), to see what is reflected. Default 0.
 ReflectDebug=0
 
-; MenuLog: log every event on the Options pages mcm2fix adds settings to.
+; MenuLog: log every event on the Options pages MCM2MaX adds settings to.
 ; Default 0.
 MenuLog=0
 

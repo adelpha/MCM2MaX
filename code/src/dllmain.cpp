@@ -1,4 +1,4 @@
-// mcm2fix.dll: loaded by Mcm2.exe in place of d3drm.dll. Applies the
+// MCM2MaX.dll (shipped as d3drm.dll): loaded by Mcm2.exe in place of d3drm.dll. Applies the
 // compatibility fixes to the game's code before its entry point runs.
 #include <windows.h>
 #include <cstdint>
@@ -15,6 +15,7 @@ void ApplyStep1Fixes();
 void ApplyStartupFixes();
 void ApplyDpiAwareness();
 void ApplyRegistryFixes();
+void MigrateLegacySettings();
 void ApplyFileFixes();
 void ApplyDiagnostics();
 void ApplyRegistryTrace();
@@ -61,7 +62,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
     DisableThreadLibraryCalls(inst);
     LoadConfig();
     if (IsSupportedGame()) {
-      patch::Log("mcm2fix loaded");
+      patch::Log("MCM2MaX (Motocross Madness 2 MaXimuM) loaded");
+      patch::Log("config: %s [%s]", IniPath(), IniSection());
+      MigrateLegacySettings();
       xp::LogSystemInfo();
       crash::Apply();
       ApplyStep1Fixes();
