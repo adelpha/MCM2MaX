@@ -920,10 +920,11 @@ void Note3DDraw() {
   g_any_3d = true;
 }
 
+bool MenuScreen() { return !g_any_3d || GetTickCount() - g_last_3d >= 500; }
+
 void DrawRendererLabel(ID3D11RenderTargetView* dst, IDirect3DSurface9* dst9, UINT w, UINT h) {
   if (!GetConfig().renderer_label || (!dst && !dst9) || w < 64 || h < 64) return;
-  // Menus: no 3D scene drawn for half a second.
-  if (g_any_3d && GetTickCount() - g_last_3d < 500) return;
+  if (!MenuScreen()) return;
   static GpuTexture label;
   static UINT label_h = 0;
   static Api label_api = Api::kD3D11;

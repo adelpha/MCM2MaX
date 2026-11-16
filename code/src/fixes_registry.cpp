@@ -135,9 +135,21 @@ void SeedUserKey() {
                 GetSystemMetrics(SM_CYSCREEN));
   char old_stamp[64] = {};
   DWORD stamp_size = sizeof(old_stamp) - 1;
-  if (RegQueryValueExA(key, "MCM2MaXModeList", nullptr, nullptr,
-                       reinterpret_cast<BYTE*>(old_stamp), &stamp_size) != ERROR_SUCCESS ||
-      std::strcmp(old_stamp, stamp) != 0) {
+  // Settings copied from before the rename carry the stamp as mcm2fixModeList;
+  // without reading it the cache was dropped and the game's saved resolution
+  // (a position in the mode list) could point at a different mode.
+  LONG got = RegQueryValueExA(key, "MCM2MaXModeList", nullptr, nullptr,
+                              reinterpret_cast<BYTE*>(old_stamp), &stamp_size);
+  if (got != ERROR_SUCCESS) {
+    stamp_size = sizeof(old_stamp) - 1;
+    got = RegQueryValueExA(key, "mcm2fixModeList", nullptr, nullptr, reinterpret_cast<BYTE*>(old_stamp),
+                           &stamp_size);
+    if (got == ERROR_SUCCESS) {
+      patch::Log("registry: mode list stamp taken from mcm2fixModeList (%s)", old_stamp);
+      if (std::strcmp(old_stamp, stamp) == 0) SetString(key, "MCM2MaXModeList", stamp);
+    }
+  }
+  if (got != ERROR_SUCCESS || std::strcmp(old_stamp, stamp) != 0) {
     LONG r = xp::DeleteRegTree(key, "DriverInfo");
     patch::Log("registry: display modes changed (%s), video card will be re-tested (%ld)", stamp, r);
     SetString(key, "MCM2MaXModeList", stamp);

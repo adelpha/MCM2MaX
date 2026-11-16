@@ -124,9 +124,15 @@ FullscreenMode=Desktop
 ; Windows allows it.
 VSync=1
 
-; FrameCap: the most frames per second, on top of VSync. 0 = no cap (default).
-; Useful with VSync=0, e.g. FrameCap=120. Does not change game speed.
-FrameCap=0
+; FrameCap: the most frames per second, on top of VSync. Default 500.
+; 0 = no cap. Matters with VSync=0. Does not change game speed.
+FrameCap=500
+
+; MenuFpsCap: the most frames per second outside races (menus, rider and
+; bike select, loading, the pause menu), even with VSync=0. Races, including
+; the intro, countdown and podium cutscene, are not affected.
+; 0 = no menu cap. Default 240. If FrameCap is lower, that wins.
+MenuFpsCap=240
 
 ; WideFov: 1 = on widescreen resolutions, the view is widened so you see more
 ; to the sides (default). 0 = keep the 4:3 view width and crop the top and
