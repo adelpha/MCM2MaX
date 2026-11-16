@@ -1381,7 +1381,9 @@ HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
   RECT prompt_area{};
   const bool prompt = ModePromptDraw(this, &prompt_area);
   if (prompt) {
-    const bool cut = g_cursor_sprite.native && g_cursor_sprite.native == GpuKey();
+    // Any buffer of the flip chain: the game does not draw the cursor into
+    // every frame, so the last one seen is kept while the prompt is up.
+    const bool cut = g_cursor_sprite.native != nullptr;
     static int logged = 0;
     if (logged < 3) {
       ++logged;
@@ -1391,7 +1393,7 @@ HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
     }
     if (cut) GpuTextOccludeSprite(GpuKey(), g_cursor_sprite.p);
   }
-  g_cursor_sprite.native = nullptr;
+  if (!prompt) g_cursor_sprite.native = nullptr;
   // VSync in mcm2max.ini decides, whatever the game asked for.
   PresentFront(GetConfig().vsync ? 1 : 0);
   if (prompt) GpuTextOcclude(GpuKey(), &prompt_area, "mode prompt");
