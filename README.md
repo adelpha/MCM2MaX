@@ -1,6 +1,6 @@
 # Motocross Madness 2 MaXimuM - An MCM2 Compatibility and Enhancement Project
 
-mcm2fix makes **Motocross Madness 2** (Microsoft / Rainbow Studios, 2000) run
+Motocross Madness 2 MaXimuM makes **Motocross Madness 2** (Microsoft / Rainbow Studios, 2000) run
 on modern Windows by double-clicking `Mcm2.exe`. You don't need compatibility
 settings, administrator rights, DirectX wrappers or old codecs, and you don't
 change the game's display resolution.
