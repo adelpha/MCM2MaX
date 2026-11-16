@@ -401,12 +401,17 @@ void ResolutionFillDropdown(uintptr_t dropdown) {
 
 void ResolutionSetExclusive(bool exclusive, uintptr_t dropdown) {
   if (exclusive == GetConfig().exclusive) return;
+  const DWORD t0 = GetTickCount();
   const char* file = SetFullscreenFromMenu(exclusive);
-  patch::Log("resolution: Fullscreen=%s from Options, saved to %s", exclusive ? "Exclusive" : "Borderless", file);
+  const DWORD t1 = GetTickCount();
+  patch::Log("resolution: Fullscreen=%s from Options, saved to %s (%lu ms)", exclusive ? "Exclusive" : "Borderless", file,
+             static_cast<unsigned long>(t1 - t0));
   display::Rebuild();
   ChooseFromIni();
   RefillGameTable();
   RefillDropdown(dropdown);
+  patch::Log("resolution: switch done in %lu ms (lists %lu ms)", static_cast<unsigned long>(GetTickCount() - t0),
+             static_cast<unsigned long>(GetTickCount() - t1));
 }
 
 void ResolutionWanted(int* w, int* h, int* hz) {

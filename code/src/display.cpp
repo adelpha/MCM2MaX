@@ -67,7 +67,7 @@ bool PickDevice(int want, char* out, size_t size) {
   return true;
 }
 
-void BuildLists() {
+void ReadMonitorModes() {
   g_monitor_modes.clear();
   DEVMODEA dm{};
   dm.dmSize = sizeof(dm);
@@ -88,7 +88,12 @@ void BuildLists() {
     if (a.w != b.w) return a.w < b.w;
     return a.hz > b.hz;
   });
+}
 
+// The game's list for the current Fullscreen mode, from the monitor's modes
+// read once at start (EnumDisplaySettings takes over a second on some
+// systems, far too slow for a live switch in Options).
+void BuildLists() {
   g_game_modes.clear();
   if (GetConfig().exclusive) {
     g_game_modes = g_monitor_modes;
@@ -146,6 +151,7 @@ void Init() {
   patch::Log("display: Monitor=%d -> %s, desktop %dx%d@%d, at %ld,%ld %ldx%ld", want, g_device[0] ? g_device : "?",
              g_desktop.w, g_desktop.h, g_desktop.hz, g_rect.left, g_rect.top, g_rect.right - g_rect.left,
              g_rect.bottom - g_rect.top);
+  ReadMonitorModes();
   BuildLists();
 }
 

@@ -97,7 +97,6 @@ constexpr const char* kFsLabels[2] = {"Borderless", "Exclusive"};
 constexpr int kFsGroup = 731;            // AttachId of the pair (unused by the game's pages)
 constexpr int kFindRadio = 4;            // FindControl type for radio buttons (0x4b73c8)
 constexpr uintptr_t kRadioSelect = 0x47A240;  // thiscall(int): checks it, clears the rest of its group
-constexpr uintptr_t kRadioState = 0x47A320;   // thiscall(): 2 = checked, 1 = not
 constexpr char kFootText[] = "* after restarting the game";
 // Page layout (control pixels; the page's controls are placed 20,35 menu
 // pixels further on). StOo: every box a border-only plate; the two columns
@@ -800,17 +799,18 @@ void MenusFrame() {
     return;
   }
   const bool excl = GetConfig().exclusive;
-  // Only the button for the mode not in use can have become checked.
-  const char* other = kFsNames[excl ? 0 : 1];
-  const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(page, nullptr, other, kFindRadio);
+  // Each radio button's own state is at +0x1f0 (1 = checked; the game's
+  // getter 0x479d00). 0x47a320 is NOT a per-button state: it returns the
+  // 1-based position of the checked button in the group, the same for both.
+  const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(page, nullptr, kFsNames[1], kFindRadio);
   if (!r) {
-    if (g_radio_logged++ < 3) patch::Log("menus: radio button %s not found while watching", other);
+    if (g_radio_logged++ < 3) patch::Log("menus: radio button %s not found while watching", kFsNames[1]);
     return;
   }
-  const int state = reinterpret_cast<int(__fastcall*)(uintptr_t, void*)>(kRadioState)(r, nullptr);
-  if (state != 2) return;
-  patch::Log("menus: %s picked (radio state %d)", other, state);
-  ResolutionSetExclusive(!excl, FindAny(page, "DisplayResolutionDropDown"));
+  const bool want = *reinterpret_cast<const int*>(r + kStateOffset) == 1;
+  if (want == excl) return;
+  patch::Log("menus: %s picked", kFsNames[want ? 1 : 0]);
+  ResolutionSetExclusive(want, FindAny(page, "DisplayResolutionDropDown"));
 }
 
 void ApplyMenuOptions() {
