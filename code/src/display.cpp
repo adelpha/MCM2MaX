@@ -82,11 +82,11 @@ void ReadMonitorModes() {
     }
     dm.dmSize = sizeof(dm);
   }
-  // Smallest first; for one size the highest refresh rate first.
+  // Smallest first; for one size the lowest refresh rate first (StOo).
   std::sort(g_monitor_modes.begin(), g_monitor_modes.end(), [](const Mode& a, const Mode& b) {
     if (a.w * a.h != b.w * b.h) return a.w * a.h < b.w * b.h;
     if (a.w != b.w) return a.w < b.w;
-    return a.hz > b.hz;
+    return a.hz < b.hz;
   });
 }
 

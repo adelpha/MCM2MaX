@@ -106,6 +106,7 @@ constexpr char kFootText[] = "* after restarting the game";
 constexpr int kGap = 9;
 constexpr int kBoxW = 228;
 constexpr int kLeftX = 8, kRightX = kLeftX + kBoxW + kGap;
+constexpr int kListH = 200;  // resolution list height (the game's: 62, 4 rows)
 constexpr int kTopY = 7, kTopH = 76;  // 66 before the Borderless / Exclusive row
 constexpr int kLowY = kTopY + kTopH + kGap;
 constexpr int kRowTop = 27, kRowStep = 22;  // first checkbox, checkbox to checkbox
@@ -335,6 +336,37 @@ bool BorderPlate(const std::vector<char>& d, const char* src_name, int w, int h,
   return true;
 }
 
+// A taller copy of a list background (the dropdown's list box and its
+// scroll bar track, 62 rows for 4 entries): the top and bottom 4 rows kept,
+// the scan-line pattern between them repeated (period 2) to h rows.
+bool TallSprite(const std::vector<char>& d, const char* src_name, int h, std::vector<char>& tga) {
+  const size_t e = FindEntry(d, src_name);
+  if (!e) return false;
+  const uint32_t off = Get32(d, e), size = Get32(d, e + 4);
+  const unsigned char* s = reinterpret_cast<const unsigned char*>(d.data() + off);
+  if (size < 18 || s[2] != 2 || s[16] != 16) return patch::Log("menus: %s is not a plain 16-bit TGA", src_name), false;
+  const int sw = s[12] | s[13] << 8, sh = s[14] | s[15] << 8;
+  const size_t start = 18 + s[0];
+  if (sw < 4 || sh < 12 || start + static_cast<size_t>(sw) * sh * 2 > size) return patch::Log("menus: %s too small", src_name), false;
+  const bool top_down = (s[17] & 0x20) != 0;
+  const int period = ((sh - 8) / 2) * 2;
+  // Rows counted from the top of the picture.
+  auto src_row = [&](int y) { return y < 4 ? y : y >= h - 4 ? sh - (h - y) : 4 + (y - 4) % period; };
+  tga.assign(18 + static_cast<size_t>(sw) * h * 2, 0);
+  std::memcpy(tga.data(), s, 18);
+  tga[0] = 0;
+  tga[14] = static_cast<char>(h & 0xff);
+  tga[15] = static_cast<char>(h >> 8);
+  for (int y = 0; y < h; ++y) {
+    const int sy = src_row(y);
+    const int from = top_down ? sy : sh - 1 - sy;  // stored row
+    const int to = top_down ? y : h - 1 - y;
+    std::memcpy(tga.data() + 18 + static_cast<size_t>(to) * sw * 2, s + start + static_cast<size_t>(from) * sw * 2,
+                static_cast<size_t>(sw) * 2);
+  }
+  return true;
+}
+
 // A slider track without the original's tick marks (they are spaced for its
 // own 10 steps): the bar along the top of GHorizontalSlider01 (the rows that
 // are not magenta), stretched to w, magenta below.
@@ -417,7 +449,10 @@ constexpr Plate kPlates[] = {{"Mcm2fixPlateTop", kTopH}, {"Mcm2fixPlateFeatures"
 void RelayoutOptGraph(std::string& t) {
   Place(t, "DisplayResolutionBox", kLeftX, kTopY, kBoxW, kTopH);
   SetKey(t, "DisplayResolutionBox", "AnimNorm", "\"Mcm2fixPlateTop\"");
-  Place(t, "DisplayResolutionDropDown", 25, 50, 178, 83);
+  // Taller list (StOo: the Exclusive list is long; 4 rows were too few).
+  Place(t, "DisplayResolutionDropDown", 25, 50, 178, 21 + kListH);
+  SetKey(t, "DisplayResolutionDropDown", "AnimListBack", "\"Mcm2fixListBack\"");
+  SetKey(t, "DisplayResolutionDropDown", "AnimScrollBack", "\"Mcm2fixScrollBack\"");
   Place(t, "TerrainQualityBox", kRightX, kTopY, kBoxW, kTopH);
   SetKey(t, "TerrainQualityBox", "AnimNorm", "\"Mcm2fixPlateTop\"");
   Place(t, "TerrainQualitySliderBar", 11, 28, 204, 16);
@@ -448,12 +483,20 @@ bool EditOptGraph(std::vector<char>& d) {
   }
   std::vector<char> track;
   if (!TrackSprite(d, "Options\\Graphics\\GHorizontalSlider01.tga", kSliderW, track)) return false;
+  std::vector<char> list_back, scroll_back;
+  if (!TallSprite(d, "Options\\Graphics\\DropDownBG05.tga", kListH, list_back)) return false;
+  if (!TallSprite(d, "Options\\Graphics\\VerticleScroll04.tga", kListH, scroll_back)) return false;
+  anims += "[Mcm2fixListBack]\r\nFiles1 = Options\\Graphics\\Mcm2fixListBack.tga\r\nMSecDelay = 0\r\nLoopCount = 0\r\n\r\n";
+  anims += "[Mcm2fixScrollBack]\r\nFiles1 = Options\\Graphics\\Mcm2fixScrollBack.tga\r\nMSecDelay = 0\r\nLoopCount = 0\r\n\r\n";
   anims += "[Mcm2fixTrack]\r\nFiles1 = Options\\Graphics\\Mcm2fixTrack.tga\r\nMSecDelay = 0\r\nLoopCount = 0\r\n\r\n";
   text.insert(anim + std::strlen("[Set_Anim]\r\n"), anims);
   text.insert(anim, OptGraphControls());
   RelayoutOptGraph(text);
   ReplaceEntry(d, e, text.data(), text.size());
   AddEntry(d, "Options\\Graphics\\Mcm2fixTrack.tga", track);
+  AddEntry(d, "Options\\Graphics\\Mcm2fixListBack.tga", list_back);
+  AddEntry(d, "Options\\Graphics\\Mcm2fixScrollBack.tga", scroll_back);
+  patch::Log("menus: resolution list %d px tall (list and scroll bar backgrounds stretched from 62)", kListH);
   for (int i = 0; i < 3; ++i)
     AddEntry(d, (std::string("Options\\Graphics\\") + kPlates[i].anim + ".tga").c_str(), plates[i]);
   patch::Log("menus: border-only plates added (228x%d, 228x%d, 228x%d; edge of GPlate03, magenta inside)", kTopH,
