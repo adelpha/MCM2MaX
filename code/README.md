@@ -130,7 +130,7 @@ FrameCap=0
 
 ; MenuFpsCap: the most frames per second outside races (menus, rider and
 ; bike select, loading, the pause menu), even with VSync=0. Races, including
-; the intro and countdown, are not affected.
+; the intro, countdown and podium cutscene, are not affected.
 ; 0 = no menu cap. Default 240. If FrameCap is lower, that wins.
 MenuFpsCap=240
 

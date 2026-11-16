@@ -766,7 +766,10 @@ void WaitForFrameSlot() {
   const bool player = g_player_seen && t - g_player_seen < half;
   const uintptr_t race = g_live_race;
   const bool started = race && *reinterpret_cast<const uint8_t*>(race + 0x18A) != 0;
-  const bool in_race = bikes || player || (race && !started);
+  // The podium cutscene (game+0x3430 set, top three) also counts as racing.
+  const uintptr_t game = *reinterpret_cast<const uintptr_t*>(0x5743AC);
+  const bool podium = race && game && *reinterpret_cast<const int*>(game + 0x3430) != 0;
+  const bool in_race = bikes || player || (race && (!started || podium));
   const bool menu = c.menu_fps_cap > 0 && !in_race;
   if (menu && (cap <= 0 || c.menu_fps_cap < cap)) cap = c.menu_fps_cap;
   if (menu != g_menu_capped) {
@@ -774,10 +777,10 @@ void WaitForFrameSlot() {
     g_menu_log_start = 0;
     g_menu_frames = 0;
     g_menu_slept = g_menu_late = g_menu_late_max = 0;
-    patch::Log("menu frame cap: %s (now %d fps%s; race %08x started %d, bikes simulated %d, player simulated %d, "
+    patch::Log("menu frame cap: %s (now %d fps%s; race %08x started %d, podium %d, bikes simulated %d, player simulated %d, "
                "3D scene %d)",
                menu ? "not racing, cap on" : "race running, menu cap off", cap, cap > 0 ? "" : " = no cap",
-               static_cast<unsigned>(race), started, bikes, player, !dd::MenuScreen());
+               static_cast<unsigned>(race), started, podium, bikes, player, !dd::MenuScreen());
   }
   if (cap <= 0) return;
   if (!g_timer) {
