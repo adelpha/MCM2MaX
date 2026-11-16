@@ -72,6 +72,8 @@
 //     kind (slot), u16 x, y, z (fractions of the terrain width, mgr+0x5a8),
 //     u8 height, u8 width (0x456d50 / 0x456db0: below 128 mean - (mean - min)
 //     * b / 128, else mean + (max - mean) * (255 - b) / 128).
+//   * .slb models, .col collision shapes and .mot animations: see the
+//     comments at SlbModel, ColShape and Motion below.
 #include <algorithm>
 #include <cctype>
 #include <cstdarg>
@@ -273,11 +275,21 @@ std::string Hex(uint32_t v) {
 }
 std::string Fmt(const char* f, ...) {
   char b[1024];
-  va_list a;
+  va_list a, a2;
   va_start(a, f);
-  std::vsnprintf(b, sizeof(b), f, a);
+  va_copy(a2, a);
+  const int n = std::vsnprintf(b, sizeof(b), f, a);
   va_end(a);
-  return b;
+  std::string s;
+  if (n >= static_cast<int>(sizeof(b))) {
+    s.resize(n + 1);
+    std::vsnprintf(&s[0], s.size(), f, a2);
+    s.resize(n);
+  } else if (n > 0) {
+    s.assign(b, n);
+  }
+  va_end(a2);
+  return s;
 }
 std::string HtmlEsc(const std::string& s) {
   std::string o;
@@ -806,7 +818,7 @@ uint64_t Fnv(const std::vector<uint8_t>& v) {
 }
 
 struct Counts {
-  unsigned textures = 0, images = 0, failed = 0, files = 0, models = 0, tracks = 0;
+  unsigned textures = 0, images = 0, failed = 0, files = 0, models = 0, tracks = 0, anims = 0, colls = 0;
 } g_count;
 
 std::string g_out;  // output folder
@@ -1087,23 +1099,63 @@ void ConvertSlt(const Archive& ar, const Member& m, const std::vector<uint8_t>& 
   ++g_count.models;
 }
 
-// Writes LOD 0 of a binary model (.slb, the game's Soultree object loader
-// 0x4408f0) as OBJ + MTL into models\<archive>\, in its rest pose.
+// A binary model (.slb, the game's Soultree object loader 0x4408f0).
 // Layout: u32 node count; per node 0x80 name, 4x4 float matrix (row vectors,
 // relative to the parent), u32, u32, 2 x vec3 (bounds), u32, 2 x vec3 (60 bytes); then
 // one s32 parent per node (-1 = root) (0x502a90). u32 material count; per
-// material 0x40 texture name ("PROCEDURAL" = made by the game), 4 u32, u32
-// has texture, 10 u32, u16, u32 (0x5042e0). u32 LOD count, u32 has
-// distances, LOD count - 1 floats. Per LOD: u32 mesh count; per mesh u32
-// segments, u32 vertices, u32 triangles, u32 materials; vertices x 32 bytes
-// (model space: x, y, z, -, -, -, u, v; LOD 0 only, a copy of the next array
-// in the others), vertices x 32 bytes (the same in the node's own space),
-// vertices x 12 (normals), triangles x 3 u16, vertices x 2 floats (u, v),
-// materials x u32 (material numbers), segments x 20 bytes (+4 = vertex
-// count), segments x (u32 node, u32 first vertex).
-void ConvertSlb(const Archive& ar, const Member& m, const std::vector<uint8_t>& d) {
+// material 0x40 texture name ("PROCEDURAL" = made by the game: the number
+// plates), 4 u32, u32 has texture, 10 u32, u16, u32 (0x5042e0). u32 LOD
+// count, u32 has distances, LOD count - 1 floats. Per LOD: u32 mesh count;
+// per mesh u32 segments, u32 vertices, u32 triangles, u32 materials;
+// vertices x 32 bytes (model space: x, y, z, -, -, -, u, v; LOD 0 only, a
+// copy of the next array in the others), vertices x 32 bytes (the same in
+// the node's own space), vertices x 12 (normals), triangles x 3 u16,
+// vertices x 2 floats (u, v), materials x u32 (material numbers), segments
+// x 20 bytes (+4 = vertex count), segments x (u32 node, u32 first vertex).
+// The game numbers the nodes by walking the tree (0x5028f0: a node's
+// children, then each child's subtree; 0 = the object itself), which in
+// every file is the file order + 1. .mot and .col files use those numbers.
+struct SlbModel {
+  std::string name, archive, obj;  // obj = the OBJ written ("" = only loaded for animations)
+  struct Node {
+    std::string name;
+    double m[16];
+    int parent = -1;
+    double w[16];
+    bool done = false;
+  };
+  std::vector<Node> nodes;
+  std::vector<std::string> mats;  // texture per material ("" = none)
+  uint32_t lods = 0;
+  struct Mesh {
+    std::vector<float> pos, nrm, uv;  // per vertex, in its node's own space
+    std::vector<uint16_t> tri;
+    std::vector<int> owner;  // node per vertex (-1 = none)
+    int mat = 0;
+  };
+  std::vector<Mesh> meshes;  // LOD 0
+  // Model-space matrix of node i: its own matrix times its parent's (row vectors).
+  const double* World(int i) {
+    Node& n = nodes[i];
+    if (n.done) return n.w;
+    n.done = true;  // also guards against loops
+    std::memcpy(n.w, n.m, sizeof n.w);
+    if (n.parent >= 0 && n.parent < static_cast<int>(nodes.size()) && n.parent != i) {
+      const double* q = World(n.parent);
+      for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c) {
+          double s = 0;
+          for (int k = 0; k < 4; ++k) s += n.m[r * 4 + k] * q[k * 4 + c];
+          n.w[r * 4 + c] = s;
+        }
+    }
+    return n.w;
+  }
+};
+std::vector<SlbModel> g_slb;
+
+bool ParseSlb(const std::vector<uint8_t>& d, SlbModel& M, std::string& err) {
   size_t p = 0;
-  std::string err;
   auto need = [&](size_t n) {
     if (p + n > d.size()) {
       if (err.empty()) err = Fmt("cut short at byte %zu", p);
@@ -1117,59 +1169,28 @@ void ConvertSlb(const Archive& ar, const Member& m, const std::vector<uint8_t>& 
     p += 4;
     return v;
   };
-  struct Node {
-    std::string name;
-    double m[16];
-    int parent = -1;
-    double w[16];
-    bool done = false;
-  };
-  std::vector<Node> nodes(std::min<uint32_t>(u32(), 4096));
-  for (Node& n : nodes) {
+  M.nodes.resize(std::min<uint32_t>(u32(), 4096));
+  for (SlbModel::Node& n : M.nodes) {
     if (!need(0x80 + 64 + 60)) break;
     n.name = std::string(reinterpret_cast<const char*>(&d[p]), strnlen(reinterpret_cast<const char*>(&d[p]), 0x80));
     p += 0x80;
     for (double& v : n.m) v = F32(&d[p]), p += 4;
     p += 60;
   }
-  for (Node& n : nodes) n.parent = static_cast<int32_t>(u32());
-  std::vector<std::string> mats(std::min<uint32_t>(u32(), 4096));
-  for (std::string& t : mats) {
+  for (SlbModel::Node& n : M.nodes) n.parent = static_cast<int32_t>(u32());
+  M.mats.resize(std::min<uint32_t>(u32(), 4096));
+  for (std::string& t : M.mats) {
     if (!need(0x40 + 66)) break;
     t = std::string(reinterpret_cast<const char*>(&d[p]), strnlen(reinterpret_cast<const char*>(&d[p]), 0x40));
     if (t == "PROCEDURAL") t.clear();
     p += 0x40 + 66;
   }
-  const uint32_t lods = u32();
-  if (u32() && lods) p += 4ull * (lods - 1);
-  // World matrices: own matrix times the parent's (row vectors).
-  std::function<const double*(int)> world = [&](int i) -> const double* {
-    Node& n = nodes[i];
-    if (n.done) return n.w;
-    n.done = true;  // also guards against loops
-    std::memcpy(n.w, n.m, sizeof n.w);
-    if (n.parent >= 0 && n.parent < static_cast<int>(nodes.size()) && n.parent != i) {
-      const double* q = world(n.parent);
-      for (int r = 0; r < 4; ++r)
-        for (int c = 0; c < 4; ++c) {
-          double s = 0;
-          for (int k = 0; k < 4; ++k) s += n.m[r * 4 + k] * q[k * 4 + c];
-          n.w[r * 4 + c] = s;
-        }
-    }
-    return n.w;
-  };
-  const std::string dir = Join("models", SafeFile(ar.name()));
-  const std::string stem = SafeFile(StripExt(m.name));
-  std::string obj = "# " + m.name + " from " + ar.name() + " (LOD 0 of " + std::to_string(lods) +
-                    "), written by mcm2res\n# One group per part (node); feet. The game is left-handed; z is negated "
-                    "here so the model is not mirrored.\nmtllib " + stem + ".mtl\n";
-  size_t nv = 0, nf = 0;
-  long base = 1;
-  const uint32_t meshes = lods ? u32() : 0;
+  M.lods = u32();
+  if (u32() && M.lods) p += 4ull * (M.lods - 1);
+  const uint32_t meshes = M.lods ? u32() : 0;
   for (uint32_t mi = 0; mi < meshes && err.empty(); ++mi) {
     const uint32_t nseg = u32(), nvert = u32(), ntri = u32(), nmat = u32();
-    if (nseg > 100000 || nvert > 1000000 || ntri > 1000000 || nmat > 1000) {
+    if (nseg > 100000 || nvert > 65536 || ntri > 1000000 || nmat > 1000) {
       err = Fmt("bad mesh %u header", mi);
       break;
     }
@@ -1185,28 +1206,81 @@ void ConvertSlb(const Archive& ar, const Member& m, const std::vector<uint8_t>& 
     if (!need(8ull * nvert)) break;
     const size_t uvs = p;
     p += 8ull * nvert;
-    int mat = 0;
+    SlbModel::Mesh me;
     for (uint32_t i = 0; i < nmat; ++i) {
       const uint32_t v = u32();
-      if (i == 0) mat = static_cast<int>(v);
+      if (i == 0) me.mat = static_cast<int>(v);
     }
     if (!need(28ull * nseg)) break;
     const size_t segs = p;
     p += 28ull * nseg;
-    // Vertices in model space: local position times the node's world matrix.
-    std::vector<int> owner(nvert, -1);
+    me.owner.assign(nvert, -1);
     for (uint32_t s = 0; s < nseg; ++s) {
       const uint32_t cnt = U32(&d[segs + 20 * s + 4]);
       const uint32_t node = U32(&d[segs + 20ull * nseg + 8 * s]), first = U32(&d[segs + 20ull * nseg + 8 * s + 4]);
-      if (node >= nodes.size()) continue;
-      for (uint32_t k = first; k < first + cnt && k < nvert; ++k) owner[k] = static_cast<int>(node);
+      if (node >= M.nodes.size()) continue;
+      for (uint32_t k = first; k < first + cnt && k < nvert; ++k) me.owner[k] = static_cast<int>(node);
     }
-    std::string vs, vts, vns;
     for (uint32_t k = 0; k < nvert; ++k) {
-      double x = F32(&d[local + 32 * k]), y = F32(&d[local + 32 * k + 4]), z = F32(&d[local + 32 * k + 8]);
-      double nx = F32(&d[normals + 12 * k]), ny = F32(&d[normals + 12 * k + 4]), nz = F32(&d[normals + 12 * k + 8]);
-      if (owner[k] >= 0) {
-        const double* w = world(owner[k]);
+      for (int c = 0; c < 3; ++c) me.pos.push_back(F32(&d[local + 32 * k + 4 * c]));
+      for (int c = 0; c < 3; ++c) me.nrm.push_back(F32(&d[normals + 12 * k + 4 * c]));
+      for (int c = 0; c < 2; ++c) me.uv.push_back(F32(&d[uvs + 8 * k + 4 * c]));
+    }
+    for (uint32_t t = 0; t < 3 * ntri; ++t) {
+      const uint16_t v = static_cast<uint16_t>(d[tris + 2 * t] | d[tris + 2 * t + 1] << 8);
+      me.tri.push_back(v);
+    }
+    for (uint32_t t = 0; t < ntri; ++t)
+      if (me.tri[3 * t] >= nvert || me.tri[3 * t + 1] >= nvert || me.tri[3 * t + 2] >= nvert) {
+        err = Fmt("mesh %u: corner out of range", mi);
+        break;
+      }
+    M.meshes.push_back(std::move(me));
+  }
+  if (err.empty() && M.meshes.empty()) err = "no meshes";
+  return err.empty();
+}
+
+std::string MtlText(const std::vector<std::string>& mats, const std::string& tex_dir) {
+  std::string mtl;
+  for (size_t i = 0; i < mats.size(); ++i) {
+    mtl += Fmt("newmtl mat%d\nKd 1 1 1\n", static_cast<int>(i));
+    if (!mats[i].empty()) mtl += "map_Kd " + tex_dir + TextureKey(mats[i]) + ".png\n";
+    mtl += "\n";
+  }
+  if (mats.empty()) mtl += "newmtl mat0\nKd 1 1 1\n";
+  return mtl;
+}
+
+// Writes LOD 0 of a binary model as OBJ + MTL into models\<archive>\, in its
+// rest pose, and keeps it for animations (.mot) and collision shapes (.col).
+void ConvertSlb(const Archive& ar, const Member& m, const std::vector<uint8_t>& d) {
+  SlbModel M;
+  M.name = m.name;
+  M.archive = ar.name();
+  std::string err;
+  if (!ParseSlb(d, M, err)) {
+    Log("  %s %s: %s", ar.name().c_str(), m.name.c_str(), err.c_str());
+    ++g_count.failed;
+    return;
+  }
+  const std::string dir = Join("models", SafeFile(ar.name()));
+  const std::string stem = SafeFile(StripExt(m.name));
+  std::string obj = "# " + m.name + " from " + ar.name() + " (LOD 0 of " + std::to_string(M.lods) +
+                    "), written by mcm2res\n# One group per part (node); feet. The game is left-handed; z is negated "
+                    "here so the model is not mirrored.\nmtllib " + stem + ".mtl\n";
+  size_t nv = 0, nf = 0;
+  long base = 1;
+  for (size_t mi = 0; mi < M.meshes.size(); ++mi) {
+    const SlbModel::Mesh& me = M.meshes[mi];
+    const size_t nvert = me.owner.size();
+    std::string vs, vts, vns;
+    for (size_t k = 0; k < nvert; ++k) {
+      double x = me.pos[3 * k], y = me.pos[3 * k + 1], z = me.pos[3 * k + 2];
+      double nx = me.nrm[3 * k], ny = me.nrm[3 * k + 1], nz = me.nrm[3 * k + 2];
+      if (me.owner[k] >= 0) {
+        // Model space: the local position times the node's world matrix.
+        const double* w = M.World(me.owner[k]);
         const double X = x * w[0] + y * w[4] + z * w[8] + w[12], Y = x * w[1] + y * w[5] + z * w[9] + w[13],
                      Z = x * w[2] + y * w[6] + z * w[10] + w[14];
         const double NX = nx * w[0] + ny * w[4] + nz * w[8], NY = nx * w[1] + ny * w[5] + nz * w[9],
@@ -1216,53 +1290,672 @@ void ConvertSlb(const Archive& ar, const Member& m, const std::vector<uint8_t>& 
         if (l > 0) nx = NX / l, ny = NY / l, nz = NZ / l;
       }
       vs += Fmt("v %.5f %.5f %.5f\n", x, y, -z);
-      vts += Fmt("vt %.6f %.6f\n", F32(&d[uvs + 8 * k]), 1.0 - F32(&d[uvs + 8 * k + 4]));
+      vts += Fmt("vt %.6f %.6f\n", me.uv[2 * k], 1.0 - me.uv[2 * k + 1]);
       vns += Fmt("vn %.5f %.5f %.5f\n", nx, ny, -nz);
     }
     obj += vs + vts + vns;
     // Triangles, grouped by the part their first corner belongs to.
     std::map<int, std::string> groups;
-    for (uint32_t t = 0; t < ntri; ++t) {
-      const uint32_t a = d[tris + 6 * t] | d[tris + 6 * t + 1] << 8, b = d[tris + 6 * t + 2] | d[tris + 6 * t + 3] << 8,
-                     c = d[tris + 6 * t + 4] | d[tris + 6 * t + 5] << 8;
-      if (a >= nvert || b >= nvert || c >= nvert) continue;
+    for (size_t t = 0; t + 2 < me.tri.size(); t += 3) {
+      const uint32_t a = me.tri[t], b = me.tri[t + 1], c = me.tri[t + 2];
       const long A = base + a, B = base + c, C = base + b;  // z negated: swap two corners
-      groups[owner[a]] += Fmt("f %ld/%ld/%ld %ld/%ld/%ld %ld/%ld/%ld\n", A, A, A, B, B, B, C, C, C);
+      groups[me.owner[a]] += Fmt("f %ld/%ld/%ld %ld/%ld/%ld %ld/%ld/%ld\n", A, A, A, B, B, B, C, C, C);
       ++nf;
     }
     for (auto& g : groups) {
-      const std::string part = g.first >= 0 ? nodes[g.first].name : "unattached";
-      obj += Fmt("g %s_mesh%u\nusemtl mat%d\n", SafeFile(part).c_str(), mi, mat) + g.second;
+      const std::string part = g.first >= 0 ? M.nodes[g.first].name : "unattached";
+      obj += Fmt("g %s_mesh%u\nusemtl mat%d\n", SafeFile(part).c_str(), static_cast<unsigned>(mi), me.mat) + g.second;
     }
     base += static_cast<long>(nvert);
     nv += nvert;
   }
-  if (!err.empty() || meshes == 0) {
-    Log("  %s %s: %s", ar.name().c_str(), m.name.c_str(), err.empty() ? "no meshes" : err.c_str());
-    ++g_count.failed;
-    return;
-  }
-  std::string mtl;
-  for (size_t i = 0; i < mats.size(); ++i) {
-    mtl += Fmt("newmtl mat%d\nKd 1 1 1\n", static_cast<int>(i));
-    if (!mats[i].empty()) mtl += "map_Kd ../../textures/" + TextureKey(mats[i]) + ".png\n";
-    mtl += "\n";
-  }
-  if (mats.empty()) mtl += "newmtl mat0\nKd 1 1 1\n";
   MakeDirs(Join(g_out, dir));
   WriteText(Join(g_out, Join(dir, stem + ".obj")), obj);
-  WriteText(Join(g_out, Join(dir, stem + ".mtl")), mtl);
+  WriteText(Join(g_out, Join(dir, stem + ".mtl")), MtlText(M.mats, "../../textures/"));
   ModelEntry e;
   e.name = m.name;
   e.archive = ar.name();
   e.obj = Join(dir, stem + ".obj");
   std::string tex;
-  for (const std::string& t : mats)
+  for (const std::string& t : M.mats)
     if (!t.empty()) tex += (tex.empty() ? "" : ", ") + t;
-  e.info = Fmt("%zu vertices, %zu triangles, %zu parts, %u LODs", nv, nf, nodes.size(), lods) +
+  e.info = Fmt("%zu vertices, %zu triangles, %zu parts, %u LODs", nv, nf, M.nodes.size(), M.lods) +
            (tex.empty() ? "" : ", textures " + tex);
   g_models.push_back(e);
   ++g_count.models;
+  M.obj = e.obj;
+  g_slb.push_back(std::move(M));
+}
+
+// ---------------------------------------------------------------- animations (.mot) and collision (.col)
+
+// Kept until every archive has been read, so that each can find its model.
+struct Pending {
+  std::string name, archive;
+  std::vector<uint8_t> d;
+};
+std::vector<Pending> g_mots, g_cols;
+std::vector<ModelEntry> g_anims, g_colls;
+
+int LongestCommon(const std::string& a, const std::string& b) {
+  int best = 0;
+  for (size_t i = 0; i < a.size(); ++i)
+    for (size_t j = 0; j < b.size(); ++j) {
+      int k = 0;
+      while (i + k < a.size() && j + k < b.size() && a[i + k] == b[j + k]) ++k;
+      best = std::max(best, k);
+    }
+  return best;
+}
+
+// The model a .col or .mot belongs to: the same name, else (for .col) a model
+// whose name starts with it ("Rider" -> "Rider02"). -1 = none loaded.
+int ModelByName(const std::string& member, size_t need_nodes, bool prefix) {
+  const std::string stem = Lower(StripExt(member));
+  int best = -1;
+  for (size_t i = 0; i < g_slb.size(); ++i) {
+    const std::string s = Lower(StripExt(g_slb[i].name));
+    if (g_slb[i].nodes.size() < need_nodes) continue;
+    if (s == stem) return static_cast<int>(i);
+    if (prefix && s.rfind(stem, 0) == 0 && (best < 0 || s.size() < g_slb[best].name.size())) best = static_cast<int>(i);
+  }
+  return best;
+}
+
+// .col collision shapes (0x43adb0; read for an object's model by the object
+// loader, and for the bike and rider from BIKE.RES): u32 type. Type 0 = one
+// body; type 1 = u32 count, u32 (unused), count x (u32 model node, numbered
+// as in the .slb comment, 0 = the whole object; body) (0x43aff0), with
+// points in that node's own space. A body (0x43ae70): 12 floats (3x3
+// matrix + offset, row vectors; identity in every file), u32, u32 has mesh
+// [u32 n, n x vec3 points, triangle tree (0x42f010)], u32 has contact
+// points [point tree (0x42f0b0)]. Both trees are box trees read depth
+// first: float f; f >= 0 is a branch (f = box volume, then centre vec3,
+// half size vec3, then the two children), f < 0 a leaf. A triangle leaf
+// (0x42eec0) is the plane (d, then normal vec3; normal . p + d = 0) and 3 u16
+// point numbers; a contact-point leaf is a vec3 (the points the bike and
+// rider touch the ground with).
+struct ColShape {
+  struct Part {
+    int node = -1;  // -1 = single body
+    double m[12];
+    std::vector<float> pts, contacts;
+    std::vector<uint16_t> tris;
+  };
+  std::vector<Part> parts;
+};
+
+bool ParseCol(const std::vector<uint8_t>& d, ColShape& C, std::string& err) {
+  size_t p = 0;
+  auto need = [&](size_t n) {
+    if (p + n > d.size()) {
+      if (err.empty()) err = Fmt("cut short at byte %zu", p);
+      return false;
+    }
+    return true;
+  };
+  auto u32 = [&]() -> uint32_t {
+    if (!need(4)) return 0;
+    const uint32_t v = U32(&d[p]);
+    p += 4;
+    return v;
+  };
+  auto f32 = [&]() -> float {
+    if (!need(4)) return 0;
+    const float v = F32(&d[p]);
+    p += 4;
+    return v;
+  };
+  std::function<void(ColShape::Part&, bool, int)> tree = [&](ColShape::Part& P, bool tris, int depth) {
+    if (!err.empty()) return;
+    if (depth > 200) {
+      err = "tree too deep";
+      return;
+    }
+    const float f = f32();
+    if (f >= 0) {
+      for (int i = 0; i < 6; ++i) f32();
+      tree(P, tris, depth + 1);
+      tree(P, tris, depth + 1);
+    } else if (tris) {
+      for (int i = 0; i < 4; ++i) f32();
+      if (!need(6)) return;
+      for (int i = 0; i < 3; ++i) P.tris.push_back(static_cast<uint16_t>(d[p + 2 * i] | d[p + 2 * i + 1] << 8));
+      p += 6;
+    } else {
+      for (int i = 0; i < 3; ++i) P.contacts.push_back(f32());
+    }
+  };
+  auto body = [&](ColShape::Part& P) {
+    for (double& v : P.m) v = f32();
+    u32();
+    if (u32()) {
+      const uint32_t n = u32();
+      if (n > 1000000 || !need(12ull * n)) {
+        if (err.empty()) err = "bad point count";
+        return;
+      }
+      for (uint32_t i = 0; i < 3 * n; ++i) P.pts.push_back(f32());
+      tree(P, true, 0);
+    }
+    if (err.empty() && u32()) tree(P, false, 0);
+  };
+  const uint32_t type = u32();
+  if (type == 0) {
+    C.parts.emplace_back();
+    body(C.parts.back());
+  } else if (type == 1) {
+    const uint32_t n = u32();
+    u32();
+    for (uint32_t i = 0; i < n && i < 4096 && err.empty(); ++i) {
+      C.parts.emplace_back();
+      C.parts.back().node = static_cast<int>(u32());
+      body(C.parts.back());
+    }
+  } else {
+    err = Fmt("unknown type %u", type);
+  }
+  if (err.empty() && p != d.size()) err = Fmt("%zu bytes left over", d.size() - p);
+  return err.empty();
+}
+
+// Writes collision\<archive>\<name>.obj: one group of triangles per part
+// (placed with the model's parts when the model is loaded) and the contact
+// points as small diamonds.
+void ConvertCollision(const Pending& c) {
+  ColShape C;
+  std::string err;
+  if (!ParseCol(c.d, C, err)) {
+    Log("  collision %s %s: %s", c.archive.c_str(), c.name.c_str(), err.c_str());
+    ++g_count.failed;
+    return;
+  }
+  size_t need_nodes = 0;
+  for (const auto& P : C.parts) need_nodes = std::max<size_t>(need_nodes, P.node > 0 ? P.node : 0);
+  const int mi = need_nodes ? ModelByName(c.name, need_nodes, true) : -1;
+  SlbModel* M = mi >= 0 ? &g_slb[mi] : nullptr;
+  const std::string dir = Join("collision", SafeFile(c.archive));
+  const std::string stem = SafeFile(StripExt(c.name));
+  std::string obj = "# Collision shape " + c.name + " from " + c.archive + ", written by mcm2res\n";
+  if (need_nodes)
+    obj += M ? "# Parts placed as in the rest pose of " + M->name + " (" + M->archive + ").\n"
+             : "# Parts belong to a model that was not loaded; each is in its own part's space.\n";
+  obj += "# Feet. The game is left-handed; z is negated here so the shape is not mirrored.\n";
+  long base = 1;
+  size_t ntri = 0, ncon = 0;
+  for (const auto& P : C.parts) {
+    double w[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    std::string part = P.node < 0 ? "shape" : P.node == 0 ? "object" : Fmt("node%d", P.node);
+    if (M && P.node > 0 && P.node <= static_cast<int>(M->nodes.size())) {
+      std::memcpy(w, M->World(P.node - 1), sizeof w);
+      part = M->nodes[P.node - 1].name;
+    }
+    // The body's own matrix first (identity in the game's files), then the part's.
+    auto place = [&](double x, double y, double z, double* o) {
+      const double X = x * P.m[0] + y * P.m[3] + z * P.m[6] + P.m[9], Y = x * P.m[1] + y * P.m[4] + z * P.m[7] + P.m[10],
+                   Z = x * P.m[2] + y * P.m[5] + z * P.m[8] + P.m[11];
+      o[0] = X * w[0] + Y * w[4] + Z * w[8] + w[12];
+      o[1] = X * w[1] + Y * w[5] + Z * w[9] + w[13];
+      o[2] = X * w[2] + Y * w[6] + Z * w[10] + w[14];
+    };
+    const size_t np = P.pts.size() / 3;
+    if (np) {
+      obj += "g " + SafeFile(part) + "\n";
+      for (size_t i = 0; i < np; ++i) {
+        double o[3];
+        place(P.pts[3 * i], P.pts[3 * i + 1], P.pts[3 * i + 2], o);
+        obj += Fmt("v %.5f %.5f %.5f\n", o[0], o[1], -o[2]);
+      }
+      for (size_t t = 0; t + 2 < P.tris.size(); t += 3) {
+        if (P.tris[t] >= np || P.tris[t + 1] >= np || P.tris[t + 2] >= np) continue;
+        obj += Fmt("f %ld %ld %ld\n", base + P.tris[t], base + P.tris[t + 2], base + P.tris[t + 1]);
+        ++ntri;
+      }
+      base += static_cast<long>(np);
+    }
+    if (!P.contacts.empty()) {
+      obj += "g " + SafeFile(part) + "_contact_points\n";
+      const double r = 0.08;
+      for (size_t i = 0; i + 2 < P.contacts.size(); i += 3) {
+        double o[3];
+        place(P.contacts[i], P.contacts[i + 1], P.contacts[i + 2], o);
+        o[2] = -o[2];
+        obj += Fmt("v %.5f %.5f %.5f\nv %.5f %.5f %.5f\nv %.5f %.5f %.5f\nv %.5f %.5f %.5f\nv %.5f %.5f %.5f\nv %.5f %.5f %.5f\n",
+                   o[0] + r, o[1], o[2], o[0] - r, o[1], o[2], o[0], o[1] + r, o[2], o[0], o[1] - r, o[2], o[0], o[1],
+                   o[2] + r, o[0], o[1], o[2] - r);
+        static const int f[8][3] = {{0, 2, 4}, {2, 1, 4}, {1, 3, 4}, {3, 0, 4}, {2, 0, 5}, {1, 2, 5}, {3, 1, 5}, {0, 3, 5}};
+        for (const auto& t : f) obj += Fmt("f %ld %ld %ld\n", base + t[0], base + t[1], base + t[2]);
+        base += 6;
+        ++ncon;
+      }
+    }
+  }
+  MakeDirs(Join(g_out, dir));
+  WriteText(Join(g_out, Join(dir, stem + ".obj")), obj);
+  ModelEntry e;
+  e.name = c.name;
+  e.archive = c.archive;
+  e.obj = Join(dir, stem + ".obj");
+  e.info = Fmt("%zu triangles", ntri) + (ncon ? Fmt(", %zu contact points", ncon) : "") +
+           (C.parts.size() > 1 || need_nodes ? Fmt(", %zu parts", C.parts.size()) : "") +
+           (M ? ", on " + M->name : need_nodes ? ", model not loaded" : "");
+  g_colls.push_back(e);
+  Log("  collision %s: %zu parts, %zu triangles, %zu contact points%s", c.name.c_str(), C.parts.size(), ntri, ncon,
+      M ? (", model " + M->name).c_str() : "");
+}
+
+// .mot animations (0x4a7290; ".mot" members, ".vue" goes elsewhere): u32
+// frames, u32 records per frame, then frames x records x 37 bytes: u8 node
+// (numbered as in the .slb comment), the node's Z axis (vec3), its Y axis
+// (vec3; X = Y x Z) and its position relative to its parent, i.e. the node's
+// matrix for that frame. 256 more bytes follow in every file (unused).
+// The file does not name its model: the rider's (BIKE.RES, 16 nodes) fit
+// any rider, the "b..." ones the bikes, OBJECTS.RES's the MODELS.RES model of
+// the same or a similar name (flight paths move the root in track
+// coordinates). Played here at 30 frames per second (assumed).
+struct Motion {
+  std::string name, archive;
+  uint32_t frames = 0, per = 0;
+  std::vector<uint8_t> id;  // frames x per
+  std::vector<float> v;     // frames x per x 9
+};
+
+bool ParseMot(const Pending& m, Motion& o, std::string& err) {
+  if (m.d.size() < 8) return err = "too short", false;
+  o.name = m.name;
+  o.archive = m.archive;
+  o.frames = U32(&m.d[0]);
+  o.per = U32(&m.d[4]);
+  const uint64_t n = static_cast<uint64_t>(o.frames) * o.per;
+  if (o.frames == 0 || o.per == 0 || o.per > 256 || 8 + n * 37 > m.d.size())
+    return err = Fmt("bad header (%u frames x %u)", o.frames, o.per), false;
+  for (uint64_t i = 0; i < n; ++i) {
+    o.id.push_back(m.d[8 + 37 * i]);
+    for (int k = 0; k < 9; ++k) o.v.push_back(F32(&m.d[8 + 37 * i + 1 + 4 * k]));
+  }
+  if (8 + n * 37 + 256 != m.d.size()) Log("  motion %s: %zu bytes after the frames", m.name.c_str(), m.d.size() - 8 - n * 37);
+  return true;
+}
+
+// Picks the model a motion fits: the same name; else among the models whose
+// rest positions match the motion's first frame (parts with a parent only),
+// the one sharing the longest piece of name (4+ letters), then the game's
+// usual rider and bike, then the closest fit.
+int ModelForMotion(const Motion& mo, double* fit) {
+  int maxid = 0;
+  for (uint8_t i : mo.id) maxid = std::max<int>(maxid, i);
+  const int same = ModelByName(mo.name, maxid, false);
+  *fit = 0;
+  if (same >= 0) return same;
+  std::vector<std::pair<double, int>> err;
+  double best = 1e30;
+  for (size_t i = 0; i < g_slb.size(); ++i) {
+    const SlbModel& M = g_slb[i];
+    if (M.nodes.size() < static_cast<size_t>(maxid)) continue;
+    double e = 0;
+    int n = 0;
+    for (uint32_t k = 0; k < mo.per; ++k) {
+      const int id = mo.id[k];
+      if (id < 1 || M.nodes[id - 1].parent < 0) continue;
+      const double* t = &M.nodes[id - 1].m[12];
+      const float* v = &mo.v[9 * k + 6];
+      e += std::sqrt((t[0] - v[0]) * (t[0] - v[0]) + (t[1] - v[1]) * (t[1] - v[1]) + (t[2] - v[2]) * (t[2] - v[2]));
+      ++n;
+    }
+    if (n) e /= n;
+    err.push_back({e, static_cast<int>(i)});
+    best = std::min(best, e);
+  }
+  const std::string stem = Lower(StripExt(mo.name));
+  int pick = -1, pick_lcs = -1, pick_pref = -1;
+  double pick_e = 0;
+  for (const auto& c : err) {
+    if (c.first > best + 0.15) continue;
+    const std::string s = Lower(StripExt(g_slb[c.second].name));
+    int lcs = LongestCommon(stem, s);
+    if (lcs < 4) lcs = 0;
+    const int pref = s == "rider02" || s == "honda";
+    if (pick < 0 || lcs > pick_lcs || (lcs == pick_lcs && pref > pick_pref) ||
+        (lcs == pick_lcs && pref == pick_pref && c.first < pick_e)) {
+      pick = c.second, pick_lcs = lcs, pick_pref = pref, pick_e = c.first;
+    }
+  }
+  *fit = pick_e;
+  return pick;
+}
+
+std::string JsonEsc(const std::string& s) {
+  std::string o;
+  for (char c : s) {
+    if (c == '"' || c == '\\') o += '\\', o += c;
+    else if (static_cast<unsigned char>(c) < 0x20) o += ' ';
+    else o += c;
+  }
+  return o;
+}
+
+std::string Base64(const std::vector<uint8_t>& d) {
+  static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string o;
+  o.reserve((d.size() + 2) / 3 * 4);
+  for (size_t i = 0; i < d.size(); i += 3) {
+    const uint32_t v = d[i] << 16 | (i + 1 < d.size() ? d[i + 1] << 8 : 0) | (i + 2 < d.size() ? d[i + 2] : 0);
+    o += t[v >> 18 & 63];
+    o += t[v >> 12 & 63];
+    o += i + 1 < d.size() ? t[v >> 6 & 63] : '=';
+    o += i + 2 < d.size() ? t[v & 63] : '=';
+  }
+  return o;
+}
+
+// A node matrix (rows = X, Y, Z axes, then position; left-handed) as glTF
+// translation, rotation (x, y, z, w) and scale (right-handed: z negated).
+void ToTrs(const double* x, const double* y, const double* z, const double* t, double* T, double* Q, double* S) {
+  // Column-vector matrix A has the axes as columns; mirrored: A' = F A F, F = diag(1, 1, -1).
+  double c[3][3] = {{x[0], x[1], -x[2]}, {y[0], y[1], -y[2]}, {-z[0], -z[1], z[2]}};  // columns
+  for (int i = 0; i < 3; ++i) {
+    S[i] = std::sqrt(c[i][0] * c[i][0] + c[i][1] * c[i][1] + c[i][2] * c[i][2]);
+    if (S[i] > 1e-12)
+      for (int k = 0; k < 3; ++k) c[i][k] /= S[i];
+  }
+  const double det = c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) - c[1][0] * (c[0][1] * c[2][2] - c[0][2] * c[2][1]) +
+                     c[2][0] * (c[0][1] * c[1][2] - c[0][2] * c[1][1]);
+  if (det < 0) {
+    S[0] = -S[0];
+    for (int k = 0; k < 3; ++k) c[0][k] = -c[0][k];
+  }
+  // R[row][col] = c[col][row].
+  const double r00 = c[0][0], r11 = c[1][1], r22 = c[2][2];
+  const double tr = r00 + r11 + r22;
+  double w, qx, qy, qz;
+  if (tr > 0) {
+    const double s = std::sqrt(tr + 1) * 2;
+    w = s / 4, qx = (c[1][2] - c[2][1]) / s, qy = (c[2][0] - c[0][2]) / s, qz = (c[0][1] - c[1][0]) / s;
+  } else if (r00 > r11 && r00 > r22) {
+    const double s = std::sqrt(1 + r00 - r11 - r22) * 2;
+    w = (c[1][2] - c[2][1]) / s, qx = s / 4, qy = (c[1][0] + c[0][1]) / s, qz = (c[2][0] + c[0][2]) / s;
+  } else if (r11 > r22) {
+    const double s = std::sqrt(1 + r11 - r00 - r22) * 2;
+    w = (c[2][0] - c[0][2]) / s, qx = (c[1][0] + c[0][1]) / s, qy = s / 4, qz = (c[2][1] + c[1][2]) / s;
+  } else {
+    const double s = std::sqrt(1 + r22 - r00 - r11) * 2;
+    w = (c[0][1] - c[1][0]) / s, qx = (c[2][0] + c[0][2]) / s, qy = (c[2][1] + c[1][2]) / s, qz = s / 4;
+  }
+  const double l = std::sqrt(w * w + qx * qx + qy * qy + qz * qz);
+  Q[0] = qx / l, Q[1] = qy / l, Q[2] = qz / l, Q[3] = w / l;
+  T[0] = t[0], T[1] = t[1], T[2] = -t[2];
+}
+
+// Writes animations\<model>.gltf: the model (LOD 0, one mesh per part, in the
+// part's own space, textured from ..\textures\) with each motion as an
+// animation; Blender's glTF import lists them as actions.
+void WriteAnimated(SlbModel& M, const std::vector<std::pair<Motion, double>>& motions) {
+  std::vector<uint8_t> bin;
+  std::string views, accs;
+  int nview = 0, nacc = 0;
+  auto add = [&](const void* p, size_t n, int target) {
+    while (bin.size() % 4) bin.push_back(0);
+    const size_t off = bin.size();
+    bin.insert(bin.end(), static_cast<const uint8_t*>(p), static_cast<const uint8_t*>(p) + n);
+    views += Fmt("%s{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu%s}", nview ? "," : "", off, n,
+                 target ? Fmt(",\"target\":%d", target).c_str() : "");
+    return nview++;
+  };
+  auto acc = [&](int view, int ctype, size_t count, const char* type, const std::string& extra) {
+    accs += Fmt("%s{\"bufferView\":%d,\"componentType\":%d,\"count\":%zu,\"type\":\"%s\"%s}", nacc ? "," : "", view, ctype,
+                count, type, extra.c_str());
+    return nacc++;
+  };
+  auto minmax = [](const std::vector<float>& v, int n) {
+    std::vector<float> lo(n, 1e30f), hi(n, -1e30f);
+    for (size_t i = 0; i < v.size(); ++i) lo[i % n] = std::min(lo[i % n], v[i]), hi[i % n] = std::max(hi[i % n], v[i]);
+    std::string s = ",\"min\":[";
+    for (int i = 0; i < n; ++i) s += Fmt("%s%g", i ? "," : "", lo[i]);
+    s += "],\"max\":[";
+    for (int i = 0; i < n; ++i) s += Fmt("%s%g", i ? "," : "", hi[i]);
+    return s + "]";
+  };
+  // Inverse of a node's model-space matrix (row vectors, affine).
+  auto inverse = [](const double* w, double* o) {
+    const double a = w[0], b = w[1], c = w[2], d = w[4], e = w[5], f = w[6], g = w[8], h = w[9], i = w[10];
+    const double det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    const double k = std::fabs(det) > 1e-20 ? 1 / det : 0;
+    double r[9] = {(e * i - f * h) * k, (c * h - b * i) * k, (b * f - c * e) * k, (f * g - d * i) * k, (a * i - c * g) * k,
+                   (c * d - a * f) * k, (d * h - e * g) * k, (b * g - a * h) * k, (a * e - b * d) * k};
+    std::memset(o, 0, 16 * sizeof(double));
+    for (int y = 0; y < 3; ++y)
+      for (int x = 0; x < 3; ++x) o[y * 4 + x] = r[y * 3 + x];
+    for (int x = 0; x < 3; ++x) o[12 + x] = -(w[12] * r[x] + w[13] * r[3 + x] + w[14] * r[6 + x]);
+    o[15] = 1;
+  };
+  // Meshes: per node, per source mesh, one primitive in the node's space.
+  const size_t nn = M.nodes.size();
+  std::vector<std::string> prims(nn);
+  size_t ntris = 0;
+  for (const SlbModel::Mesh& me : M.meshes) {
+    std::map<int, std::vector<uint32_t>> by_node;
+    for (size_t t = 0; t + 2 < me.tri.size(); t += 3)
+      if (me.owner[me.tri[t]] >= 0) by_node[me.owner[me.tri[t]]].insert(by_node[me.owner[me.tri[t]]].end(), {me.tri[t], me.tri[t + 1], me.tri[t + 2]});
+    for (auto& kv : by_node) {
+      const int node = kv.first;
+      double inv[16];
+      inverse(M.World(node), inv);
+      std::map<uint32_t, uint32_t> remap;
+      std::vector<float> pos, nrm, uv;
+      std::vector<uint16_t> idx;
+      for (uint32_t v : kv.second) {
+        auto it = remap.find(v);
+        if (it == remap.end()) {
+          double p[3] = {me.pos[3 * v], me.pos[3 * v + 1], me.pos[3 * v + 2]};
+          double n[3] = {me.nrm[3 * v], me.nrm[3 * v + 1], me.nrm[3 * v + 2]};
+          const int o = me.owner[v];
+          if (o >= 0 && o != node) {
+            // A corner on another part: into model space, then into this part's.
+            const double* w = M.World(o);
+            double q[3], m[3];
+            for (int c = 0; c < 3; ++c) q[c] = p[0] * w[c] + p[1] * w[4 + c] + p[2] * w[8 + c] + w[12 + c];
+            for (int c = 0; c < 3; ++c) m[c] = n[0] * w[c] + n[1] * w[4 + c] + n[2] * w[8 + c];
+            for (int c = 0; c < 3; ++c) p[c] = q[0] * inv[c] + q[1] * inv[4 + c] + q[2] * inv[8 + c] + inv[12 + c];
+            for (int c = 0; c < 3; ++c) n[c] = m[0] * inv[c] + m[1] * inv[4 + c] + m[2] * inv[8 + c];
+          }
+          const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+          if (l > 0) n[0] /= l, n[1] /= l, n[2] /= l;
+          else n[1] = 1;
+          pos.insert(pos.end(), {static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(-p[2])});
+          nrm.insert(nrm.end(), {static_cast<float>(n[0]), static_cast<float>(n[1]), static_cast<float>(-n[2])});
+          uv.insert(uv.end(), {me.uv[2 * v], me.uv[2 * v + 1]});
+          it = remap.emplace(v, static_cast<uint32_t>(remap.size())).first;
+        }
+        idx.push_back(static_cast<uint16_t>(it->second));
+      }
+      for (size_t t = 0; t + 2 < idx.size(); t += 3) std::swap(idx[t + 1], idx[t + 2]);  // z negated
+      ntris += idx.size() / 3;
+      const size_t nv = pos.size() / 3;
+      const int ap = acc(add(pos.data(), pos.size() * 4, 34962), 5126, nv, "VEC3", minmax(pos, 3));
+      const int an = acc(add(nrm.data(), nrm.size() * 4, 34962), 5126, nv, "VEC3", "");
+      const int at = acc(add(uv.data(), uv.size() * 4, 34962), 5126, nv, "VEC2", "");
+      const int ai = acc(add(idx.data(), idx.size() * 2, 34963), 5123, idx.size(), "SCALAR", "");
+      const int mat = me.mat >= 0 && me.mat < static_cast<int>(M.mats.size()) ? me.mat : 0;
+      prims[node] += Fmt("%s{\"attributes\":{\"POSITION\":%d,\"NORMAL\":%d,\"TEXCOORD_0\":%d},\"indices\":%d%s}",
+                         prims[node].empty() ? "" : ",", ap, an, at, ai,
+                         M.mats.empty() ? "" : Fmt(",\"material\":%d", mat).c_str());
+    }
+  }
+  // Nodes in the rest pose.
+  std::string nodes, meshes;
+  int nmesh = 0;
+  std::vector<std::vector<int>> kids(nn);
+  std::string roots;
+  for (size_t i = 0; i < nn; ++i) {
+    const int par = M.nodes[i].parent;
+    if (par >= 0 && par < static_cast<int>(nn) && par != static_cast<int>(i)) kids[par].push_back(static_cast<int>(i));
+    else roots += Fmt("%s%zu", roots.empty() ? "" : ",", i);
+  }
+  for (size_t i = 0; i < nn; ++i) {
+    const double* m = M.nodes[i].m;
+    double T[3], Q[4], S[3];
+    ToTrs(m, m + 4, m + 8, m + 12, T, Q, S);
+    nodes += Fmt("%s{\"name\":\"%s\",\"translation\":[%g,%g,%g],\"rotation\":[%g,%g,%g,%g],\"scale\":[%g,%g,%g]", i ? "," : "",
+                 JsonEsc(M.nodes[i].name).c_str(), T[0], T[1], T[2], Q[0], Q[1], Q[2], Q[3], S[0], S[1], S[2]);
+    if (!kids[i].empty()) {
+      nodes += ",\"children\":[";
+      for (size_t k = 0; k < kids[i].size(); ++k) nodes += Fmt("%s%d", k ? "," : "", kids[i][k]);
+      nodes += "]";
+    }
+    if (!prims[i].empty()) {
+      nodes += Fmt(",\"mesh\":%d", nmesh);
+      meshes += Fmt("%s{\"name\":\"%s\",\"primitives\":[%s]}", nmesh ? "," : "", JsonEsc(M.nodes[i].name).c_str(), prims[i].c_str());
+      ++nmesh;
+    }
+    nodes += "}";
+  }
+  // Animations.
+  std::string anims;
+  int nanim = 0;
+  for (const auto& mp : motions) {
+    const Motion& mo = mp.first;
+    std::vector<float> times(mo.frames);
+    for (uint32_t f = 0; f < mo.frames; ++f) times[f] = f / 30.0f;
+    const int at = acc(add(times.data(), times.size() * 4, 0), 5126, times.size(), "SCALAR", minmax(times, 1));
+    // Per node: a value every frame (a frame without the node repeats the last).
+    std::map<int, std::pair<std::vector<float>, std::vector<float>>> ch;  // node -> (T, Q)
+    for (uint32_t k = 0; k < mo.per; ++k) {
+      const int node = mo.id[k] - 1;
+      if (node >= 0 && node < static_cast<int>(nn)) ch[node];
+    }
+    for (auto& kv : ch) {
+      const double* rest = M.nodes[kv.first].m;
+      double T[3], Q[4], S[3];
+      ToTrs(rest, rest + 4, rest + 8, rest + 12, T, Q, S);
+      for (uint32_t f = 0; f < mo.frames; ++f) {
+        for (uint32_t k = 0; k < mo.per; ++k) {
+          const size_t r = static_cast<size_t>(f) * mo.per + k;
+          if (mo.id[r] - 1 != kv.first) continue;
+          const float* v = &mo.v[9 * r];
+          const double z[3] = {v[0], v[1], v[2]}, y[3] = {v[3], v[4], v[5]}, t[3] = {v[6], v[7], v[8]};
+          const double x[3] = {y[1] * z[2] - y[2] * z[1], y[2] * z[0] - y[0] * z[2], y[0] * z[1] - y[1] * z[0]};
+          double q[4];
+          ToTrs(x, y, z, t, T, q, S);
+          // Keep neighbouring rotations on the same side so they blend the short way.
+          if (Q[0] * q[0] + Q[1] * q[1] + Q[2] * q[2] + Q[3] * q[3] < 0)
+            for (double& c : q) c = -c;
+          std::memcpy(Q, q, sizeof Q);
+          break;
+        }
+        for (double c : T) kv.second.first.push_back(static_cast<float>(c));
+        for (double c : Q) kv.second.second.push_back(static_cast<float>(c));
+      }
+    }
+    std::string samplers, channels;
+    int ns = 0;
+    for (auto& kv : ch) {
+      const int aT = acc(add(kv.second.first.data(), kv.second.first.size() * 4, 0), 5126, mo.frames, "VEC3", "");
+      const int aQ = acc(add(kv.second.second.data(), kv.second.second.size() * 4, 0), 5126, mo.frames, "VEC4", "");
+      samplers += Fmt("%s{\"input\":%d,\"output\":%d},{\"input\":%d,\"output\":%d}", ns ? "," : "", at, aT, at, aQ);
+      channels += Fmt("%s{\"sampler\":%d,\"target\":{\"node\":%d,\"path\":\"translation\"}},"
+                      "{\"sampler\":%d,\"target\":{\"node\":%d,\"path\":\"rotation\"}}",
+                      ns ? "," : "", ns, kv.first, ns + 1, kv.first);
+      ns += 2;
+    }
+    if (!ns) continue;
+    anims += Fmt("%s{\"name\":\"%s\",\"samplers\":[%s],\"channels\":[%s]}", nanim ? "," : "",
+                 JsonEsc(StripExt(mo.name)).c_str(), samplers.c_str(), channels.c_str());
+    ++nanim;
+  }
+  // Materials and textures.
+  std::string mats, texs, imgs;
+  int ntex = 0;
+  for (size_t i = 0; i < M.mats.size(); ++i) {
+    mats += Fmt("%s{\"name\":\"mat%zu\",\"pbrMetallicRoughness\":{\"metallicFactor\":0,\"roughnessFactor\":1", i ? "," : "", i);
+    if (!M.mats[i].empty()) {
+      mats += Fmt(",\"baseColorTexture\":{\"index\":%d}", ntex);
+      texs += Fmt("%s{\"source\":%d}", ntex ? "," : "", ntex);
+      imgs += Fmt("%s{\"uri\":\"../textures/%s.png\"}", ntex ? "," : "", JsonEsc(Url(TextureKey(M.mats[i]))).c_str());
+      ++ntex;
+    }
+    mats += "}}";
+  }
+  std::string j = "{\"asset\":{\"version\":\"2.0\",\"generator\":\"mcm2res\"},\"scene\":0,\"scenes\":[{\"name\":\"" +
+                  JsonEsc(StripExt(M.name)) + "\",\"nodes\":[" + roots + "]}],\"nodes\":[" + nodes + "]";
+  if (nmesh) j += ",\"meshes\":[" + meshes + "]";
+  if (!mats.empty()) j += ",\"materials\":[" + mats + "]";
+  if (ntex) j += ",\"textures\":[" + texs + "],\"images\":[" + imgs + "]";
+  if (nanim) j += ",\"animations\":[" + anims + "]";
+  j += ",\"accessors\":[" + accs + "],\"bufferViews\":[" + views + "]";
+  j += Fmt(",\"buffers\":[{\"byteLength\":%zu,\"uri\":\"data:application/octet-stream;base64,", bin.size()) + Base64(bin) + "\"}]}\n";
+  const std::string file = Join("animations", SafeFile(StripExt(M.name)) + (M.archive == "BIKE.RES" || M.archive == "MODELS.RES" ? "" : "_" + SafeFile(M.archive)) + ".gltf");
+  MakeDirs(Join(g_out, "animations"));
+  WriteText(Join(g_out, file), j);
+  for (const auto& mp : motions) {
+    ModelEntry e;
+    e.name = mp.first.name;
+    e.archive = mp.first.archive;
+    e.obj = file;
+    e.info = Fmt("%u frames (%.1f s at 30 fps), %u parts, on ", mp.first.frames, mp.first.frames / 30.0, mp.first.per) +
+             M.name + " (" + M.archive + ")";
+    g_anims.push_back(e);
+  }
+  Log("  animations %s: %zu motions, %zu triangles, %zu bytes", file.c_str(), motions.size(), ntris, j.size());
+}
+
+void ConvertPending() {
+  for (const Pending& c : g_cols) ConvertCollision(c);
+  if (!g_cols.empty()) Say("  %zu collision shapes", g_cols.size());
+  std::map<int, std::vector<std::pair<Motion, double>>> by_model;
+  unsigned unmatched = 0;
+  for (const Pending& p : g_mots) {
+    Motion mo;
+    std::string err;
+    if (!ParseMot(p, mo, err)) {
+      Log("  motion %s %s: %s", p.archive.c_str(), p.name.c_str(), err.c_str());
+      ++g_count.failed;
+      continue;
+    }
+    double fit = 0;
+    const int mi = ModelForMotion(mo, &fit);
+    if (mi < 0) {
+      Log("  motion %s %s: no model with %u parts loaded", p.archive.c_str(), p.name.c_str(), mo.per);
+      ++unmatched;
+      continue;
+    }
+    Log("  motion %s: %u frames x %u -> %s (fit %.3f ft)", p.name.c_str(), mo.frames, mo.per, g_slb[mi].name.c_str(), fit);
+    by_model[mi].push_back({mo, fit});
+  }
+  for (auto& kv : by_model) WriteAnimated(g_slb[kv.first], kv.second);
+  if (!g_mots.empty())
+    Say("  %zu animations on %zu models%s", g_mots.size() - unmatched, by_model.size(),
+        unmatched ? Fmt(" (%u without a model; extract BIKE.RES and MODELS.RES too)", unmatched).c_str() : "");
+  g_count.anims = static_cast<unsigned>(g_anims.size());
+  g_count.colls = static_cast<unsigned>(g_colls.size());
+}
+
+// For a dropped archive: loads the models from BIKE.RES and MODELS.RES next
+// to it (nothing written) so its animations and collision shapes find them.
+void LoadModelsNear(const std::string& dropped) {
+  if (g_mots.empty() && g_cols.empty()) return;
+  std::string dir = DirName(dropped);
+  if (dir.empty()) dir = ".";
+  for (const char* want : {"bike.res", "models.res"}) {
+    if (Lower(BaseName(dropped)) == want) continue;
+    const std::string f = FindIn(dir, want);
+    if (f.empty()) continue;
+    {
+      Archive ar;
+      std::string err;
+      if (!ar.Load(f, err)) continue;
+      std::vector<uint8_t> d;
+      size_t n = 0;
+      for (const Member& m : ar.members()) {
+        if (Ext(m.name) != "slb") continue;
+        ar.ReadMember(m, d);
+        SlbModel M;
+        M.name = m.name;
+        M.archive = ar.name();
+        if (ParseSlb(d, M, err)) g_slb.push_back(std::move(M)), ++n;
+      }
+      Say("  (models for animations and collision shapes: %zu from %s)", n, f.c_str());
+    }
+  }
 }
 
 // ---------------------------------------------------------------- terrain
@@ -2369,6 +3062,12 @@ void ProcessArchive(const std::string& path, const std::string& rel) {
       ConvertSlb(ar, m, d);
       row.what = "model (binary; OBJ in models\\)";
       if (!g_models.empty() && g_models.back().name == m.name) row.file = g_models.back().obj;
+    } else if (e == "mot") {
+      g_mots.push_back({m.name, ar.name(), d});
+      row.what = "animation (glTF with its model in animations\\)";
+    } else if (e == "col") {
+      g_cols.push_back({m.name, ar.name(), d});
+      row.what = "collision shape (OBJ in collision\\)";
     } else if (e == "wav") {
       row.what = "sound";
     } else if (e == "scn" || e == "wpt" || e == "ini" || e == "mcf" || e == "vut" || e == "pb" || e == "seg" ||
@@ -2420,11 +3119,11 @@ void WriteIndex(const std::string& game) {
        "details{background:var(--card);border-radius:8px;padding:6px 10px;margin:6px 0}summary{cursor:pointer}\n"
        "</style></head><body>\n";
   h += "<header><h1>Motocross Madness 2 resources</h1><nav><a href=\"#tracks\">Tracks</a><a href=\"#textures\">Textures</a>"
-       "<a href=\"#images\">Pictures</a><a href=\"#models\">Models</a><a href=\"#archives\">Archives</a></nav>"
+       "<a href=\"#images\">Pictures</a><a href=\"#models\">Models</a><a href=\"#animations\">Animations</a><a href=\"#collision\">Collision</a><a href=\"#archives\">Archives</a></nav>"
        "<input id=\"q\" placeholder=\"Filter by name...\" oninput=\"f(this.value)\"></header><main>\n";
-  h += "<p class=\"dim\">From " + HtmlEsc(game) + Fmt(". %u textures, %u pictures, %u models, %u tracks, %u files.",
-                                                       g_count.textures, g_count.images, g_count.models, g_count.tracks,
-                                                       g_count.files) +
+  h += "<p class=\"dim\">From " + HtmlEsc(game) + Fmt(". %u textures, %u pictures, %u models, %u animations, %u collision shapes, %u tracks, %u files.",
+                                                       g_count.textures, g_count.images, g_count.models, g_count.anims,
+                                                       g_count.colls, g_count.tracks, g_count.files) +
        " Texture file names are the names mcm2fix uses: copy a picture into the game's <code>textures\\</code> "
        "folder (or <code>%LOCALAPPDATA%\\Motocross Madness 2\\textures\\</code>), edit it, and the game uses it "
        "(TextureReplace=1).</p>\n";
@@ -2485,6 +3184,23 @@ void WriteIndex(const std::string& game) {
     h += "<tr class=\"f\" data-n=\"" + HtmlEsc(Lower(m.name)) + "\"><td><a href=\"" + Url(m.obj) + "\">" + HtmlEsc(m.name) +
          "</a></td><td>" + HtmlEsc(m.archive) + "</td><td class=\"dim\">" + HtmlEsc(m.info) + "</td></tr>\n";
   h += "</table>\n";
+  if (!g_anims.empty()) {
+    h += "<h3 id=\"animations\">Animations</h3><p class=\"dim\">Each model with animations as one glTF file (the model, its textures and every "
+         "animation that fits it; in Blender: File, Import, glTF, then pick the animation in the Action Editor). Played at 30 frames per second "
+         "(assumed).</p><table><tr><th>Animation</th><th>Archive</th><th></th></tr>\n";
+    for (const ModelEntry& m : g_anims)
+      h += "<tr class=\"f\" data-n=\"" + HtmlEsc(Lower(m.name)) + "\"><td><a href=\"" + Url(m.obj) + "\">" + HtmlEsc(m.name) +
+           "</a></td><td>" + HtmlEsc(m.archive) + "</td><td class=\"dim\">" + HtmlEsc(m.info) + "</td></tr>\n";
+    h += "</table>\n";
+  }
+  if (!g_colls.empty()) {
+    h += "<h3 id=\"collision\">Collision shapes</h3><p class=\"dim\">What the bikes and riders hit, as OBJ: triangles per part, and the "
+         "points the bike and rider touch with as small diamonds.</p><table><tr><th>Shape</th><th>Archive</th><th></th></tr>\n";
+    for (const ModelEntry& m : g_colls)
+      h += "<tr class=\"f\" data-n=\"" + HtmlEsc(Lower(m.name)) + "\"><td><a href=\"" + Url(m.obj) + "\">" + HtmlEsc(m.name) +
+           "</a></td><td>" + HtmlEsc(m.archive) + "</td><td class=\"dim\">" + HtmlEsc(m.info) + "</td></tr>\n";
+    h += "</table>\n";
+  }
 
   // Archives
   h += "<h2 id=\"archives\">Archives</h2>\n";
@@ -2563,6 +3279,11 @@ void Begin(const std::string& out) {
   g_tex.clear();
   g_tex_by_name.clear();
   g_models.clear();
+  g_slb.clear();
+  g_mots.clear();
+  g_cols.clear();
+  g_anims.clear();
+  g_colls.clear();
   g_tracks.clear();
   g_archives.clear();
   g_count = Counts();
@@ -2582,6 +3303,7 @@ void ExtractFiles(const std::vector<std::string>& files, const std::string& out_
     Say("Archive: %s", f.c_str());
     Say("Output: %s", g_out.c_str());
     ProcessArchive(f, BaseName(f));
+    LoadModelsNear(f);
     Finish(f);
     Say("");
   }
@@ -2611,6 +3333,7 @@ void Extract(const std::string& game, const std::string& out) {
 }
 
 void Finish(const std::string& game) {
+  ConvertPending();
   WriteIndex(game);
   // A plain list of every texture name.
   std::string list = "# name\tsize\tformat\tloaded\tarchive\tmember\tfile\n";
@@ -2618,8 +3341,8 @@ void Finish(const std::string& game) {
     list += t.name + Fmt("\t%dx%d\t", t.w, t.h) + t.format + "\t" + (t.how == "stream" ? "stream" : "by name") + "\t" +
             t.archive + "\t" + t.member + "\t" + t.file + "\n";
   WriteText(Join(g_out, "textures.txt"), list);
-  Say("\nDone: %u textures, %u pictures, %u models, %u tracks, %u files%s.", g_count.textures, g_count.images,
-      g_count.models, g_count.tracks, g_count.files,
+  Say("\nDone: %u textures, %u pictures, %u models, %u animations, %u collision shapes, %u tracks, %u files%s.",
+      g_count.textures, g_count.images, g_count.models, g_count.anims, g_count.colls, g_count.tracks, g_count.files,
       g_count.failed ? Fmt(", %u problems (see mcm2res.log)", g_count.failed).c_str() : "");
   Say("Open %s in a browser to look through it.", Join(g_out, "index.html").c_str());
   if (g_log) fclose(g_log);
@@ -2682,7 +3405,8 @@ const char kUsage[] =
     "  mcm2res [extract] [game folder | archive...] [-o folder] [--only text]... [--obj-step N] [--raw-all]\n"
     "      Extracts every archive (RES\\*.RES, RES\\*.TEX, UI\\*.DAT, TERAFORM\\*\\*.ENV):\n"
     "      textures as PNG named for mcm2fix's textures folder, pictures, sounds,\n"
-    "      text files, tree models as OBJ, and for each track a height map,\n"
+    "      text files, models and collision shapes as OBJ, animations as glTF,\n"
+    "      and for each track a height map,\n"
     "      ground texture, race maps and a terrain OBJ. Writes index.html to\n"
     "      browse it all (default output: mcm2res_out\\ next to mcm2res.exe).\n"
     "      --only baja   only archives whose path contains \"baja\" (repeatable)\n"
