@@ -5,6 +5,8 @@ on modern Windows by double-clicking the no-CD patched `Mcm2.exe`. You don't nee
 settings, administrator rights, DirectX wrappers or old codecs, and you don't
 change the game's display resolution.
 
+This is a ***work-in-progress*** and will change fast, with frequent bugs until first release candidate.
+
 ---
 
 ***You need the no-CD `Mcm2.exe`.*** MCM2MaX only works with the widely available no-CD exe (1,577,005 bytes; see [Requirements](#requirements)). The original `Mcm2.exe` from the CD uses SafeDisc copy protection, which Windows 10 and 11 can't run at all, and MCM2MaX doesn't patch it. With any other exe MCM2MaX does nothing.
@@ -248,7 +250,7 @@ Windows 10 and 11.
 - **A Pentium II / Pentium Pro, AMD Athlon / Duron or newer CPU** (any CPU
   with the CMOV instruction). The original Pentium, Pentium MMX and AMD K6
   series (K6-2, K6-III) are not supported; on machines that old, run the
-  original game. No MMX or SSE is needed.
+  original game. No MMX or SSE is needed, but SSE will be used if available.
 - Nothing else. You don't need the DirectX 7 runtime, `d3drm.dll` from an
   old Windows, the Indeo codec or compatibility settings. If you set
   compatibility modes on `Mcm2.exe` earlier, it's best to remove them.
