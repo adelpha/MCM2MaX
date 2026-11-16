@@ -17,6 +17,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
+# Refuse a DLL built without FFmpeg (-DMCM2MaX_FFMPEG missing or misspelled):
+# the game crashes at the first menu video without the Indeo 5 decoder.
+if ! grep -aq "FfmpegIndeo5" "$DLL"; then
+  echo "package.sh: $DLL has no FFmpeg Indeo 5 decoder (configure with -DMCM2MaX_FFMPEG=<build-ffmpeg.sh dir>/install); the game would crash at the menu video" >&2
+  exit 1
+fi
 cp "$DLL" "$STAGE/d3drm.dll"
 if command -v i686-w64-mingw32-strip >/dev/null 2>&1; then
   i686-w64-mingw32-strip "$STAGE/d3drm.dll"
