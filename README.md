@@ -22,7 +22,7 @@ Motocross Madness 2 MaXimuM's core features are:
 | Audio | Drop in DSOAL and the EAX effects will just work |
 | Music | Optional music tracks, either per-event or per-track (provide your own) |
 
-See the [Featrures](#features) section for more details.
+See the [Features](#features) section for more details.
 
 Motocross Madness 2 MaXimuM is a single DLL that the game loads in place of `d3drm.dll`, a library
 Windows no longer ships. When the DLL loads, it patches the game's code in
