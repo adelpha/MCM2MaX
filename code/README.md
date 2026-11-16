@@ -707,10 +707,12 @@ XInputTriggerButtons=1
 ; counts, in percent, 0-50. Default 15.
 XInputDeadzone=15
 
-; XInputSteerCurve: stick response curve in percent, 100-300. 100 = linear;
-; higher gives finer control near the centre and keeps full lock at the edge.
-; Default 160.
-XInputSteerCurve=160
+; XInputSteerCurve: steering response of the left stick, 33-300. The game
+; already turns a joystick's steering into a curve (gentle near the centre,
+; steep near the edge). 100 = the game's own curve (default); lower is more
+; even (33 = the bike follows the stick in a straight line); higher is softer
+; near the centre and steeper at the edge.
+XInputSteerCurve=100
 
 ; PreciseTimer: 1 = the game's frame time is measured with the precise
 ; QueryPerformanceCounter instead of whole milliseconds (default). Only used

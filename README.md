@@ -623,7 +623,7 @@ The file has three parts:
 | `XInputRumble` | `100` | 0-200, percent | Rumble strength. `0` = no rumble, and the controller doesn't offer force feedback to the game. |
 | `XInputTriggerButtons` | `1` | `0`, `1` | The triggers also work as buttons 11 (LT) and 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the right trigger's axis, Brake on button 11) works as it is. `0` = axes only. The game can't bind a trigger's axis by pressing it while remapping (it looks for movement from the centre); use the preset for the right trigger. |
 | `XInputRumbleForces` | `0` | `0`/`1` | `1` = the game's steady stick forces rumble too (a constant buzz while riding). `0` = only bumps, landings and crashes rumble. |
-| `XInputSteerCurve` | `160` | 100-300, percent | Stick response curve. `100` = linear; higher = finer control near the centre, full lock still at the edge. |
+| `XInputSteerCurve` | `100` | 33-300, percent | Left stick steering response. The game already curves joystick steering (gentle near the centre, steep near the edge). `100` = the game's own curve; lower is more even (`33` = straight line from stick to bike); higher is softer near the centre and steeper at the edge. |
 | `XInputDeadzone` | `15` | 0-50, percent | How far either stick has to move from the centre before it counts. Raise it if the bike steers by itself. |
 
 ### 2. Advanced: changing these is not recommended

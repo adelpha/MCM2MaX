@@ -160,7 +160,7 @@ struct Lock {
 bool g_log = false;
 int g_rumble_pct = 100;
 float g_deadzone = 0.15f;
-float g_curve = 1.6f;          // XInputSteerCurve / 100: stick response exponent
+float g_curve = 1.0f;          // XInputSteerCurve / 100: left stick X response exponent
 bool g_rumble_forces = false;  // XInputRumbleForces: steady stick forces rumble too
 LARGE_INTEGER g_freq;
 
@@ -834,6 +834,10 @@ class Pad final : public IDirectInputDevice7A {
     const XINPUT_GAMEPAD& g = st.Gamepad;
     float lx, ly, rx, ry;
     Stick(g.sThumbLX, g.sThumbLY, &lx, &ly);
+    // XInputSteerCurve on the left stick's X (steering). The game already
+    // cubes joystick steering (0x52e3e0: steer = x^3), so 33 gives a straight
+    // line from stick to bike and 100 leaves the game's own curve.
+    if (g_curve != 1.0f) lx = std::copysign(std::pow(std::fabs(lx), g_curve), lx);
     Stick(g.sThumbRX, g.sThumbRY, &rx, &ry);
     const float lt = g.bLeftTrigger / 255.0f, rt = g.bRightTrigger / 255.0f;
     LONG v[kObjects];
@@ -885,10 +889,7 @@ class Pad final : public IDirectInputDevice7A {
       *ox = *oy = 0;
       return;
     }
-    float scaled = (std::min(mag, 1.0f) - g_deadzone) / (1.0f - g_deadzone);
-    // Response curve (XInputSteerCurve): finer control near the centre, full
-    // lock still at the edge.
-    if (g_curve != 1.0f) scaled = std::pow(scaled, g_curve);
+    const float scaled = (std::min(mag, 1.0f) - g_deadzone) / (1.0f - g_deadzone);
     *ox = std::max(-1.0f, std::min(1.0f, x / mag * scaled));
     *oy = std::max(-1.0f, std::min(1.0f, y / mag * scaled));
   }

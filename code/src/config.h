@@ -101,7 +101,7 @@ struct Config {
   bool xinput = true;         // XInput: Xbox controllers as analog DirectInput joysticks with rumble (xinput_pad.cpp)
   int xinput_rumble = 100;    // XInputRumble: rumble strength in percent (0 = off, no force feedback offered)
   int xinput_deadzone = 15;   // XInputDeadzone: stick dead zone in percent of the stick's travel
-  int xinput_steer_curve = 160;   // XInputSteerCurve: stick response exponent in percent (100 = linear)
+  int xinput_steer_curve = 100;   // XInputSteerCurve: left stick X exponent in percent (game cubes it on top)
   bool xinput_rumble_forces = false;  // XInputRumbleForces: the game's steady stick forces rumble too
   bool xinput_trigger_buttons = true;   // XInputTriggerButtons: triggers also as buttons 11 (LT) and 12 (RT)
   bool xinput_log = false;    // XInputLog: log controller calls, buttons, effects and a summary every 10 s
