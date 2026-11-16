@@ -31,7 +31,9 @@
 //          not the axis: the game looks for movement from the centre.
 //   POV 1  d-pad
 //   buttons 1-10 A B X Y LB RB Back Start LS RS (XInputTriggerButtons: 11 LT, 12 RT)
-// Force feedback effects become rumble: constant and ramp forces and slow
+// Force feedback effects become rumble. A never-ending constant force is the
+// game pushing a force feedback stick; only its sudden jumps rumble unless
+// XInputRumbleForces. Other constant and ramp forces and slow
 // periodic ones drive the left (heavy) motor, faster periodic ones the right.
 // A thread samples the pads every 4 ms, so buffered events carry their own
 // time stamps (InputTiming hands them to the race step they belong to).
@@ -158,6 +160,8 @@ struct Lock {
 bool g_log = false;
 int g_rumble_pct = 100;
 float g_deadzone = 0.15f;
+float g_curve = 1.6f;          // XInputSteerCurve / 100: stick response exponent
+bool g_rumble_forces = false;  // XInputRumbleForces: steady stick forces rumble too
 LARGE_INTEGER g_freq;
 
 double NowUs() {
@@ -274,6 +278,13 @@ class Effect final : public IDirectInputEffect {
   // Current strength 0..1 for the left (heavy) or right motor; ends the
   // effect when its time is up. Called under g_cs.
   void Strength(double now_us, float* low, float* high);
+  // Force jumps at least this big (of 10000) rumble; the kick fades out
+  // over kKickUs.
+  static constexpr double kKickThreshold = 2000, kKickUs = 250000;
+  double KickLevel(double now_us) const {
+    const double t = now_us - kick_us_;
+    return t >= kKickUs || t < 0 ? 0 : kick_ * (1.0 - t / kKickUs);
+  }
 
   Pad* pad_;
   GUID type_;
@@ -287,6 +298,12 @@ class Effect final : public IDirectInputEffect {
   DIENVELOPE env_ = {};
   LONG magnitude_ = 0, ramp_end_ = 0, offset_ = 0;  // constant/ramp start/periodic magnitude
   DWORD period_ = 0;
+  // A constant force that never ends is the game pushing a force feedback
+  // stick (steering weight, updated every frame). Unless XInputRumbleForces,
+  // only its sudden changes (landings, crashes) rumble: kick_ decays from the
+  // time it was set.
+  bool steady_ = false;
+  double kick_ = 0, kick_us_ = 0;
 
  private:
   volatile LONG refs_ = 1;
@@ -868,7 +885,10 @@ class Pad final : public IDirectInputDevice7A {
       *ox = *oy = 0;
       return;
     }
-    const float scaled = (std::min(mag, 1.0f) - g_deadzone) / (1.0f - g_deadzone);
+    float scaled = (std::min(mag, 1.0f) - g_deadzone) / (1.0f - g_deadzone);
+    // Response curve (XInputSteerCurve): finer control near the centre, full
+    // lock still at the edge.
+    if (g_curve != 1.0f) scaled = std::pow(scaled, g_curve);
     *ox = std::max(-1.0f, std::min(1.0f, x / mag * scaled));
     *oy = std::max(-1.0f, std::min(1.0f, y / mag * scaled));
   }
@@ -1000,7 +1020,10 @@ Effect::~Effect() {
 HRESULT Effect::SetParameters(LPCDIEFFECT eff, DWORD flags) {
   if (!eff || eff->dwSize < sizeof(DIEFFECT_DX5)) return DIERR_INVALIDPARAM;
   Lock lock;
-  if (flags & DIEP_DURATION) duration_ = eff->dwDuration;
+  if (flags & DIEP_DURATION) {
+    duration_ = eff->dwDuration;
+    steady_ = !periodic_ && !ramp_ && duration_ == INFINITE;
+  }
   if (flags & DIEP_GAIN) gain_ = std::min<DWORD>(eff->dwGain, 10000);
   if (flags & DIEP_AXES) axes_ = eff->cAxes;
   if (flags & DIEP_STARTDELAY) start_delay_ = eff->dwSize >= sizeof(DIEFFECT) ? eff->dwStartDelay : 0;
@@ -1019,7 +1042,18 @@ HRESULT Effect::SetParameters(LPCDIEFFECT eff, DWORD flags) {
       magnitude_ = p->lStart;
       ramp_end_ = p->lEnd;
     } else if (!periodic_ && !ramp_ && eff->cbTypeSpecificParams >= sizeof(DICONSTANTFORCE)) {
-      magnitude_ = static_cast<const DICONSTANTFORCE*>(eff->lpvTypeSpecificParams)->lMagnitude;
+      const LONG m = static_cast<const DICONSTANTFORCE*>(eff->lpvTypeSpecificParams)->lMagnitude;
+      const double jump = std::fabs(static_cast<double>(m) - magnitude_);
+      if (jump >= kKickThreshold) {
+        const double now = NowUs();
+        const double left = KickLevel(now);
+        kick_ = std::max(left, std::min(10000.0, jump));
+        kick_us_ = now;
+        if (g_log && steady_ && !g_rumble_forces)
+          patch::Log("xinput: effect %p (ConstantForce): force jump %ld -> %ld, rumble kick %.0f",
+                     static_cast<void*>(this), magnitude_, m, kick_);
+      }
+      magnitude_ = m;
     } else {
       return DIERR_INVALIDPARAM;
     }
@@ -1126,6 +1160,8 @@ void Effect::Strength(double now_us, float* low, float* high) {
     level = std::min(10000.0, static_cast<double>(magnitude_) + std::fabs(static_cast<double>(offset_)));
   } else if (ramp_ && duration_ != INFINITE) {
     level = std::fabs(magnitude_ + (ramp_end_ - magnitude_) * (local / duration_));
+  } else if (steady_ && !g_rumble_forces) {
+    level = KickLevel(now_us);
   } else {
     level = std::fabs(static_cast<double>(magnitude_));
   }
@@ -1420,6 +1456,8 @@ void Apply() {
   g_log = c.xinput_log;
   g_rumble_pct = c.xinput_rumble;
   g_deadzone = static_cast<float>(c.xinput_deadzone) / 100.0f;
+  g_curve = static_cast<float>(c.xinput_steer_curve) / 100.0f;
+  g_rumble_forces = c.xinput_rumble_forces;
   g_trigger_buttons = c.xinput_trigger_buttons;
   constexpr uintptr_t kDirectInputCreateEx = 0x555028;  // DINPUT!DirectInputCreateEx
   if (!*reinterpret_cast<void**>(kDirectInputCreateEx)) {
@@ -1428,8 +1466,10 @@ void Apply() {
   }
   g_create = reinterpret_cast<CreateExFn>(
       patch::HookIat(kDirectInputCreateEx, reinterpret_cast<void*>(&MyDirectInputCreateEx)));
-  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputDeadzone=%d XInputTriggerButtons=%d XInputLog=%d)", c.xinput_rumble,
-             c.xinput_deadzone, g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
+  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputDeadzone=%d XInputSteerCurve=%d "
+             "XInputTriggerButtons=%d XInputLog=%d)",
+             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_deadzone, c.xinput_steer_curve,
+             g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
 }
 
 }  // namespace xpad

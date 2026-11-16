@@ -691,6 +691,11 @@ XInput=1
 ; controller doesn't offer force feedback to the game. Default 100.
 XInputRumble=100
 
+; XInputRumbleForces: 1 = the game's steady stick forces rumble too (it
+; pushes a force feedback joystick all the time while riding, which on a pad
+; is a constant buzz). 0 = only bumps, landings and crashes rumble (default).
+XInputRumbleForces=0
+
 ; XInputTriggerButtons: 1 = the triggers also work as buttons 11 (LT) and
 ; 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the Z axis,
 ; Brake on button 11) works as it is (default). 0 = axes only. The game can't
@@ -701,6 +706,11 @@ XInputTriggerButtons=1
 ; XInputDeadzone: how far either stick has to move from the centre before it
 ; counts, in percent, 0-50. Default 15.
 XInputDeadzone=15
+
+; XInputSteerCurve: stick response curve in percent, 100-300. 100 = linear;
+; higher gives finer control near the centre and keeps full lock at the edge.
+; Default 160.
+XInputSteerCurve=160
 
 ; PreciseTimer: 1 = the game's frame time is measured with the precise
 ; QueryPerformanceCounter instead of whole milliseconds (default). Only used

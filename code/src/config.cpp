@@ -289,6 +289,10 @@ void LoadConfig() {
   g_config.xinput_deadzone = GetPrivateProfileIntA(sec, "XInputDeadzone", 15, ini);
   if (g_config.xinput_deadzone < 0) g_config.xinput_deadzone = 0;
   if (g_config.xinput_deadzone > 50) g_config.xinput_deadzone = 50;
+  g_config.xinput_steer_curve = GetPrivateProfileIntA(sec, "XInputSteerCurve", 160, ini);
+  if (g_config.xinput_steer_curve < 100) g_config.xinput_steer_curve = 100;
+  if (g_config.xinput_steer_curve > 300) g_config.xinput_steer_curve = 300;
+  g_config.xinput_rumble_forces = GetPrivateProfileIntA(sec, "XInputRumbleForces", 0, ini) != 0;
   g_config.xinput_trigger_buttons = GetPrivateProfileIntA(sec, "XInputTriggerButtons", 1, ini) != 0;
   g_config.xinput_log = GetPrivateProfileIntA(sec, "XInputLog", 0, ini) != 0;
   g_config.sound_log = GetPrivateProfileIntA(sec, "SoundLog", 0, ini) != 0;
