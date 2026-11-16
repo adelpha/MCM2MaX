@@ -49,7 +49,7 @@ The same DLL also runs on **Windows XP SP3**, where it uses Direct3D 9.
 - [Windows XP](#windows-xp)
 - [Sound, EAX and DSOAL](#sound-eax-and-dsoal)
 - [Music](#music)
-- [MCM2MaX.ini reference](#MCM2MaXini-reference)
+- [MCM2MaX.ini reference](#mcm2maxini-reference)
 - [Texture dumping and replacement](#texture-dumping-and-replacement)
 - [Problems and logs](#problems-and-logs)
 - [Building from source](#building-from-source)
@@ -293,6 +293,14 @@ default. The game folder can be read-only (for example under
 `HKLM\Software\Microsoft\Microsoft Games\Motocross Madness 2` key (an
 earlier install) into its own per-user key, and sets the install path from
 the folder `Mcm2.exe` is in.
+
+**Upgrading from mcm2fix** (this project's old name): on first run MCM2MaX
+copies `HKCU\Software\mcm2fix` to `HKCU\Software\MCM2MaX`, so your game
+settings carry over; profiles and saves are in the same per-user folder as
+before. `mcm2max.ini` replaces `mcm2fix.ini`: copy any settings you changed
+across, then delete `mcm2fix.ini`. Until `mcm2max.ini` is there, the old
+`mcm2fix.ini` is still read, and so is a `mcm2fix-menu.ini` in the per-user
+folder until `MCM2MaX-menu.ini` exists.
 
 *Alternative for developers:* `python tools/mcm2patch.py Mcm2.exe
 Mcm2_fixed.exe` makes a copy of the exe that imports `MCM2MaX.dll` by that

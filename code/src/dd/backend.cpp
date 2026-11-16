@@ -171,7 +171,7 @@ ID3DBlob* Compile(const char* source, const char* entry, const char* target) {
   }
   ID3DBlob* code = nullptr;
   ID3DBlob* errors = nullptr;
-  HRESULT hr = compile(source, std::strlen(source), "mcm2fix", nullptr, nullptr, entry, target,
+  HRESULT hr = compile(source, std::strlen(source), "MCM2MaX", nullptr, nullptr, entry, target,
                        D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
   if (FAILED(hr)) {
     Log("shader %s failed: %s", entry,
@@ -303,7 +303,7 @@ bool InitDevice() {
   if (g_device_failed) return false;
   g_device_failed = true;
   const bool want9 = GetConfig().renderer == 9;
-  patch::Log("renderer: %s asked for in mcm2fix.ini", want9 ? "Direct3D 9" : "Direct3D 11");
+  patch::Log("renderer: %s asked for in mcm2max.ini", want9 ? "Direct3D 9" : "Direct3D 11");
   if (!want9) {
     g_api = Api::kD3D11;
     if (InitDevice11()) {

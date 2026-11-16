@@ -39,7 +39,7 @@ enum Zone : int {
   kGdiText,       // the game's TextOut / DrawText calls (GPU text or GDI)
   kReflect,       // Reflections: the cube faces drawn at the end of the scene
   kReflectCache,  //   Reflections: world draws kept for later frames (per draw)
-  kObjectWalk,    // FastObjectWalk: the game's object passes walked by mcm2fix
+  kObjectWalk,    // FastObjectWalk: the game's object passes walked by MCM2MaX
   kFarTrees,      // FarTrees: far tree billboards drawn on the GPU (game side and draw)
   kTerrSetup,     // terrain: Setup (culling, detail numbers, split/collapse; 0x482d20)
   kTerrEval,      // terrain: Eval (vertex activation; 0x4836e0 or FastTerrain)

@@ -51,7 +51,7 @@ struct KnownFont {
   bool abc_ok[256]{};
 };
 
-// The font mcm2fix itself selected into one of its own DCs (GpuTextSelectFont),
+// The font MCM2MaX itself selected into one of its own DCs (GpuTextSelectFont),
 // so finding it needs no GDI call. Only for DCs the game never sees.
 struct TrackedFont {
   HDC dc;
@@ -432,7 +432,7 @@ RECT ScaleRect(const Overlay& o, const RECT& r) {
 }
 
 // The DC's clip region (surface pixels), as overlay rectangles.
-// known: the clip as mcm2fix set it (no GDI calls); null: ask GDI.
+// known: the clip as MCM2MaX set it (no GDI calls); null: ask GDI.
 void ReadClip(HDC dc, Ctx& c, const RECT* extra) {
   const Overlay& o = *c.o;
   RECT full{0, 0, static_cast<LONG>(o.base_w), static_cast<LONG>(o.base_h)};
@@ -703,7 +703,7 @@ class Recorder : public GdiTarget {
   const void* native = nullptr;
   bool clip_known = false, clip_none = false;  // see Ctx
   RECT clip{};
-  // The last use was mcm2fix's own (HUD text) and left the DC as GpuTextBeginDC
+  // The last use was MCM2MaX's own (HUD text) and left the DC as GpuTextBeginDC
   // makes it: no GDI clip, stock font, pen and brush. The next one can skip
   // those GDI calls.
   bool clean = false;
@@ -876,13 +876,13 @@ HDC GpuTextBeginDC(const GpuTexture& base, UINT w, UINT h) {
   r->native = base.Native();
   GdiTrack(dc, r, w, h, "gpu text");
   ++g_ts.dcs;
-  LogOnce("GPU text: the game's GDI drawing is drawn by mcm2fix (GpuText=1)");
+  LogOnce("GPU text: the game's GDI drawing is drawn by MCM2MaX (GpuText=1)");
   return dc;
 }
 
 void GpuTextEndDC(HDC dc) {
   GdiUntrack(dc);
-  // Only mcm2fix's own drawing selects fonts through GpuTextSelectFont, and
+  // Only MCM2MaX's own drawing selects fonts through GpuTextSelectFont, and
   // it touches nothing else that needs resetting: if it put the stock font
   // back, the DC is as GpuTextBeginDC left it.
   HGDIOBJ tracked = nullptr;

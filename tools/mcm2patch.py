@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Make Mcm2.exe load mcm2fix.dll instead of d3drm.dll.
+"""Make Mcm2.exe load MCM2MaX.dll instead of d3drm.dll.
 
 Usage:  python mcm2patch.py <original Mcm2.exe> <output exe>
 
 The input is never modified. The only change to the exe is the name of one
 imported DLL: d3drm.dll (not shipped with Windows 11; the game used just
-D3DRMVectorRotate from it) becomes mcm2fix.dll, which provides that function
+D3DRMVectorRotate from it) becomes MCM2MaX.dll, which provides that function
 and applies every other fix in memory when the game starts. See
 code/README.md.
 
@@ -29,7 +29,7 @@ D3DRM_NAME_RVA = 0x16AE0E
 
 # New DLL name goes in the zero-filled tail of .text (raw data already there).
 NEW_NAME_RVA = 0x154A80
-NEW_NAME = b"mcm2fix.dll\0"
+NEW_NAME = b"MCM2MaX.dll\0"
 
 
 def main():
@@ -60,7 +60,7 @@ def main():
     struct.pack_into("<I", buf, D3DRM_DESCRIPTOR + 12, NEW_NAME_RVA)
 
     open(dst, "wb").write(buf)
-    print(f"wrote {dst} (imports mcm2fix.dll instead of d3drm.dll)")
+    print(f"wrote {dst} (imports MCM2MaX.dll instead of d3drm.dll)")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 // Direct3D 7 interface and type declarations for the D3D11 backend.
 //
 // Current Windows SDKs no longer ship d3d.h / d3dtypes.h / d3dcaps.h, so the
-// parts mcm2fix implements are declared here from the documented DirectX 7
+// parts MCM2MaX implements are declared here from the documented DirectX 7
 // ABI. Interfaces are abstract structs whose virtual methods are in vtable
 // order; DirectDraw types come from ddraw.h, which the SDK still has.
 #pragma once

@@ -124,9 +124,9 @@ HWND DummyWindow() {
   WNDCLASSA wc{};
   wc.lpfnWndProc = DefWindowProcA;
   wc.hInstance = GetModuleHandleA(nullptr);
-  wc.lpszClassName = "mcm2fix_d3d9";
+  wc.lpszClassName = "MCM2MaX_d3d9";
   RegisterClassA(&wc);
-  g_dummy = CreateWindowExA(0, wc.lpszClassName, "mcm2fix", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr,
+  g_dummy = CreateWindowExA(0, wc.lpszClassName, "MCM2MaX", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr,
                             wc.hInstance, nullptr);
   return g_dummy;
 }
@@ -1316,7 +1316,7 @@ namespace {
 // chain is enough. Without it (Windows XP, Vista/7 basic theme) a windowed
 // Present is a plain blit to the desktop: XP drivers often ignore the
 // interval (the frame rate is not capped) or blit at any scan line (tearing).
-// There mcm2fix waits for the vertical blank itself and presents on the
+// There MCM2MaX waits for the vertical blank itself and presents on the
 // immediate chain right as it starts; if the driver cannot report the scan
 // line, frames are paced to the refresh rate with the precise timer.
 enum class VsyncMode { kSwapChain, kRasterPoll, kTimer };

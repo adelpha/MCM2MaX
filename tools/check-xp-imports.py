@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Fails if mcm2fix.dll imports anything Windows XP (SP3) does not have.
+"""Fails if MCM2MaX.dll imports anything Windows XP (SP3) does not have.
 
-    tools/check-xp-imports.py build/mcm2fix.dll [objdump]
+    tools/check-xp-imports.py build/MCM2MaX.dll [objdump]
 
 Uses MinGW objdump to list the import table. The check is a deny list: DLLs
-that do not exist on XP, Vista+ functions of the system DLLs mcm2fix uses, and
+that do not exist on XP, Vista+ functions of the system DLLs MCM2MaX uses, and
 the msvcrt "secure" (_s) functions that only Vista's msvcrt.dll exports. Load
 anything newer with LoadLibrary/GetProcAddress instead (see src/xp_compat.cpp).
 """

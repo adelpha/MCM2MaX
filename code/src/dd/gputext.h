@@ -1,6 +1,6 @@
 // GPU text (ini GpuText=1): the game's GDI drawing on render targets
 // (TextOutA, DrawTextA, FillRect, FrameRect, LineTo; see gdihook.cpp) is
-// drawn by mcm2fix instead, at the resolution the frame is shown at, into a
+// drawn by MCM2MaX instead, at the resolution the frame is shown at, into a
 // transparent "text overlay" that belongs to the surface's GPU texture.
 // Glyphs come from an antialiased glyph atlas (GetGlyphOutline, GGO_GRAY8).
 //
@@ -24,17 +24,17 @@ bool GpuTextActive();
 // whose GPU copy is `base` (w x h). Null if GPU text cannot be used.
 HDC GpuTextBeginDC(const GpuTexture& base, UINT w, UINT h);
 void GpuTextEndDC(HDC dc);
-// Draw one GDI call on a DC from GpuTextBeginDC (calls mcm2fix makes itself,
+// Draw one GDI call on a DC from GpuTextBeginDC (calls MCM2MaX makes itself,
 // which the GDI hooks do not see). Uses the DC's font, colours and clip.
 bool GpuTextRun(const GdiCall& call);
 // A font that is never deleted (the HUD's own scaled fonts): its metrics and
 // the extents of strings drawn with it are cached.
 void GpuTextKeepFont(HFONT f);
-// SelectObject of a font into a DC from GpuTextBeginDC that only mcm2fix
+// SelectObject of a font into a DC from GpuTextBeginDC that only MCM2MaX
 // draws on: remembered, so measuring needs no GDI call to find the font, and
 // selecting the font that is already there costs nothing.
 void GpuTextSelectFont(HDC dc, HGDIOBJ f);
-// The clip of a DC from GpuTextBeginDC, set by mcm2fix (null: none), so
+// The clip of a DC from GpuTextBeginDC, set by MCM2MaX (null: none), so
 // drawing does not have to read it back from GDI. Instead of SelectClipRgn.
 void GpuTextSetClip(HDC dc, const RECT* r);
 // GetTextExtentPoint32A / GetTextMetricsA, cached for kept fonts.

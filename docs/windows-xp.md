@@ -1,10 +1,10 @@
 # Windows XP support
 
-Goal: the same `d3drm.dll` (mcm2fix) loads and runs on Windows XP SP3 as well
+Goal: the same `d3drm.dll` (MCM2MaX) loads and runs on Windows XP SP3 as well
 as Windows 7 to 11. Only the MinGW build targets XP; current MSVC toolsets and
 their static CRT need Windows 7.
 
-## What stopped mcm2fix loading on XP (audit 2026-11-09)
+## What stopped MCM2MaX loading on XP (audit 2026-11-09)
 
 A DLL whose import table names a function or DLL the system lacks does not
 load at all, and the game then fails to start. The release2 DLL imported:
@@ -31,7 +31,7 @@ it on every MinGW build.
 - **Renderer**: Direct3D 11 does not exist on XP, so the renderer falls back
   to the fixed-function Direct3D 9 renderer (`dd/backend9.cpp`, d3d9.dll
   loaded at run time; ini `Renderer=D3D9` forces it). Only with no Direct3D 9
-  at all does mcm2fix leave the game on Windows' own DirectDraw.
+  at all does MCM2MaX leave the game on Windows' own DirectDraw.
 - Registry: HKCU works the same. XP has no UAC virtualisation, so the HKLM
   import on first run finds only what an XP install wrote there.
 

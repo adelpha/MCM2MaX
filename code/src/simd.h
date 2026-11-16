@@ -1,6 +1,6 @@
-// SSE2 fast paths for mcm2fix's own per-frame work (ini Simd), picked at run
+// SSE2 fast paths for MCM2MaX's own per-frame work (ini Simd), picked at run
 // time from the CPU, so the DLL still runs on a Pentium II or Athlon without
-// SSE2. Only mcm2fix's own code: the game's physics and other game code keep
+// SSE2. Only MCM2MaX's own code: the game's physics and other game code keep
 // their x87 maths untouched.
 //
 // Every kernel has a plain version (simd_plain.cpp) and an SSE2 version
