@@ -21,7 +21,6 @@ void ApplyDiagnostics();
 void ApplyRegistryTrace();
 void ApplyD3D11Backend();
 void ApplyWidescreenFov();
-void ApplyResolutionDefault();
 void ApplyFramePacing();
 void ApplyDetailFixes();
 void ApplyArrowFix();
@@ -91,7 +90,6 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
       if (c.reg_log) ApplyRegistryTrace();
       ApplyD3D11Backend();
       ApplyWidescreenFov();
-      ApplyResolutionDefault();
       ApplyFramePacing();
       ApplyDetailFixes();
       ApplyArrowFix();

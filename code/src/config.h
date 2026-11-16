@@ -56,9 +56,6 @@ struct Config {
   int renderer = 11;          // Renderer: 11 = Direct3D 11, 9 = Direct3D 9 (also used when D3D11 is missing)
   bool exclusive = false;     // Fullscreen: false = borderless window (default), true = exclusive fullscreen
   int fs_width = 0, fs_height = 0, fs_hz = 0;  // FullscreenMode: 0 = the desktop's
-  // Resolution: the game's resolution, by size; the game's Options write the
-  // player's pick here. -1 = Game (the game's own choice), 0 = Desktop.
-  int default_res_w = 0, default_res_h = 0;
   bool renderer_label = true;  // RendererLabel: name the active renderer in the corner of the menus
   bool gpu_text = true;       // GpuText: draw the game's GDI text on the GPU at screen resolution
   float hud_scale = 2.0f;     // HudScale: race HUD text panels drawn this many times larger (1..4)
@@ -172,7 +169,5 @@ const char* MenuIniPath();
 // else to MenuIniPath(); returns the file used. MotionBlur, VSync and
 // AlphaToCoverage and Anisotropy also change at once; the rest apply at the next start.
 const char* SetFromMenu(const char* key, int value);
-// The same for a text value (e.g. Resolution=1920x1080).
-const char* SetStringFromMenu(const char* key, const char* value);
 // A value read from mcm2max.ini, replaced by the menus' choice if there is one.
 int MenuOverride(const char* key, int value);
