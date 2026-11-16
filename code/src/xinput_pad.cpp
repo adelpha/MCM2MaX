@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -106,6 +107,18 @@ using XSetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
 XGetStateFn g_get_state = nullptr;
 XSetStateFn g_set_state = nullptr;
 const char* g_xinput_dll = "";
+// XInputGetCapabilitiesEx (xinput1_4 ordinal 108, Windows 10+): adds the
+// controller's USB vendor and product id, used to name each slot.
+struct XCapsEx {
+  XINPUT_CAPABILITIES caps;
+  WORD vid, pid, version, unk1;
+  DWORD unk2;
+};
+using XCapsExFn = DWORD(WINAPI*)(DWORD, DWORD, DWORD, XCapsEx*);
+using XCapsFn = DWORD(WINAPI*)(DWORD, DWORD, XINPUT_CAPABILITIES*);
+XCapsExFn g_caps_ex = nullptr;
+XCapsFn g_caps = nullptr;
+std::string g_slot_name[XUSER_MAX_COUNT];  // shown in the game's controller list
 
 bool LoadXInput() {
   static bool tried = false;
@@ -121,6 +134,8 @@ bool LoadXInput() {
       g_get_state = get;
       g_set_state = set;
       g_xinput_dll = n;
+      g_caps_ex = reinterpret_cast<XCapsExFn>(reinterpret_cast<void*>(GetProcAddress(m, MAKEINTRESOURCEA(108))));
+      g_caps = reinterpret_cast<XCapsFn>(reinterpret_cast<void*>(GetProcAddress(m, "XInputGetCapabilities")));
       patch::Log("xinput: using %s (rumble %s)", n, set ? "available" : "not available");
       return true;
     }
@@ -698,8 +713,13 @@ class Pad final : public IDirectInputDevice7A {
     d->guidInstance = PadInstanceGuid(slot);
     d->guidProduct = kPadProduct;
     d->dwDevType = DevType();
-    std::snprintf(d->tszInstanceName, sizeof d->tszInstanceName, "Xbox Controller %d", slot + 1);
-    std::snprintf(d->tszProductName, sizeof d->tszProductName, "Xbox Controller (XInput)");
+    if (!g_slot_name[slot].empty()) {
+      std::snprintf(d->tszInstanceName, sizeof d->tszInstanceName, "%s", g_slot_name[slot].c_str());
+      std::snprintf(d->tszProductName, sizeof d->tszProductName, "%s", g_slot_name[slot].c_str());
+    } else {
+      std::snprintf(d->tszInstanceName, sizeof d->tszInstanceName, "Xbox Controller %d", slot + 1);
+      std::snprintf(d->tszProductName, sizeof d->tszProductName, "Xbox Controller %d (XInput)", slot + 1);
+    }
     if (RumbleOn()) d->guidFFDriver = kPadProduct;
     d->wUsagePage = 1;  // generic desktop
     d->wUsage = 4;      // joystick
@@ -1149,6 +1169,32 @@ struct VidPid {
   bool operator<(const VidPid& o) const { return vid != o.vid ? vid < o.vid : pid < o.pid; }
 };
 
+std::map<VidPid, std::string> g_hid_names;  // XInput HID devices' product strings
+
+std::string HidProductName(const char* path) {
+  using GetStrFn = BOOLEAN(WINAPI*)(HANDLE, PVOID, ULONG);
+  static GetStrFn get = nullptr;
+  static bool tried = false;
+  if (!tried) {
+    tried = true;
+    if (HMODULE h = LoadLibraryA("hid.dll"))
+      get = reinterpret_cast<GetStrFn>(reinterpret_cast<void*>(GetProcAddress(h, "HidD_GetProductString")));
+  }
+  if (!get) return "";
+  HANDLE f = CreateFileA(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return "";
+  wchar_t w[128] = {};
+  std::string out;
+  if (get(f, w, sizeof w - sizeof(wchar_t))) {
+    char a[256] = {};
+    WideCharToMultiByte(CP_ACP, 0, w, -1, a, sizeof a - 1, nullptr, nullptr);
+    out = a;
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+  }
+  CloseHandle(f);
+  return out;
+}
+
 std::set<VidPid> XInputHidDevices() {
   std::set<VidPid> out;
   UINT n = 0;
@@ -1168,10 +1214,40 @@ std::set<VidPid> XInputHidDevices() {
     if (v == std::string::npos || p == std::string::npos) continue;
     VidPid vp = {static_cast<WORD>(strtoul(s.substr(v + 4, 4).c_str(), nullptr, 16)),
                  static_cast<WORD>(strtoul(s.substr(p + 4, 4).c_str(), nullptr, 16))};
-    if (out.insert(vp).second)
-      patch::Log("xinput: XInput HID device VID_%04X PID_%04X (%s)", vp.vid, vp.pid, name);
+    if (out.insert(vp).second) {
+      g_hid_names[vp] = HidProductName(name);
+      patch::Log("xinput: XInput HID device VID_%04X PID_%04X \"%s\" (%s)", vp.vid, vp.pid, g_hid_names[vp].c_str(),
+                 name);
+    }
   }
   return out;
+}
+
+// "Wooting Two HE (XInput 2)", or "Xbox Controller 1" when the device can't be told.
+void NameSlot(int slot) {
+  std::string name;
+  XCapsEx ex = {};
+  XINPUT_CAPABILITIES caps = {};
+  bool have_ids = g_caps_ex && g_caps_ex(1, static_cast<DWORD>(slot), 0, &ex) == ERROR_SUCCESS;
+  if (have_ids) caps = ex.caps;
+  else if (g_caps) g_caps(static_cast<DWORD>(slot), 0, &caps);
+  if (have_ids) {
+    auto it = g_hid_names.find(VidPid{ex.vid, ex.pid});
+    if (it != g_hid_names.end() && !it->second.empty()) {
+      char b[200];
+      std::snprintf(b, sizeof b, "%s (XInput %d)", it->second.c_str(), slot + 1);
+      name = b;
+    } else if (ex.vid != 0x045E) {
+      char b[200];
+      std::snprintf(b, sizeof b, "XInput controller %d (VID_%04X PID_%04X)", slot + 1, ex.vid, ex.pid);
+      name = b;
+    }
+  }
+  if (name.empty()) name = "Xbox Controller " + std::to_string(slot + 1);
+  g_slot_name[slot] = name;
+  patch::Log("xinput: slot %d: \"%s\" (type %u subtype %u flags 0x%x%s)", slot + 1, name.c_str(), caps.Type,
+             caps.SubType, caps.Flags,
+             have_ids ? (" VID_" + [&] { char b[16]; std::snprintf(b, sizeof b, "%04X PID_%04X", ex.vid, ex.pid); return std::string(b); }()).c_str() : "");
 }
 
 bool IsXInputCopy(const DIDEVICEINSTANCEA* d, const std::set<VidPid>& hid) {
@@ -1217,6 +1293,10 @@ class DirectInputWrap final : public IDirectInput7A {
     const bool want_joy = cls == 0 || cls == DIDEVTYPE_JOYSTICK;
     const bool ff_only = (flags & DIEDFL_FORCEFEEDBACK) != 0;
     int listed = 0;
+    if (!hid_scanned_) {
+      hid_ = XInputHidDevices();
+      hid_scanned_ = true;
+    }
     if (want_joy && (!ff_only || RumbleOn())) {
       for (int slot = 0; slot < XUSER_MAX_COUNT; ++slot) {
         XINPUT_STATE st;
@@ -1225,6 +1305,7 @@ class DirectInputWrap final : public IDirectInput7A {
           Lock lock;
           g_connected_mask |= 1u << slot;
         }
+        NameSlot(slot);
         DIDEVICEINSTANCEA d;
         Pad::FillInstance(slot, &d);
         ++listed;
@@ -1232,10 +1313,6 @@ class DirectInputWrap final : public IDirectInput7A {
         if (cb(&d, ref) == DIENUM_STOP) return DI_OK;
       }
       if (!listed) patch::Log("xinput: EnumDevices: no XInput controller connected (connect it before starting the game)");
-    }
-    if (!hid_scanned_) {
-      hid_ = XInputHidDevices();
-      hid_scanned_ = true;
     }
     Ctx ctx = {cb, ref, &hid_, false};
     return real_->EnumDevices(type, &Filter, &ctx, flags);
