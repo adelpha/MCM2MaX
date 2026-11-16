@@ -11,7 +11,7 @@ change the game's display resolution.
 
 ---
 
-Motocross Madness 2 MaXimuM's core features are:
+Here's just a few of Motocross Madness 2 MaXimuM's core features:
 
 | Feature | Description |
 |---|---|
