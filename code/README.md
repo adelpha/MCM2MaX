@@ -128,9 +128,9 @@ VSync=1
 ; Useful with VSync=0, e.g. FrameCap=120. Does not change game speed.
 FrameCap=0
 
-; MenuFpsCap: the most frames per second whenever a race isn't running
-; (menus, rider and bike select, loading, pause, results), even with VSync=0.
-; Races are not affected.
+; MenuFpsCap: the most frames per second outside races (menus, rider and
+; bike select, loading, the pause menu), even with VSync=0. Races, including
+; the intro and countdown, are not affected.
 ; 0 = no menu cap. Default 240. If FrameCap is lower, that wins.
 MenuFpsCap=240
 

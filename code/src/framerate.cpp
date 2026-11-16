@@ -710,6 +710,8 @@ bool MenuScreen();  // dd/backend.cpp
 }
 
 namespace {
+uintptr_t g_live_race = 0;  // BikeRace from its countdown to its destructor
+
 // MenuFpsCap bookkeeping, for the log.
 bool g_menu_capped = false;
 LONGLONG g_menu_log_start = 0;  // QPC at the start of the current log window
@@ -736,28 +738,46 @@ void MenuCapLog(LONGLONG now, int cap) {
 }
 }  // namespace
 
+void RaceAlive(uintptr_t race) {
+  if (g_live_race != race) patch::Log("menu frame cap: race %08x countdown set", static_cast<unsigned>(race));
+  g_live_race = race;
+}
+
+void RaceGone(uintptr_t race) {
+  if (race && race == g_live_race) {
+    patch::Log("menu frame cap: race %08x destroyed", static_cast<unsigned>(race));
+    g_live_race = 0;
+  }
+}
+
 void WaitForFrameSlot() {
   const Config& c = GetConfig();
   if (!g_freq.QuadPart) return;
   int cap = c.frame_cap;
-  // MenuFpsCap: anything but a running race (menus, rider/bike select,
-  // loading, pause, results) doesn't need thousands of frames a second with
-  // VSync off. A race is running while bikes are being simulated; the 3D
-  // test of the renderer label isn't enough (the rider select shows a bike).
+  // MenuFpsCap: anything but a race (menus, rider/bike select, loading,
+  // pause) doesn't need thousands of frames a second with VSync off. A race
+  // runs from its countdown being set (intro, countdown) until the BikeRace
+  // is destroyed; once started (race+0x18a) it counts only while bikes are
+  // simulated, so the pause menu is capped. The 3D test of the renderer
+  // label isn't enough (the rider select shows a bike).
   const LONGLONG half = g_freq.QuadPart / 2;
   const LONGLONG t = Now();
   const bool bikes = g_bike_seen && t - g_bike_seen < half;
   const bool player = g_player_seen && t - g_player_seen < half;
-  const bool menu = c.menu_fps_cap > 0 && !bikes && !player;
+  const uintptr_t race = g_live_race;
+  const bool started = race && *reinterpret_cast<const uint8_t*>(race + 0x18A) != 0;
+  const bool in_race = bikes || player || (race && !started);
+  const bool menu = c.menu_fps_cap > 0 && !in_race;
   if (menu && (cap <= 0 || c.menu_fps_cap < cap)) cap = c.menu_fps_cap;
   if (menu != g_menu_capped) {
     g_menu_capped = menu;
     g_menu_log_start = 0;
     g_menu_frames = 0;
     g_menu_slept = g_menu_late = g_menu_late_max = 0;
-    patch::Log("menu frame cap: %s (now %d fps%s; bikes simulated %d, player simulated %d, 3D scene %d)",
+    patch::Log("menu frame cap: %s (now %d fps%s; race %08x started %d, bikes simulated %d, player simulated %d, "
+               "3D scene %d)",
                menu ? "not racing, cap on" : "race running, menu cap off", cap, cap > 0 ? "" : " = no cap",
-               bikes, player, !dd::MenuScreen());
+               static_cast<unsigned>(race), started, bikes, player, !dd::MenuScreen());
   }
   if (cap <= 0) return;
   if (!g_timer) {

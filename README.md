@@ -484,7 +484,7 @@ The file has three parts:
 | `FullscreenMode` | `Desktop` | `Desktop`, `<w>x<h>`, `<w>x<h>@<Hz>` | With `Fullscreen=Exclusive` only: the screen mode. `Desktop` keeps the current mode. Without `@<Hz>`, the highest refresh rate is used. Example: `1024x768@85`. |
 | `VSync` | `1` | `0`, `1` | `1` waits for the monitor's refresh before showing each frame: no tearing, and the frame rate is limited to the refresh rate. `0` shows frames as soon as they are ready, with tearing where Windows allows it. |
 | `FrameCap` | `0` | `0`, frames/s | The most frames per second, on top of VSync. `0` = no cap. Useful with `VSync=0`. It does not change game speed. |
-| `MenuFpsCap` | `240` | `0`, frames/s | The most frames per second whenever a race isn't running (menus, rider and bike select, loading, pause, results), even with `VSync=0`. Races are not affected. `0` = no menu cap. If `FrameCap` is lower, that wins. |
+| `MenuFpsCap` | `240` | `0`, frames/s | The most frames per second outside races (menus, rider and bike select, loading, the pause menu), even with `VSync=0`. Races, including the intro and countdown, are not affected. `0` = no menu cap. If `FrameCap` is lower, that wins. |
 | `WideFov` | `1` | `0`, `1` | `1` widens the view on widescreen resolutions, so you see more to the sides. `0` keeps the 4:3 width and crops the top and bottom, like the original. |
 | `Fov` | `0` | `0`, 20-150 | Field of view in degrees, as a 4:3 screen would show it. `0` = the game's default (77). `WideFov` widens it further on widescreen, and the zoom keys still step from it. |
 | `RendererLabel` | `1` | `0`, `1` | Shows "Direct3D 11" or "Direct3D 9" in the bottom right corner of the menus, only while no 3D scene is being drawn. |
