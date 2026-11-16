@@ -56,6 +56,9 @@ struct Config {
   int renderer = 11;          // Renderer: 11 = Direct3D 11, 9 = Direct3D 9 (also used when D3D11 is missing)
   bool exclusive = false;     // Fullscreen: false = borderless window (default), true = exclusive fullscreen
   int fs_width = 0, fs_height = 0, fs_hz = 0;  // FullscreenMode: 0 = the desktop's
+  // DefaultResolution: the game's resolution until the player picks one in
+  // Options (then kept by size). -1 = off (the game's own choice), 0 = desktop.
+  int default_res_w = 0, default_res_h = 0;
   bool renderer_label = true;  // RendererLabel: name the active renderer in the corner of the menus
   bool gpu_text = true;       // GpuText: draw the game's GDI text on the GPU at screen resolution
   float hud_scale = 2.0f;     // HudScale: race HUD text panels drawn this many times larger (1..4)

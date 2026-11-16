@@ -15,3 +15,7 @@ bool SimDrawPoint(unsigned* tick, float* alpha);
 
 // True while races run at the fixed simulation rate.
 bool SimRacing();
+
+// DefaultResolution (fixes_resolution.cpp): once a frame, keep the game's
+// saved display mode pointed at the player's choice, or the desktop size.
+void ResolutionFrame();
