@@ -162,6 +162,7 @@ int g_rumble_pct = 100;
 float g_deadzone = 0.15f;
 float g_curve = 1.0f;          // XInputSteerCurve / 100: left stick X response exponent
 bool g_rumble_forces = false;  // XInputRumbleForces: steady stick forces rumble too
+float g_steer_smooth_us = 0;   // XInputSteerSmooth (ms) * 1000: steering follows the stick with this time constant
 LARGE_INTEGER g_freq;
 
 double NowUs() {
@@ -280,7 +281,7 @@ class Effect final : public IDirectInputEffect {
   void Strength(double now_us, float* low, float* high);
   // Force jumps at least this big (of 10000) rumble; the kick fades out
   // over kKickUs.
-  static constexpr double kKickThreshold = 2000, kKickUs = 250000;
+  static constexpr double kKickThreshold = 2000, kKickUs = 400000;
   double KickLevel(double now_us) const {
     const double t = now_us - kick_us_;
     return t >= kKickUs || t < 0 ? 0 : kick_ * (1.0 - t / kKickUs);
@@ -826,10 +827,13 @@ class Pad final : public IDirectInputDevice7A {
       patch::Log("xinput: controller %d %s", slot_ + 1, now_connected ? "connected" : "disconnected");
     }
     if (!now_connected) std::memset(&st, 0, sizeof st);  // neutral while unplugged
-    if (now_connected && st.dwPacketNumber == packet_ && have_packet_) return;
-    packet_ = st.dwPacketNumber;
-    have_packet_ = now_connected;
-    ++stats_packets_;
+    const bool same = now_connected && st.dwPacketNumber == packet_ && have_packet_;
+    if (same && !smoothing_) return;  // nothing new (unless steering is still catching up)
+    if (!same) {
+      packet_ = st.dwPacketNumber;
+      have_packet_ = now_connected;
+      ++stats_packets_;
+    }
 
     const XINPUT_GAMEPAD& g = st.Gamepad;
     float lx, ly, rx, ry;
@@ -838,6 +842,18 @@ class Pad final : public IDirectInputDevice7A {
     // cubes joystick steering (0x52e3e0: steer = x^3), so 33 gives a straight
     // line from stick to bike and 100 leaves the game's own curve.
     if (g_curve != 1.0f) lx = std::copysign(std::pow(std::fabs(lx), g_curve), lx);
+    // XInputSteerSmooth: steering eases toward the stick instead of jumping,
+    // which takes the edge off small thumb flicks.
+    if (g_steer_smooth_us > 0) {
+      const double now = NowUs();
+      const double dt = smooth_us_ > 0 ? std::min(100000.0, now - smooth_us_) : 100000.0;
+      smooth_us_ = now;
+      const float a = static_cast<float>(1.0 - std::exp(-dt / g_steer_smooth_us));
+      smooth_lx_ += (lx - smooth_lx_) * a;
+      if (std::fabs(lx - smooth_lx_) < 0.002f) smooth_lx_ = lx;
+      smoothing_ = smooth_lx_ != lx;
+      lx = smooth_lx_;
+    }
     Stick(g.sThumbRX, g.sThumbRY, &rx, &ry);
     const float lt = g.bLeftTrigger / 255.0f, rt = g.bRightTrigger / 255.0f;
     LONG v[kObjects];
@@ -954,8 +970,14 @@ class Pad final : public IDirectInputDevice7A {
     }
     if (!acquired_ || !actuators_ || paused_ || !fg) low = high = 0;
     const float k = static_cast<float>(ff_gain_) / 10000.0f * static_cast<float>(g_rumble_pct) / 100.0f;
-    auto motor = [&](float s) { return static_cast<WORD>(std::lround(std::min(1.0f, s * k) * 65535.0f)); };
-    SetMotors(motor(low), motor(high));
+    // Pad motors barely spin below about a fifth of full power, and the
+    // game's bumps are small forces: a square root curve makes them felt.
+    // Both motors run for low effects (the light one adds the sharp edge).
+    auto motor = [&](float s) {
+      const float x = std::min(1.0f, s * k);
+      return static_cast<WORD>(std::lround((x > 0 ? std::sqrt(x) : 0.0f) * 65535.0f));
+    };
+    SetMotors(motor(low), motor(std::max(high, low * 0.6f)));
   }
 
   void LogSummary() {
@@ -987,6 +1009,9 @@ class Pad final : public IDirectInputDevice7A {
   bool actuators_ = true, paused_ = false;
   std::vector<Effect*> effects_;
   WORD motor_low_ = 0, motor_high_ = 0;
+  float smooth_lx_ = 0;
+  double smooth_us_ = 0;
+  bool smoothing_ = false;
   // stats for XInputLog
   DWORD stats_packets_ = 0, stats_events_ = 0, stats_events_read_ = 0, stats_overflows_ = 0, stats_reads_ = 0,
         stats_motor_changes_ = 0;
@@ -1448,6 +1473,14 @@ namespace xpad {
 
 void Apply() {
   const Config& c = GetConfig();
+  if (c.keep_control_preset) {
+    // The game keeps the chosen control preset only while "use last
+    // controller" is on (0x528760 sets PresetSelected); otherwise every start
+    // resets it to the default for the device (0x44a1b0). Keep it whenever
+    // the controller is the same one (0x528630 still compares the IDs).
+    const unsigned char orig[] = {0x74, 0x40}, repl[] = {0x90, 0x90};
+    patch::Replace("input: keep control preset", 0x5286de, orig, sizeof orig, repl, sizeof repl);
+  }
   if (!c.xinput) {
     patch::Log("xinput: XInput=0, Xbox controllers stay as Windows' DirectInput devices");
     return;
@@ -1459,6 +1492,7 @@ void Apply() {
   g_deadzone = static_cast<float>(c.xinput_deadzone) / 100.0f;
   g_curve = static_cast<float>(c.xinput_steer_curve) / 100.0f;
   g_rumble_forces = c.xinput_rumble_forces;
+  g_steer_smooth_us = static_cast<float>(c.xinput_steer_smooth) * 1000.0f;
   g_trigger_buttons = c.xinput_trigger_buttons;
   constexpr uintptr_t kDirectInputCreateEx = 0x555028;  // DINPUT!DirectInputCreateEx
   if (!*reinterpret_cast<void**>(kDirectInputCreateEx)) {
@@ -1467,9 +1501,9 @@ void Apply() {
   }
   g_create = reinterpret_cast<CreateExFn>(
       patch::HookIat(kDirectInputCreateEx, reinterpret_cast<void*>(&MyDirectInputCreateEx)));
-  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputDeadzone=%d XInputSteerCurve=%d "
+  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputDeadzone=%d XInputSteerCurve=%d XInputSteerSmooth=%d KeepControlPreset=%d "
              "XInputTriggerButtons=%d XInputLog=%d)",
-             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_deadzone, c.xinput_steer_curve,
+             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
              g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
 }
 

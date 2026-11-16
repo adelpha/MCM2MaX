@@ -709,10 +709,20 @@ XInputDeadzone=15
 
 ; XInputSteerCurve: steering response of the left stick, 33-300. The game
 ; already turns a joystick's steering into a curve (gentle near the centre,
-; steep near the edge). 100 = the game's own curve (default); lower is more
-; even (33 = the bike follows the stick in a straight line); higher is softer
-; near the centre and steeper at the edge.
-XInputSteerCurve=100
+; steep near the edge). 33 = the bike follows the stick in a straight line
+; (default); 100 = the game's own curve; higher is softer near the centre and
+; steeper at the edge.
+XInputSteerCurve=33
+
+; XInputSteerSmooth: how long, in milliseconds, the steering takes to catch
+; up with the left stick, 0-500. Takes the edge off small thumb movements;
+; too much feels sluggish. 0 = off (default). Try 50-100.
+XInputSteerSmooth=0
+
+; KeepControlPreset: 1 = the control preset you chose (Options > Controls)
+; is kept between runs as long as the same controller is used (default). The
+; game itself only keeps it when its "use last controller" setting is on.
+KeepControlPreset=1
 
 ; PreciseTimer: 1 = the game's frame time is measured with the precise
 ; QueryPerformanceCounter instead of whole milliseconds (default). Only used
