@@ -489,6 +489,7 @@ bool ResizeSwapchain() {
 DWORD g_fs_last_try = 0;
 unsigned g_fs_enters = 0, g_fs_failures = 0;
 int g_fs_target_w = -1, g_fs_target_h = -1, g_fs_target_hz = -1;  // the mode last asked for (0 = desktop)
+DWORD g_fs_check_at = 0;  // when to log the screen mode Windows reports after a switch
 bool g_fs_changed_mode = false;              // ResizeTarget moved the screen off the desktop mode
 
 // The screen mode wanted: ExclusiveResolution or the player's pick
@@ -576,6 +577,7 @@ void ApplyExclusiveMode11(IDXGIOutput* out, const char* why) {
     Log("exclusive: %s: screen mode %ux%u@%.2f Hz for %s %dx%d (ResizeTarget %08lx)", why, m.Width, m.Height,
         Hz(m.RefreshRate), "ExclusiveResolution", w, h, hr);
   b.swap_w = b.swap_h = 0;  // buffers follow the new size on the next frame
+  g_fs_check_at = GetTickCount() + 1500;
 }
 
 void EnterExclusive11() {
@@ -606,11 +608,27 @@ void EnterExclusive11() {
   RECT rc{};
   GetClientRect(b.hwnd, &rc);
   Log("exclusive: entered fullscreen (#%u), window client %ldx%ld", g_fs_enters, rc.right, rc.bottom);
+  g_fs_check_at = GetTickCount() + 1500;
 }
 
 void TrackExclusive11() {
   Backend& b = g_backend;
   if (!b.swapchain) return;
+  if (g_fs_check_at && static_cast<int>(GetTickCount() - g_fs_check_at) >= 0) {
+    // What Windows says the monitor runs at now (StOo saw 144 Hz after
+    // picking a 60 Hz mode): tells a refused switch from a driver override.
+    g_fs_check_at = 0;
+    DEVMODEA dm{};
+    dm.dmSize = sizeof(dm);
+    const char* dev = display::DeviceName();
+    if (EnumDisplaySettingsA(dev[0] ? dev : nullptr, ENUM_CURRENT_SETTINGS, &dm))
+      Log("exclusive: Windows reports %s at %lux%lu@%lu Hz now", dev[0] ? dev : "the display", dm.dmPelsWidth,
+          dm.dmPelsHeight, dm.dmDisplayFrequency);
+    DXGI_SWAP_CHAIN_FULLSCREEN_DESC fd{};
+    if (SUCCEEDED(b.swapchain->GetFullscreenDesc(&fd)))
+      Log("exclusive: swap chain fullscreen desc refresh %u/%u, windowed %d", fd.RefreshRate.Numerator,
+          fd.RefreshRate.Denominator, fd.Windowed);
+  }
   static BOOL was = FALSE;
   if (!GetConfig().exclusive) {
     // Switched to Borderless in Options: leave fullscreen (Windows puts the
