@@ -96,7 +96,7 @@ void ApplyStep1Fixes() {
     SetProcessAffinityMask(GetCurrentProcess(), 1);
     patch::Log("one-core: pinned to CPU 0");
   } else {
-    patch::Log("one-core: off (mcm2fix.ini OneCore=0)");
+    patch::Log("one-core: off (mcm2max.ini OneCore=0)");
   }
   ApplyFlipRetry();
   ApplyNoAdmin();

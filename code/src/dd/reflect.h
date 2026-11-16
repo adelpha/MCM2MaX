@@ -38,7 +38,7 @@ struct ReflectReplay {
   ID3D11Buffer* ib;
 };
 
-// Settings (read from mcm2fix.ini once).
+// Settings (read from mcm2max.ini once).
 int ReflectMode();  // 0 off, 1 sky cube, 2 live cube
 // ReflectMaxRange: sets r.lo/hi/bounded from a sample of the draw's
 // positions (pos: first position, `stride` apart, through r.world) and says

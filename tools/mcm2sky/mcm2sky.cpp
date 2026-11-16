@@ -1,6 +1,6 @@
 // mcm2sky: pull the sky boxes out of Motocross Madness 2, stitch each one into
 // a single picture for editing, and cut an edited picture back into tiles that
-// mcm2fix's texture replacement picks up (textures\<file>_<offset>.png).
+// MCM2MaX's texture replacement picks up (textures\<file>_<offset>.png).
 //
 //   mcm2sky extract [game folder] [-o output folder]
 //   mcm2sky split <picture.png> [more pictures...] [-o output folder] [--seams average|none]
@@ -333,7 +333,7 @@ struct Sky {
   std::vector<Tile> tiles;
 };
 
-uint8_t Expand5(unsigned v) { return static_cast<uint8_t>((v * 255 + 15) / 31); }  // as mcm2fix's dump
+uint8_t Expand5(unsigned v) { return static_cast<uint8_t>((v * 255 + 15) / 31); }  // as MCM2MaX's dump
 
 bool ParseCube(const Archive& ar, const Member& m, Sky& sky, std::string& err) {
   std::vector<uint8_t> c;
@@ -778,7 +778,7 @@ void Split(const std::vector<std::string>& files, std::string out, bool seams, c
     std::printf("  wrote 48 tiles of %dx%d to %s\n", ts, ts, dir.c_str());
   }
   std::printf(
-      "\nCopy the tiles into %%LOCALAPPDATA%%\\Motocross Madness 2\\textures\\ (TextureReplace=1 in mcm2fix.ini).\n");
+      "\nCopy the tiles into %%LOCALAPPDATA%%\\Motocross Madness 2\\textures\\ (TextureReplace=1 in mcm2max.ini).\n");
 }
 
 // ---------------------------------------------------------------- main
@@ -799,13 +799,13 @@ void Pause() {
 }
 
 const char kUsage[] =
-    "mcm2sky - Motocross Madness 2 sky box tool (mcm2fix)\n"
+    "mcm2sky - Motocross Madness 2 sky box tool (MCM2MaX)\n"
     "\n"
     "  mcm2sky extract [game folder] [-o folder]\n"
     "      Writes every sky box as one picture, <sky>_sky.png, into the folder\n"
     "      (default: skies\\ next to mcm2sky.exe), plus skies.txt and tracks.txt.\n"
     "  mcm2sky split <picture.png>... [-o folder] [--seams average|none]\n"
-    "      Cuts edited pictures back into the game's tiles, named for mcm2fix's\n"
+    "      Cuts edited pictures back into the game's tiles, named for MCM2MaX's\n"
     "      textures folder (default: textures\\ next to the picture).\n"
     "\n"
     "Double-click: extract (finds the game next to or above the tool).\n"

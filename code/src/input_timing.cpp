@@ -22,7 +22,7 @@
 // So the same hands on the controls give different riding depending on
 // frame times.
 //
-// With InputTiming=1 mcm2fix sits between the game and DirectInput:
+// With InputTiming=1 MCM2MaX sits between the game and DirectInput:
 //   - buffered events (keyboard, buffered joystick) are kept in a queue and
 //     each step gets only the events stamped up to the end of that step's
 //     slice of real time; the frame's last step gets the rest, so nothing is
@@ -434,7 +434,7 @@ HRESULT WINAPI MyGetData(void* self, DWORD cb, DiData* data, DWORD* inout, DWORD
   if (g_alt_tab && IsLost(hr)) {
     if (GameInFront() && SUCCEEDED(TryAcquire(*d, self, hr))) {
       hr = Drain(*d, self);
-      if (SUCCEEDED(hr)) Resync(*d, self, "acquired again by mcm2fix");
+      if (SUCCEEDED(hr)) Resync(*d, self, "acquired again by MCM2MaX");
       d->away = d->polled_lost = false;
     } else if (d->kind == kKeyboard) {
       if (!d->away) ReleaseAll(*d, IsLost(hr) && hr == static_cast<HRESULT>(0x8007001E) ? "lost (INPUTLOST), game not in front" : "lost (NOTACQUIRED), game not in front");

@@ -49,7 +49,7 @@
 //             every node whose box covers it
 // Ruled out on the way (StOo's tests): culling, the far plane, the
 // one-colour far terrain, the terrain caches' trim limits, re-meshing empty
-// collapsed blocks (75% of collapsed blocks are empty normally), mcm2fix's
+// collapsed blocks (75% of collapsed blocks are empty normally), MCM2MaX's
 // renderer (the gaps showed on Direct3D 9 with batching off too), the
 // detail-number overflow, the detail level.
 #include <windows.h>

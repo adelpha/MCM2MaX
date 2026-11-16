@@ -2,12 +2,12 @@
 """Summarise a Profile=1 run (see code/src/prof.cpp).
 
     tools/perf_report.py perf-<stamp>.csv [perf-samples-<stamp>.txt]
-        [--exe Mcm2_fixed.exe] [--dll mcm2fix.dll (unstripped)]
+        [--exe Mcm2_fixed.exe] [--dll MCM2MaX.dll (unstripped)]
 
 Prints frame-time statistics per state (menu / race), the cost of each timed
 section, and the sampling profile with game addresses grouped by function
 (function starts = call targets in the exe's disassembly, via objdump) and
-mcm2fix addresses named with addr2line.
+MCM2MaX addresses named with addr2line.
 """
 import argparse
 import bisect
@@ -88,7 +88,7 @@ class ExeMap:
 
 
 class DllMap:
-    """mcm2fix offsets to function names from the (unstripped) DLL's symbol table."""
+    """MCM2MaX offsets to function names from the (unstripped) DLL's symbol table."""
 
     def __init__(self, dll):
         self.syms = []
@@ -128,7 +128,7 @@ def report_samples(path, exe, dll):
             if 0x401000 <= a < 0x556000:
                 return f"exe:{a:06x}"
             if dll_base <= a < dll_end:
-                return f"mcm2fix+{a - dll_base:05x}"
+                return f"MCM2MaX+{a - dll_base:05x}"
         return where
 
     for line in open(path):
@@ -155,8 +155,8 @@ def report_samples(path, exe, dll):
         if where.startswith("exe:"):
             a = int(where[4:], 16)
             return f"game fn {em.func(a):06x}" if em.starts else where
-        if where.startswith("mcm2fix+"):
-            return "mcm2fix " + dm.name(int(where[8:], 16))
+        if where.startswith("MCM2MaX+"):
+            return "MCM2MaX " + dm.name(int(where[8:], 16))
         return where
 
     print("\n== where the game thread was (self), by function")
@@ -189,7 +189,7 @@ def report_samples(path, exe, dll):
         agg[(zone, f"{em.func(a):06x} (ret {a:06x})")] += n
     for (z, k), n in sorted(agg.items(), key=lambda kv: -kv[1])[:50]:
         print(f"   {100 * n / total:5.1f}% {z:14s} {k}")
-    print("\n== mcm2fix code that called into Windows / driver (dllcall)")
+    print("\n== MCM2MaX code that called into Windows / driver (dllcall)")
     agg = defaultdict(int)
     for zone, where, n in rows["dllcall"]:
         agg[(zone, label(where))] += n
@@ -203,7 +203,7 @@ def report_samples(path, exe, dll):
         for z in sorted(byzone, key=lambda z: -sum(n for n, _ in byzone[z])):
             items = sorted(byzone[z], reverse=True)
             tot = sum(n for n, _ in items)
-            print(f"   -- {z}: {tot} samples outside game/mcm2fix code")
+            print(f"   -- {z}: {tot} samples outside game/MCM2MaX code")
             for n, where in items[:15]:
                 chain = where.split("<")
                 if chain[-1].startswith("exe:"):

@@ -11,7 +11,7 @@ Check that none of these exist. If any do, remove them or use another machine.
 
 - `C:\Windows\SysWOW64\d3drm.dll`
 - Any Indeo codec (`ir50_32.dll` in SysWOW64)
-- `HKCU\Software\mcm2fix` and `HKCU\Software\Microsoft\Microsoft Games\Motocross Madness 2`
+- `HKCU\Software\MCM2MaX` and `HKCU\Software\Microsoft\Microsoft Games\Motocross Madness 2`
 - `HKLM\SOFTWARE\WOW6432Node\Microsoft\Microsoft Games\Motocross Madness 2`
 - Compatibility flags for Mcm2.exe under
   `HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers`
@@ -24,7 +24,7 @@ Check that none of these exist. If any do, remove them or use another machine.
    `C:\Games\MCM2`. Use a copy of an installed game folder or the files from
    the CD, with the supported `Mcm2.exe` (see `package/README.txt`).
    Record which method was used.
-2. Unzip the release into that folder: `d3drm.dll`, `mcm2fix.ini`,
+2. Unzip the release into that folder: `d3drm.dll`, `mcm2max.ini`,
    `MCM2HELP.html`, `README.txt`, `README.md`, `FONTS\`, `licenses\`.
 3. Do not change any compatibility settings. Run as a standard
    (non-administrator) user.
@@ -50,11 +50,11 @@ Double-click `Mcm2.exe` and check each item:
 
 ## After
 
-- [ ] The newest `%LOCALAPPDATA%\Motocross Madness 2\logs\mcm2fix-*.log` exists. It starts with
-      "mcm2fix loaded" and has no "not applied" or "skipped" lines.
+- [ ] The newest `%LOCALAPPDATA%\Motocross Madness 2\logs\MCM2MaX-*.log` exists. It starts with
+      "MCM2MaX loaded" and has no "not applied" or "skipped" lines.
 - [ ] Nothing new in the game folder except what the zip added. Profiles and
       saves are under `%LOCALAPPDATA%\Motocross Madness 2`.
-- [ ] Settings are under `HKCU\Software\mcm2fix\Motocross Madness 2`, and
+- [ ] Settings are under `HKCU\Software\MCM2MaX\Motocross Madness 2`, and
       nothing was written under HKLM.
 - [ ] Process Monitor (optional): filter on Mcm2.exe and Result
       "ACCESS DENIED". Nothing important should show up.

@@ -1,10 +1,10 @@
 #!/bin/sh
-# Makes the release zip: d3drm.dll (mcm2fix, drop-in next to Mcm2.exe),
-# mcm2fix.ini with every setting at its default, README.txt, README.md, licences, the
+# Makes the release zip: d3drm.dll (MCM2MaX, drop-in next to Mcm2.exe),
+# mcm2max.ini with every setting at its default, README.txt, README.md, licences, the
 # HUD fonts (FONTS\, SIL Open Font License) and the race announcer sounds
 # (SOUNDS\, played by Announcer=1) and the MenuFlag main menu picture (UI\).
 #
-#   tools/package.sh <mcm2fix.dll> <output zip> [MCM2HELP.HLP]
+#   tools/package.sh <MCM2MaX.dll> <output zip> [MCM2HELP.HLP]
 #
 # The zip includes package/MCM2HELP.html (the game's help file converted by
 # tools/hlp2html.py), which the in-game Help buttons open. Pass the game's
@@ -23,8 +23,8 @@ if command -v i686-w64-mingw32-strip >/dev/null 2>&1; then
 fi
 # The ini block documented in code/README.md, with Windows line endings.
 awk '/^```ini$/{on=1; next} /^```$/{if(on) exit} on' "$ROOT/code/README.md" |
-  sed 's/$/\r/' > "$STAGE/mcm2fix.ini"
-grep -q '^\[mcm2fix\]' "$STAGE/mcm2fix.ini"
+  sed 's/$/\r/' > "$STAGE/mcm2max.ini"
+grep -q '^\[MCM2MaX\]' "$STAGE/mcm2max.ini"
 sed 's/$/\r/' "$ROOT/package/README.txt" > "$STAGE/README.txt"
 # The full project README (every fix, feature and setting).
 sed 's/$/\r/' "$ROOT/README.md" > "$STAGE/README.md"
@@ -36,7 +36,7 @@ done
 mkdir "$STAGE/FONTS"
 cp "$ROOT"/package/FONTS/*.ttf "$STAGE/FONTS/"
 # Announcer sounds (Announcer in code/README.md). The game has no SOUNDS\
-# folder of its own; mcm2fix reads them from SOUNDS\ next to Mcm2.exe.
+# folder of its own; MCM2MaX reads them from SOUNDS\ next to Mcm2.exe.
 mkdir "$STAGE/SOUNDS"
 cp "$ROOT"/package/SOUNDS/*.wav "$STAGE/SOUNDS/"
 
@@ -50,7 +50,7 @@ if [ -n "$HLP" ]; then
 else
   cp "$ROOT/package/MCM2HELP.html" "$STAGE/MCM2HELP.html"
 fi
-FILES="d3drm.dll mcm2fix.ini README.txt README.md licenses MCM2HELP.html FONTS SOUNDS UI"
+FILES="d3drm.dll mcm2max.ini README.txt README.md licenses MCM2HELP.html FONTS SOUNDS UI"
 
 rm -f "$OUT"
 OUT_ABS=$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")

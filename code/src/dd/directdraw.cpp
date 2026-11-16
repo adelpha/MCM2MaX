@@ -298,7 +298,7 @@ HRESULT DirectDraw::GetDeviceIdentifier(LPDDDEVICEIDENTIFIER2 id, DWORD) {
   InitDevice();
   std::memset(id, 0, sizeof(*id));
   Backend& b = B();
-  std::snprintf(id->szDriver, sizeof(id->szDriver), "mcm2fix");
+  std::snprintf(id->szDriver, sizeof(id->szDriver), "MCM2MaX");
   std::snprintf(id->szDescription, sizeof(id->szDescription), "%s", b.adapter_name);
   id->liDriverVersion.QuadPart = 0x0006000E00010000LL;  // 6.14.1.0
   id->dwVendorId = b.vendor_id;

@@ -2,7 +2,7 @@
 
 `mcm2sky.exe` pulls every sky box out of the game's `RES\SKIES.RES`, stitches
 each one into a single picture you can paint on, and cuts an edited picture
-back into the 48 tiles the game uses, named so mcm2fix's texture replacement
+back into the 48 tiles the game uses, named so MCM2MaX's texture replacement
 picks them up (`textures\<file>_<offset>.png`). It reads the original game
 files and never changes them.
 

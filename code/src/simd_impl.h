@@ -9,7 +9,7 @@
 
 namespace simd {
 
-#define MCM2FIX_SIMD_KERNELS(NS)                                                                       \
+#define MCM2MAX_SIMD_KERNELS(NS)                                                                       \
   namespace NS {                                                                                       \
   void Expand16(const Format16& f, const uint16_t* src, uint8_t* dst, unsigned n);                     \
   void PackTo565(const uint8_t* src, uint16_t* dst, unsigned n);                                       \
@@ -27,8 +27,8 @@ namespace simd {
                       uint32_t stride);                                                                \
   }
 
-MCM2FIX_SIMD_KERNELS(plain)
-MCM2FIX_SIMD_KERNELS(sse2)
+MCM2MAX_SIMD_KERNELS(plain)
+MCM2MAX_SIMD_KERNELS(sse2)
 
 // Defaults for vertex fields the game's format lacks.
 extern const uint32_t kWhite;

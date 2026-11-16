@@ -6,7 +6,7 @@
 //   offset of the faulting code, and the return addresses found on the stack.
 //   The game may handle some of these itself, so the first few are logged and
 //   the rest counted.
-// - An unhandled fault also writes logs\mcm2fix-<date>-<time>.dmp (dbghelp's
+// - An unhandled fault also writes logs\MCM2MaX-<date>-<time>.dmp (dbghelp's
 //   MiniDumpWriteDump, loaded when needed).
 // - The game's ExitProcess call is logged with its exit code and caller, so a
 //   quit to the desktop that is not a crash is told apart from one that is.
@@ -164,7 +164,7 @@ void WriteDump(EXCEPTION_POINTERS* ep) {
   SYSTEMTIME st;
   GetLocalTime(&st);
   char path[MAX_PATH];
-  std::snprintf(path, sizeof(path), "%s\\mcm2fix-%04u%02u%02u-%02u%02u%02u.dmp", dir.c_str(), st.wYear, st.wMonth,
+  std::snprintf(path, sizeof(path), "%s\\MCM2MaX-%04u%02u%02u-%02u%02u%02u.dmp", dir.c_str(), st.wYear, st.wMonth,
                 st.wDay, st.wHour, st.wMinute, st.wSecond);
   HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (f == INVALID_HANDLE_VALUE) {
@@ -292,7 +292,7 @@ void LogHeaps() {
     }
     if (busy >= (1u << 20) || i == 0)
       patch::Log("memory: heap %p%s%s: %u MB in use in %u blocks (%u MB committed in regions)", heaps[i],
-                 heaps[i] == GetProcessHeap() ? " (process)" : "", heaps[i] == crt ? " (mcm2fix)" : "",
+                 heaps[i] == GetProcessHeap() ? " (process)" : "", heaps[i] == crt ? " (MCM2MaX)" : "",
                  static_cast<unsigned>(busy >> 20), blocks, static_cast<unsigned>(region >> 20));
   }
   patch::Log("memory: %lu heaps checked in %lu ms, %lu bad; %ld faults so far", n, GetTickCount() - t0, bad,
@@ -302,7 +302,7 @@ void LogHeaps() {
 }  // namespace
 
 // Called at each display mode change: memory use, every heap, and what
-// mcm2fix itself holds (to find what grows from race to race).
+// MCM2MaX itself holds (to find what grows from race to race).
 void OnModeChange(DWORD w, DWORD h) {
   if (!GetConfig().log) return;
   static unsigned changes = 0;

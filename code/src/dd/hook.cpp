@@ -1,5 +1,5 @@
 // Installs the D3D11 backend: Mcm2.exe's DirectDrawCreateEx import is pointed
-// at mcm2fix's own DirectDraw implementation.
+// at MCM2MaX's own DirectDraw implementation.
 #include <windows.h>
 
 #include "../patch.h"

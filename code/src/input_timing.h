@@ -5,7 +5,7 @@
 
 namespace input {
 
-// Hook DirectInput (InputTiming in mcm2fix.ini). Call once at startup.
+// Hook DirectInput (InputTiming in mcm2max.ini). Call once at startup.
 void Apply();
 
 // Before each simulation step. now = QPC at the start of the frame's tick,

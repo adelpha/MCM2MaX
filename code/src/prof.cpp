@@ -207,7 +207,7 @@ struct Sample {
   int zone;
   uint32_t eip;      // exact for exe/DLL code, else the module base | 1
   uint32_t exe_ret;  // first game return address on the stack (0 if none)
-  uint32_t dll_ret;  // first mcm2fix return address on the stack (0 if none)
+  uint32_t dll_ret;  // first MCM2MaX return address on the stack (0 if none)
 };
 constexpr unsigned kRing = 1 << 14;
 Sample g_ring[kRing];
@@ -273,7 +273,7 @@ std::string Describe(uint32_t a) {
     return buf;
   }
   if (InDll(a)) {
-    std::snprintf(buf, sizeof(buf), "mcm2fix+%05x", static_cast<unsigned>(a - g_dll_base));
+    std::snprintf(buf, sizeof(buf), "MCM2MaX+%05x", static_cast<unsigned>(a - g_dll_base));
     return buf;
   }
   std::snprintf(buf, sizeof(buf), "exe:%06x", a);
@@ -432,7 +432,7 @@ void TakeSample() {
       }
       if (InDll(v) && AfterCall(v)) {
         char b[32];
-        std::snprintf(b, sizeof(b), "<mcm2fix+%05x", static_cast<unsigned>(v - g_dll_base));
+        std::snprintf(b, sizeof(b), "<MCM2MaX+%05x", static_cast<unsigned>(v - g_dll_base));
         via += b;
         ++parts;
         continue;
@@ -485,10 +485,10 @@ void DumpSamples() {
   {
     if (!TryEnterCriticalSection(&g_map_cs)) return;
     std::snprintf(line, sizeof(line),
-                  "# mcm2fix sampling profile: %u samples every %d us (%u failed); dll base %08x code end +%x\n"
+                  "# MCM2MaX sampling profile: %u samples every %d us (%u failed); dll base %08x code end +%x\n"
                   "# self <zone> <where> <n>: where the game thread was\n"
                   "# execall <zone> <game return address> <n>: game code that called into a DLL (ours, Windows, driver)\n"
-                  "# dllcall <zone> <mcm2fix return address> <n>: our code that called into Windows/driver\n"
+                  "# dllcall <zone> <MCM2MaX return address> <n>: our code that called into Windows/driver\n"
                   "# incl - <game return address or address> <n>: game call sites on the stack (inclusive)\n"
                   "# via <zone> <where<caller<...<game return address> <n>: call chain into Windows/driver code\n",
                   g_total_samples, GetConfig().profile_sample_us, g_failed_samples, static_cast<unsigned>(g_dll_base),
@@ -949,7 +949,7 @@ void Start() {
   OpenFiles();
   g_on = true;
   LogSystem();
-  patch::Log("perf: exe code %08x-%08x, mcm2fix %08x-%08x, files perf-%s.csv / perf-samples-%s.txt",
+  patch::Log("perf: exe code %08x-%08x, MCM2MaX %08x-%08x, files perf-%s.csv / perf-samples-%s.txt",
              static_cast<unsigned>(g_exe_lo), static_cast<unsigned>(g_exe_hi), static_cast<unsigned>(g_dll_lo),
              static_cast<unsigned>(g_dll_hi), g_stamp, g_stamp);
   g_sampler = CreateThread(nullptr, 0, SamplerMain, nullptr, 0, nullptr);

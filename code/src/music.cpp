@@ -1,7 +1,7 @@
-// Optional music for the menus and races ([Music] section of mcm2fix.ini).
+// Optional music for the menus and races ([Music] section of mcm2max.ini).
 //
 // Mcm2.exe has no music player of its own (only an unused CD-audio class at
-// 0x432080..0x432268 that opens "cdaudio" but never plays), so mcm2fix plays
+// 0x432080..0x432268 that opens "cdaudio" but never plays), so MCM2MaX plays
 // music files itself: WAV, FLAC or MP3 (dr_libs, music_decoders.cpp), in
 // stereo through waveOut on a thread of its own. waveOut is outside
 // DirectSound, so neither the game's 3D positioning nor EAX reverb (DSOAL)
@@ -121,7 +121,7 @@ void LoadSettings() {
   GetModuleFileNameA(nullptr, path, MAX_PATH);
   if (char* slash = std::strrchr(path, '\\')) *slash = '\0';
   S.game_dir = path;
-  S.ini = S.game_dir + "\\mcm2fix.ini";
+  S.ini = IniPath();
   const std::string local = xp::LocalAppData();
   if (!local.empty()) S.user_dir = local + "\\Motocross Madness 2";
 
@@ -770,7 +770,7 @@ bool Enabled() {
 void Apply() {
   LoadSettings();
   if (!S.any) {
-    patch::Log("music: off (no music set in the [Music] section of mcm2fix.ini)");
+    patch::Log("music: off (no music set in the [Music] section of mcm2max.ini)");
     return;
   }
   InitializeCriticalSection(&g_cs);

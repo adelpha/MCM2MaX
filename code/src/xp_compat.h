@@ -1,4 +1,4 @@
-// Windows XP support: helpers for the few Windows calls mcm2fix needs that
+// Windows XP support: helpers for the few Windows calls MCM2MaX needs that
 // XP does not have (or names differently). Every helper uses the modern call
 // when the system has it and an XP-era equivalent otherwise.
 #pragma once

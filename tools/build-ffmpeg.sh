@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds a tiny static FFmpeg (libavcodec + libavutil, Indeo 5 decoder only)
-# for 32-bit Windows with MinGW, for mcm2fix's video player.
+# for 32-bit Windows with MinGW, for MCM2MaX's video player.
 #
 #   tools/build-ffmpeg.sh <work dir>
 #
@@ -10,7 +10,7 @@
 # after configure, so the DLL imports nothing XP lacks.
 #
 # The result is installed in <work dir>/install; pass that to CMake as
-# -DMCM2FIX_FFMPEG=<work dir>/install. FFmpeg is LGPL 2.1 or later.
+# -DMCM2MaX_FFMPEG=<work dir>/install. FFmpeg is LGPL 2.1 or later.
 set -eu
 WORK=$(mkdir -p "$1" && cd "$1" && pwd)
 VERSION=n7.1

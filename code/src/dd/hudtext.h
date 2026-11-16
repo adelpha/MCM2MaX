@@ -1,5 +1,5 @@
 // Race HUD panel text (instrument overlay: position, lap, times), drawn by
-// mcm2fix on screen instead of baked into the panel texture.
+// MCM2MaX on screen instead of baked into the panel texture.
 //
 // The game draws each panel's text with GDI (DrawTextA/TextOutA, white) on a
 // scratch texture, then a routine (0x4bafd0) copies the white pixels into
