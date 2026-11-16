@@ -54,6 +54,15 @@
 //     cell (64 wide); texels map with uv * 0.9375 + 0.03125.
 //   * .slt models (ECO.RES trees) are text: materials, then per LOD/surface
 //     vertices (x, y, z, normal, u, v, ...) and faces.
+//   * .tdf track files (one per race, "%s\%s%02d.tdf", read by 0x51b550 from
+//     bikerace.cpp 0x418f6f): a tag byte, then its value; unknown tags (0)
+//     have none. 1 u32 path count; 2/3 float x/z offset; 4 float scale;
+//     5 u32 select path; 6 u32 path flags; 7 float (path +4, scaled);
+//     8 new node; 9/10/11 node centre/side/side points (x*scale + x offset,
+//     y*scale, z*scale + z offset); 12 float (read and dropped); 13 u32 count
+//     of next paths; 14 u32 slot, u32 path = which path follows; 15/16 the
+//     start and finish lines: 10 floats, point, direction, half-width vector,
+//     width (point and vector scaled like nodes).
 #include <algorithm>
 #include <cctype>
 #include <cstdarg>
@@ -1100,9 +1109,134 @@ struct Ini {
   }
 };
 
+// A race's track file (.tdf), parsed the way the game's loader 0x51b550 does.
+struct Course {
+  struct Node {
+    float c[3], a[3], b[3];  // centre and the two side points, feet
+  };
+  struct Path {
+    bool used = false;
+    uint32_t flags = 0;
+    std::vector<Node> nodes;
+    std::vector<int> next;  // paths that follow this one
+  };
+  struct Gate {
+    bool set = false;
+    float p[3], dir[3], half[3], width;
+  };
+  std::vector<Path> paths;
+  Gate start, finish;
+  float scale = 1, ox = 0, oz = 0;
+  std::string error;
+
+  bool Parse(const std::vector<uint8_t>& d) {
+    size_t p = 0;
+    int cur = -1;
+    auto need = [&](size_t n) {
+      if (p + n > d.size()) {
+        error = Fmt("record cut short at byte %zu", p);
+        return false;
+      }
+      return true;
+    };
+    auto pt = [&](float* o) {
+      for (int i = 0; i < 3; ++i) o[i] = F32(&d[p + 4 * i]);
+      o[0] = o[0] * scale + ox, o[1] *= scale, o[2] = o[2] * scale + oz;
+      p += 12;
+    };
+    auto path = [&]() -> Path* { return cur >= 0 && cur < static_cast<int>(paths.size()) ? &paths[cur] : nullptr; };
+    while (p < d.size()) {
+      const int t = d[p++];
+      switch (t) {
+        case 1:
+          if (!need(4)) return false;
+          if (U32(&d[p]) > 1000) return error = "bad path count", false;
+          paths.assign(U32(&d[p]), Path());
+          p += 4;
+          break;
+        case 2: case 3: case 4: case 7: case 12:
+          if (!need(4)) return false;
+          if (t == 2) ox = F32(&d[p]);
+          if (t == 3) oz = F32(&d[p]);
+          if (t == 4) scale = F32(&d[p]);
+          p += 4;
+          break;
+        case 5:
+          if (!need(4)) return false;
+          cur = static_cast<int>(U32(&d[p]));
+          p += 4;
+          if (!path()) return error = Fmt("path %d out of range", cur), false;
+          path()->used = true;
+          break;
+        case 6:
+          if (!need(4) || !path()) return error.empty() ? (error = "flags before a path", false) : false;
+          path()->flags = U32(&d[p]) | 1;
+          p += 4;
+          break;
+        case 8:
+          if (!path()) return error = "node before a path", false;
+          path()->nodes.push_back(Node{});
+          break;
+        case 9: case 10: case 11:
+          if (!need(12)) return false;
+          if (!path() || path()->nodes.empty()) return error = "point before a node", false;
+          pt(t == 9 ? path()->nodes.back().c : t == 10 ? path()->nodes.back().a : path()->nodes.back().b);
+          break;
+        case 13:
+          if (!need(4) || !path()) return error.empty() ? (error = "links before a path", false) : false;
+          if (U32(&d[p]) > 1000) return error = "bad link count", false;
+          path()->next.assign(U32(&d[p]), -1);
+          p += 4;
+          break;
+        case 14: {
+          if (!need(8) || !path()) return error.empty() ? (error = "link before a path", false) : false;
+          const uint32_t slot = U32(&d[p]), to = U32(&d[p + 4]);
+          p += 8;
+          if (slot < path()->next.size() && to < paths.size()) path()->next[slot] = static_cast<int>(to);
+          break;
+        }
+        case 15: case 16: {
+          if (!need(40)) return false;
+          Gate& g = t == 15 ? start : finish;
+          float v[10];
+          for (int i = 0; i < 10; ++i) v[i] = F32(&d[p + 4 * i]);
+          p += 40;
+          g.set = true;
+          g.p[0] = v[0] * scale + ox, g.p[1] = v[1] * scale, g.p[2] = v[2] * scale + oz;
+          for (int i = 0; i < 3; ++i) g.dir[i] = v[3 + i], g.half[i] = v[6 + i] * scale;
+          g.width = v[9] * scale;
+          break;
+        }
+        default:
+          break;  // no value
+      }
+    }
+    return true;
+  }
+  size_t NodeCount() const {
+    size_t n = 0;
+    for (const Path& q : paths) n += q.nodes.size();
+    return n;
+  }
+  static double Dist(const float* a, const float* b) { return std::hypot(a[0] - b[0], a[2] - b[2]); }
+  double Length(const Path& q) const {
+    double l = 0;
+    for (size_t i = 1; i < q.nodes.size(); ++i) l += Dist(q.nodes[i - 1].c, q.nodes[i].c);
+    return l;
+  }
+  bool HasSides() const {
+    for (const Path& q : paths)
+      for (const Node& n : q.nodes)
+        if (Dist(n.a, n.c) > 0.5 || Dist(n.b, n.c) > 0.5) return true;
+    return false;
+  }
+};
+
 struct Race {
-  std::string name, file;
+  std::string name, file, tdf;
   std::vector<std::pair<double, double>> pts;  // x, z
+  Course course;
+  bool has_course = false;
 };
 
 struct TrackEntry {
@@ -1385,11 +1519,44 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
     }
     races.push_back(r);
   }
+  // Track files (.tdf): the course of the race with the same name, or a race
+  // of their own (stadiums have no waypoint file).
+  for (auto& kv : members) {
+    if (Ext(kv.first) != "tdf") continue;
+    Race* r = nullptr;
+    for (Race& q : races)
+      if (Lower(StripExt(q.file)) == Lower(StripExt(kv.first))) r = &q;
+    if (!r) {
+      races.push_back(Race());
+      r = &races.back();
+      r->file = kv.first;
+    }
+    r->tdf = kv.first;
+    std::vector<uint8_t> d;
+    ar.ReadMember(*kv.second, d);
+    if (r->course.Parse(d)) {
+      r->has_course = true;
+      Log("    %s: %zu paths, %zu nodes%s%s%s", kv.first.c_str(), r->course.paths.size(), r->course.NodeCount(),
+          r->course.HasSides() ? ", with sides" : "", r->course.start.set ? ", start line" : "",
+          r->course.finish.set ? ", finish line" : "");
+    } else {
+      Log("  %s %s: %s", ar.name().c_str(), kv.first.c_str(), r->course.error.c_str());
+      ++g_count.failed;
+    }
+  }
   std::sort(races.begin(), races.end(), [](const Race& a, const Race& b) { return Lower(a.file) < Lower(b.file); });
   for (size_t i = 0; i < races.size(); ++i) {
-    races[i].name = scn.Get("SceneInfo", Fmt("WaypointRaceName%d", static_cast<int>(i) + 1), StripExt(races[i].file));
-    info += Fmt("Race %d: %s (%s, %zu waypoints)\n", static_cast<int>(i) + 1, races[i].name.c_str(),
-                races[i].file.c_str(), races[i].pts.size());
+    const Race& r = races[i];
+    races[i].name = scn.Get("SceneInfo", Fmt("WaypointRaceName%d", static_cast<int>(i) + 1), StripExt(r.file));
+    std::string what;
+    if (Ext(r.file) == "wpt") what = Fmt("%s, %zu waypoints", r.file.c_str(), r.pts.size());
+    if (r.has_course) {
+      double len = 0;
+      for (const Course::Path& q : r.course.paths) len += r.course.Length(q);
+      what += Fmt("%s%s, %zu course points, %.0f ft of course", what.empty() ? "" : "; ", r.tdf.c_str(),
+                  r.course.NodeCount(), len);
+    }
+    info += Fmt("Race %d: %s (%s)\n", static_cast<int>(i) + 1, races[i].name.c_str(), what.c_str());
   }
 
   // Terrain.
@@ -1551,6 +1718,43 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
     Image map = ground;
     const uint8_t* c = cols[r % 6];
     const auto& p = races[r].pts;
+    if (races[r].has_course) {
+      // The course: sides in black, centre line in white, links between
+      // paths dashed, start line green, finish line red.
+      const Course& co = races[r].course;
+      static const uint8_t green[3] = {40, 230, 60}, red[3] = {255, 40, 40}, grey[3] = {200, 200, 200};
+      auto L = [&](const float* a, const float* b, double w, const uint8_t* col) {
+        Line(map, a[0] / sc, a[2] / sc, b[0] / sc, b[2] / sc, w, col);
+      };
+      const bool sides = co.HasSides();
+      for (const Course::Path& q : co.paths) {
+        for (size_t i = 1; i < q.nodes.size(); ++i) {
+          if (sides) {
+            L(q.nodes[i - 1].a, q.nodes[i].a, 0.8 * ds, black);
+            L(q.nodes[i - 1].b, q.nodes[i].b, 0.8 * ds, black);
+          }
+          L(q.nodes[i - 1].c, q.nodes[i].c, 0.7 * ds, white);
+        }
+        if (q.nodes.empty()) continue;
+        for (int to : q.next) {
+          if (to < 0 || co.paths[to].nodes.empty()) continue;
+          const float* a = q.nodes.back().c;
+          const float* b = co.paths[to].nodes.front().c;
+          const double len = Course::Dist(a, b) / sc, step = 4.0 * ds;
+          for (double s = 0; s < len; s += 2 * step) {
+            const double t0 = s / len, t1 = std::min(1.0, (s + step) / len);
+            Line(map, (a[0] + (b[0] - a[0]) * t0) / sc, (a[2] + (b[2] - a[2]) * t0) / sc,
+                 (a[0] + (b[0] - a[0]) * t1) / sc, (a[2] + (b[2] - a[2]) * t1) / sc, 0.7 * ds, grey);
+          }
+        }
+      }
+      for (const Course::Gate* g : {&co.start, &co.finish}) {
+        if (!g->set) continue;
+        const float a[3] = {g->p[0] - g->half[0], 0, g->p[2] - g->half[2]};
+        const float b[3] = {g->p[0] + g->half[0], 0, g->p[2] + g->half[2]};
+        L(a, b, 1.5 * ds, g == &co.start ? green : red);
+      }
+    }
     for (size_t i = 0; i < p.size(); ++i) {
       const auto& a = p[i];
       const auto& b = p[(i + 1) % p.size()];
@@ -1561,6 +1765,33 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
       Digits(map, static_cast<int>(p[i].first / sc + 6 * ds), static_cast<int>(p[i].second / sc - 3 * ds),
              static_cast<int>(i) + 1, ds, white, black);
     }
+    // A small course (stadiums) gets the map cut down to it.
+    {
+      double x0 = 1e30, z0 = 1e30, x1 = -1e30, z1 = -1e30;
+      auto grow = [&](double x, double z) { x0 = std::min(x0, x), z0 = std::min(z0, z), x1 = std::max(x1, x), z1 = std::max(z1, z); };
+      for (const auto& q : p) grow(q.first / sc, q.second / sc);
+      if (races[r].has_course)
+        for (const Course::Path& q : races[r].course.paths)
+          for (const Course::Node& n : q.nodes)
+            for (const float* v : {n.c, n.a, n.b}) grow(v[0] / sc, v[2] / sc);
+      if (x1 > x0) {
+        const double m = std::max(24.0 * ds, 0.1 * std::max(x1 - x0, z1 - z0));
+        const int cx0 = std::max(0, static_cast<int>(x0 - m)), cz0 = std::max(0, static_cast<int>(z0 - m));
+        const int cx1 = std::min(map.w, static_cast<int>(x1 + m) + 1), cz1 = std::min(map.h, static_cast<int>(z1 + m) + 1);
+        if (cx1 > cx0 && cz1 > cz0 && static_cast<double>(cx1 - cx0) * (cz1 - cz0) < 0.25 * map.w * map.h) {
+          Image c2;
+          c2.w = cx1 - cx0;
+          c2.h = cz1 - cz0;
+          c2.rgba.resize(static_cast<size_t>(c2.w) * c2.h * 4);
+          for (int y = 0; y < c2.h; ++y)
+            std::memcpy(&c2.rgba[static_cast<size_t>(y) * c2.w * 4],
+                        &map.rgba[(static_cast<size_t>(cz0 + y) * map.w + cx0) * 4], static_cast<size_t>(c2.w) * 4);
+          map = c2;
+          info += Fmt("map_race%d.png is cut to the course: its top left is %.0f, %.0f ft\n", static_cast<int>(r) + 1,
+                      cx0 * sc, cz0 * sc);
+        }
+      }
+    }
     std::string f = Fmt("map_race%d.png", static_cast<int>(r) + 1);
     SavePng(Join(g_out, Join(t.dir, f)), map);
     t.pictures.push_back(Join(t.dir, f));
@@ -1569,7 +1800,53 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
   t.pictures.push_back(Join(t.dir, "relief.png"));
   t.pictures.push_back(Join(t.dir, "heightmap16.png"));
   if (!races.empty())
-    info += "map_raceN.png: ground with race N's waypoints in order (white dot = waypoint 1)\n";
+    info += "map_raceN.png: ground with race N's waypoints in order (white dot = waypoint 1) and its course from "
+            "the .tdf (white = centre line, black = sides, grey dashes = where one path leads into another, "
+            "green = start line, red = finish line)\n";
+  // Courses as OBJ lines, on the ground (same axes as terrain.obj).
+  auto ground_at = [&](double x, double z) {
+    const int gx = std::max(0, std::min(W - 1, static_cast<int>(std::lround(x / sc))));
+    const int gz = std::max(0, std::min(H - 1, static_cast<int>(std::lround(z / sc))));
+    return hm[static_cast<size_t>(gz) * W + gx];
+  };
+  bool any_course = false;
+  for (size_t r = 0; r < races.size(); ++r) {
+    if (!races[r].has_course) continue;
+    any_course = true;
+    const Course& co = races[r].course;
+    std::string obj = "# " + t.name + " race " + std::to_string(r + 1) + " course from " + races[r].tdf +
+                      ", written by mcm2res; feet, z negated like terrain.obj, 1 ft above the ground\n";
+    long v = 0;
+    std::vector<long> first(co.paths.size(), 0), last(co.paths.size(), 0);
+    for (size_t pi = 0; pi < co.paths.size(); ++pi) {
+      const Course::Path& q = co.paths[pi];
+      if (q.nodes.empty()) continue;
+      obj += Fmt("o path%zu\n", pi);
+      first[pi] = v + 1;
+      for (const Course::Node& n : q.nodes)
+        obj += Fmt("v %.2f %.2f %.2f\n", n.c[0], ground_at(n.c[0], n.c[2]) + 1.0, -n.c[2]), ++v;
+      last[pi] = v;
+      obj += "l";
+      for (long i = first[pi]; i <= v; ++i) obj += " " + std::to_string(i);
+      obj += "\n";
+    }
+    for (size_t pi = 0; pi < co.paths.size(); ++pi)
+      for (int to : co.paths[pi].next)
+        if (to >= 0 && last[pi] && first[to]) obj += Fmt("l %ld %ld\n", last[pi], first[to]);
+    for (const Course::Gate* g : {&co.start, &co.finish}) {
+      if (!g->set) continue;
+      obj += g == &co.start ? "o start\n" : "o finish\n";
+      for (int s = -1; s <= 1; s += 2) {
+        const double x = g->p[0] + s * g->half[0], z = g->p[2] + s * g->half[2];
+        obj += Fmt("v %.2f %.2f %.2f\n", x, ground_at(x, z) + 1.0, -z), ++v;
+      }
+      obj += Fmt("l %ld %ld\n", v - 1, v);
+    }
+    WriteText(Join(g_out, Join(t.dir, Fmt("course_race%d.obj", static_cast<int>(r) + 1))), obj);
+  }
+  if (any_course)
+    info += "course_raceN.obj: race N's course as lines (centre line per path, start and finish lines), to load "
+            "with terrain.obj\n";
 
   // Terrain mesh (OBJ), every g_obj_step points, textured with ground.png.
   {
@@ -1600,12 +1877,38 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
   }
   // Waypoints as text too.
   for (size_t r = 0; r < races.size(); ++r) {
+    if (races[r].pts.empty()) continue;
     info += Fmt("\nRace %d waypoints (x, z in feet; height from the terrain):\n", static_cast<int>(r) + 1);
     for (size_t i = 0; i < races[r].pts.size(); ++i) {
       const double x = races[r].pts[i].first, z = races[r].pts[i].second;
       const int gx = std::max(0, std::min(W - 1, static_cast<int>(std::lround(x / sc))));
       const int gz = std::max(0, std::min(H - 1, static_cast<int>(std::lround(z / sc))));
       info += Fmt("  %2zu: %9.2f, %9.2f  (ground %.1f ft)\n", i + 1, x, z, hm[static_cast<size_t>(gz) * W + gx]);
+    }
+  }
+  // Courses as text.
+  for (size_t r = 0; r < races.size(); ++r) {
+    if (!races[r].has_course) continue;
+    const Course& co = races[r].course;
+    info += Fmt("\nRace %d course (%s; x, y, z in feet):\n", static_cast<int>(r) + 1, races[r].tdf.c_str());
+    for (const Course::Gate* g : {&co.start, &co.finish})
+      if (g->set)
+        info += Fmt("  %s line: centre %.1f, %.1f, %.1f, direction %.2f, %.2f, %.2f, %.1f ft wide\n",
+                    g == &co.start ? "Start" : "Finish", g->p[0], g->p[1], g->p[2], g->dir[0], g->dir[1], g->dir[2],
+                    g->width);
+    for (size_t pi = 0; pi < co.paths.size(); ++pi) {
+      const Course::Path& q = co.paths[pi];
+      std::string nx;
+      for (int to : q.next) nx += (nx.empty() ? "" : ", ") + std::to_string(to);
+      info += Fmt("  Path %zu: %zu points, %.0f ft, flags 0x%x, then path %s\n", pi, q.nodes.size(), co.Length(q),
+                  q.flags, nx.empty() ? "none" : nx.c_str());
+      for (size_t i = 0; i < q.nodes.size(); ++i) {
+        const Course::Node& n = q.nodes[i];
+        info += Fmt("    %3zu: %8.1f, %6.1f, %8.1f", i + 1, n.c[0], n.c[1], n.c[2]);
+        if (co.HasSides())
+          info += Fmt("   sides %8.1f, %8.1f / %8.1f, %8.1f", n.a[0], n.a[2], n.b[0], n.b[2]);
+        info += "\n";
+      }
     }
   }
   t.info = info;
@@ -1753,15 +2056,17 @@ void WriteIndex(const std::string& game) {
        "nav a{color:var(--acc);margin-right:14px;text-decoration:none}a{color:var(--acc)}\n"
        "main{padding:0 20px 40px}.dim{color:var(--dim)}\n"
        "input{background:var(--card);color:var(--fg);border:1px solid var(--line);padding:6px 10px;border-radius:6px;width:260px;margin-top:8px}\n"
-       ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}\n"
+       ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}\n"
        ".t{background:var(--card);border-radius:8px;padding:8px;overflow:hidden}\n"
        ".t img{width:100%;aspect-ratio:1;object-fit:contain;image-rendering:pixelated;border-radius:4px;"
        "background:repeating-conic-gradient(#3a3d44 0 25%,#2c2f35 0 50%) 50%/16px 16px}\n"
        ".t .n{font-family:Consolas,monospace;font-size:12px;word-break:break-all}.t .m{font-size:11px;color:var(--dim)}\n"
-       ".tracks{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}\n"
+       ".tracks{display:flex;flex-direction:column;gap:14px}\n"
        ".track{background:var(--card);border-radius:8px;padding:10px}.track img{width:100%;border-radius:4px}\n"
-       ".track .pics{display:flex;gap:6px;overflow-x:auto}.track .pics a{flex:0 0 48%}.track .pics img{width:100%}\n"
-       "pre{white-space:pre-wrap;font-size:12px;color:var(--dim);max-height:220px;overflow:auto}\n"
+       ".track .pics{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:10px}\n"
+       ".track .pics a{display:block;color:var(--dim);font-size:12px;text-decoration:none}\n"
+       ".track .pics img{display:block;width:100%;aspect-ratio:1;object-fit:contain;background:#000;margin-bottom:3px}\n"
+       "pre{white-space:pre-wrap;font-size:12px;color:var(--dim);max-height:400px;overflow:auto}\n"
        "table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:3px 8px;text-align:left}\n"
        "details{background:var(--card);border-radius:8px;padding:6px 10px;margin:6px 0}summary{cursor:pointer}\n"
        "</style></head><body>\n";
@@ -1781,8 +2086,8 @@ void WriteIndex(const std::string& game) {
     h += "<div class=\"track f\" data-n=\"" + HtmlEsc(Lower(t.name + " " + t.env)) + "\"><h3>" + HtmlEsc(t.name) +
          " <span class=\"dim\">" + HtmlEsc(t.env) + "</span></h3><div class=\"pics\">";
     for (const std::string& p : t.pictures)
-      h += "<a href=\"" + Url(p) + "\"><img loading=\"lazy\" src=\"" + Url(p) + "\"></a>";
-    h += "</div><pre>" + HtmlEsc(t.info.substr(0, t.info.find("\nRace 1 waypoints"))) + "</pre><a href=\"" +
+      h += "<a href=\"" + Url(p) + "\"><img loading=\"lazy\" src=\"" + Url(p) + "\">" + HtmlEsc(BaseName(p)) + "</a>";
+    h += "</div><pre>" + HtmlEsc(t.info.substr(0, t.info.find("\n\nRace "))) + "</pre><a href=\"" +
          Url(t.dir) + "\">folder</a></div>\n";
   }
   h += "</div>\n";
