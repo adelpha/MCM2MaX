@@ -2,7 +2,7 @@
 
 Motocross Madness 2 MaXimuM (MCM2MaX) makes **Motocross Madness 2** (Microsoft / Rainbow Studios, 2000) run
 on modern Windows by double-clicking the no-CD patched `Mcm2.exe`. You don't need compatibility
-settings, administrator rights, DirectX wrappers or old codecs, and you don't
+settings, administrator rights, DirectX wrappers or old codecs, and you don't need to
 change the game's display resolution.
 
 This is a ***work-in-progress*** and will change fast, with frequent bugs until first release candidate.
@@ -19,9 +19,9 @@ Here's just a few of Motocross Madness 2 MaXimuM's core features:
 |---|---|
 | Ease of use | Drop the files into your MCM2 directory with the no-CD exe and it just works. |
 | No wrappers, codecs, external DLLs or compatibility settings required | Indeo5 decoder built-in for the game's video files, "Modern" rendering on the GPU using D3D11 or, for Windows XP compatibility, D3D9. |
-| No physics changes | Game physics runs at a locked 30fps, separated from the renderer. It runs the original game's code straight from its own exe for all physics calculations, guaranteeing a 100% behaviour match to the original game. |
-| Performance | With GPU terrain rendering enabled in the D3D11 renderer, it can render a full map at 10x extended view distance with maximum terrain quality across the entire map at hundreds of frames per second on a modern GPU. |
-| Graphical enhancements | Widescreen, AA, AF, FoV, Alpha-to-coverage, support for high-resolution replacement textures, environment mapped reflections on bikes and riders, soft shadows for all riders, and more! |
+| No physics changes | Game physics runs at a locked 30fps, separated from the renderer. It runs the original game's code straight from its own exe for all physics calculations, guaranteeing a 100% behaviour match with the original game. |
+| Performance | With GPU terrain rendering enabled in the D3D11 renderer, it can render a full map at 10x extended view distance with maximum terrain quality across the entire map at [hundreds of frames per second](screenshots/10xview_347fps.png) on a modern GPU. |
+| Graphical enhancements | Widescreen, AA, AF, FoV, Alpha-to-coverage, support for high-resolution replacement textures, environment mapped reflections on bikes and riders, soft shadows for all riders, sharp antialiased text in the menus and HUD and more! |
 | Audio | Drop in [DSOAL](https://github.com/kcat/dsoal) and the EAX effects will just work. You can change the EAX 1.0 presets per-event type in the ini file! |
 | Music | Optional music tracks, either per-event or per-track (provide your own). |
 | Input | Native XInput support with analog and force-feedback-to-rumble translation. |
@@ -44,6 +44,8 @@ The same DLL also runs on **Windows XP SP3**, where it uses Direct3D 9.
 - [Features](#features)
 - [Requirements](#requirements)
 - [Not yet tested](#not-yet-tested)
+- [Future work](#future-work)
+- [Hypothetical future work](#hypothetical-future-work)
 - [Installing](#installing)
 - [Where your settings, saves and logs go](#where-your-settings-saves-and-logs-go)
 - [Uninstalling](#uninstalling)
@@ -266,10 +268,24 @@ Windows 10 and 11.
 These work in principle but have had little or no testing so far. Reports
 are welcome.
 
-- **Windows XP support**: barely tested, it's on the TODO list.
+- **Windows XP support**: barely tested, it's on the TODO list. The XP support is really only there for my own personal XP gaming rig, which is very powerful (for an XP machine) and probably doesn't represent a typical XP gaming rig, so YMMV.
 - **4:3, 16:10, 21:9, 32:9 and 64:27 aspect ratios** with the new HUD, text
   and other screen layout changes: not tested. Testing so far has been at
   16:9.
+
+## Future work
+
+- **Extend menu system**: More flexibility, more controls while retaining the original aestheic.
+- **More performance**: Squeeze every last drop. Move all objects to GPU where possible.
+- **Audio improvements**: Unified, low-latency audio subsystem, replacing DS7 and our current hacks.
+- **More menu options and enhancements**: Less digging in the ini file.
+- **Steamdeck optimisations**: Ensure it's playable and performant on Valve's handheld.
+- **Updated network multiplayer support**: Not sure what form this will take right now.
+
+## Hypothetical future work
+
+- **Split-screen multiplayer**: Needs checked for feasibility.
+- **3D skyboxes**: moving clouds, weather effects. Save this one for if I get really bored.
 
 ## Installing
 
