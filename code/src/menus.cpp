@@ -581,6 +581,12 @@ void SetLabel(uintptr_t page, const char* name, const char* text) {
 
 unsigned g_events_logged = 0;
 bool g_bound = false;  // the checkboxes have been bound to g_checks[].value
+// The Options > Graphics page while it is open (page set-up event 5 until
+// its close event 6): radio buttons send the page no event when clicked, so
+// MenusFrame() reads the Borderless/Exclusive pair every frame instead.
+uintptr_t g_graph_page = 0;
+uintptr_t g_graph_vtable = 0;
+int g_radio_logged = 0;
 
 uintptr_t FindCheckbox(uintptr_t page, const char* name) {
   const uintptr_t c = reinterpret_cast<FindControlFn>(kFindControl)(page, nullptr, name, 0);
@@ -715,6 +721,10 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
     g_bound = bound > 0 || sbound > 0;
     patch::Log("menus: %d of %d checkboxes and %d of %d sliders bound", bound, kNumChecks, sbound, kNumSliders);
   }
+  if (type == 6 || type == 4) {  // page closing (6) or being built again (4)
+    if (g_graph_page) patch::Log("menus: Options > Graphics closed (event %d)", type);
+    g_graph_page = 0;
+  }
   reinterpret_cast<EventFn>(kOptGraphEvent)(self, edx, event);
   if (type == 5) {
     SetLabel(self, "Mcm2fixBoxText", "Enhancements");
@@ -731,6 +741,8 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
       }
     }
     ResolutionFillDropdown(FindAny(self, "DisplayResolutionDropDown"));
+    g_graph_page = self;
+    g_graph_vtable = *reinterpret_cast<uintptr_t*>(self);
     SetLabel(self, kFootName, kFootText);
     for (const MenuSlider& m : g_sliders) SliderLabel(self, m, m.pos);
     UpdateGreying(self, g_sliders[kMsaaSlider].pos);
@@ -761,13 +773,7 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   if (type == 3) {
     const char* clicked = SafeName(event);
     // Borderless / Exclusive (the radio group keeps one selected): switch now.
-    for (int i = 0; i < 2; ++i) {
-      if (std::strcmp(clicked, kFsNames[i]) != 0) continue;
-      const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(self, nullptr, kFsNames[i], kFindRadio);
-      const int state = r ? reinterpret_cast<int(__fastcall*)(uintptr_t, void*)>(kRadioState)(r, nullptr) : -1;
-      patch::Log("menus: %s clicked (state %d)", kFsNames[i], state);
-      ResolutionSetExclusive(i == 1, FindAny(self, "DisplayResolutionDropDown"));
-    }
+    // (Borderless / Exclusive: see MenusFrame; radio buttons send no event.)
     for (MenuCheck& m : g_checks) {
       if (std::strcmp(clicked, m.name) != 0) continue;
       if (const uintptr_t box = FindCheckbox(self, m.name)) {
@@ -782,6 +788,30 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
 }
 
 }  // namespace
+
+// Every frame (game thread): while Options > Graphics is open, switch
+// Borderless / Exclusive as soon as the player picks the other radio button.
+void MenusFrame() {
+  const uintptr_t page = g_graph_page;
+  if (!page) return;
+  if (IsBadReadPtr(reinterpret_cast<void*>(page), 4) || *reinterpret_cast<uintptr_t*>(page) != g_graph_vtable) {
+    patch::Log("menus: Options > Graphics page gone without a close event; radio buttons no longer watched");
+    g_graph_page = 0;
+    return;
+  }
+  const bool excl = GetConfig().exclusive;
+  // Only the button for the mode not in use can have become checked.
+  const char* other = kFsNames[excl ? 0 : 1];
+  const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(page, nullptr, other, kFindRadio);
+  if (!r) {
+    if (g_radio_logged++ < 3) patch::Log("menus: radio button %s not found while watching", other);
+    return;
+  }
+  const int state = reinterpret_cast<int(__fastcall*)(uintptr_t, void*)>(kRadioState)(r, nullptr);
+  if (state != 2) return;
+  patch::Log("menus: %s picked (radio state %d)", other, state);
+  ResolutionSetExclusive(!excl, FindAny(page, "DisplayResolutionDropDown"));
+}
 
 void ApplyMenuOptions() {
   const Config& c = GetConfig();

@@ -1334,6 +1334,7 @@ HRESULT Surface::Flip(LPDIRECTDRAWSURFACE7 s, DWORD flags) {
 HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
   if (!back_) return DDERR_NOTFLIPPABLE;
   ResolutionFrame();  // Resolution: keep the game's saved mode by size
+  MenusFrame();       // Options: Borderless / Exclusive radio buttons
   {
     PROF_ZONE(kCapWait);
     WaitForFrameSlot();  // frame cap, outside the lock
