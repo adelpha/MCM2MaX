@@ -14,8 +14,10 @@
 //   Enter / Space select, Left / Right change sliders, Esc goes back) and
 //   controllers (d-pad / left stick move, A select, B back; XInput pads and
 //   DirectInput joysticks).
-// - While a screen is open it takes all keys, mouse buttons and controller
-//   buttons; the game only sees the mouse moving (its cursor is the pointer).
+// - While a screen is open it takes all keys, mouse movement and buttons and
+//   controller buttons; the game's cursor stays put (so the page under the
+//   screen does not react) and the screen draws its own pointer
+//   (UI\MaX\images\pointer.png).
 //
 // Direct3D 11 only for now. Without -DMCM2MaX_RMLUI the DLL has stubs.
 #pragma once
@@ -43,6 +45,7 @@ void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rec
 // centred) and buttons (bit per button).
 void KeyEvent(unsigned dik, bool down);
 void MouseButton(int button, bool down);
+void MouseMove(int dx, int dy);
 void MouseWheel(int delta);
 void JoyState(DWORD pov, DWORD buttons);
 

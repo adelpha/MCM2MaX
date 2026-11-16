@@ -671,9 +671,8 @@ HRESULT WINAPI MySetFormat(void* self, const void* fmt) {
 bool PromptKey(DWORD ofs) { return ofs == 0x01 || ofs == 0x1C || ofs == 0x9C; }  // DIK_ESCAPE, RETURN, NUMPADENTER
 bool PromptMouse(DWORD ofs) { return ofs >= 12 && ofs < 20; }                    // DIMOFS_BUTTON0..7
 
-// MenuMaX screens (ui/ui.h): while one is open, keys, mouse buttons and the
-// wheel go to it and not to the game; the mouse still moves the game's
-// cursor (the screen's pointer).
+// MenuMaX screens (ui/ui.h): while one is open, keys and all mouse input go
+// to it and not to the game (its cursor stays put; the screen has its own).
 HRESULT UiFilterData(void* self, DiData* data, DWORD* inout, DWORD flags, HRESULT hr) {
   int kind = -1;
   {
@@ -684,13 +683,10 @@ HRESULT UiFilterData(void* self, DiData* data, DWORD* inout, DWORD flags, HRESUL
   DWORD k = 0;
   for (DWORD i = 0; i < *inout; ++i) {
     const DiData& e = data[i];
-    const bool ours = kind == kKeyboard || e.ofs >= 8;  // DIMOFS_Z, BUTTON0..7
-    if (!ours) {
-      data[k++] = e;
-      continue;
-    }
-    if (flags & kPeek) continue;
+    if (flags & kPeek) continue;  // everything is the screen's
     if (kind == kKeyboard) ui::KeyEvent(e.ofs, (e.data & 0x80) != 0);
+    else if (e.ofs == 0) ui::MouseMove(static_cast<int>(e.data), 0);  // DIMOFS_X
+    else if (e.ofs == 4) ui::MouseMove(0, static_cast<int>(e.data));  // DIMOFS_Y
     else if (e.ofs == 8) ui::MouseWheel(static_cast<int>(e.data));
     else if (e.ofs < 20) ui::MouseButton(static_cast<int>(e.ofs - 12), (e.data & 0x80) != 0);
   }
@@ -716,7 +712,11 @@ HRESULT UiFilterState(void* self, DWORD cb, void* out, HRESULT hr) {
       b[i] = 0;
     }
   } else if (kind == kMouse && cb >= 16) {
-    LONG z;
+    LONG mx, my, z;
+    std::memcpy(&mx, b, 4);
+    std::memcpy(&my, b + 4, 4);
+    if (mx || my) ui::MouseMove(mx, my);
+    std::memset(b, 0, 8);
     std::memcpy(&z, b + 8, 4);
     if (z) ui::MouseWheel(z);
     std::memset(b + 8, 0, 4);

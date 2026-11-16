@@ -6,7 +6,8 @@ a library that lays out HTML/CSS-style text files. Open them in any text editor.
 
   settings.rml   the "More Settings" screen (Options > Graphics > More Settings)
   max.rcss       the look shared by every screen (colours, sizes, fonts)
-  images\        pictures (PNG); fonts\  fonts (TTF/OTF, all loaded at start)
+  images\        pictures (PNG; pointer.png is the mouse pointer)
+  fonts\         fonts (TTF/OTF, all loaded at start)
 
 Live editing: while a screen is open in the game, saving any file in this folder
 reloads it at once (F5 reloads too). Mistakes are written to the MCM2MaX log

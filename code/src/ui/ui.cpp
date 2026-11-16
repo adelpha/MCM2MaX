@@ -21,11 +21,6 @@
 bool MenusGameGet(const char* name, int* value);
 bool MenusGameSet(const char* name, int value);
 void MenusRefreshFromIni();
-namespace dd {
-// surface.cpp: the game's menu cursor sprite as last drawn (src AddRef'd
-// copy owned by surface.cpp; valid until the next call).
-bool UiCursorSprite(BlitParams* p);
-}  // namespace dd
 
 namespace ui {
 
@@ -172,7 +167,16 @@ struct State {
   int pad_dir_prev = -1;
   bool shift = false;
   // Pointer.
-  POINT last_cursor{-1, -1};
+  // The screen's own pointer (window pixels), moved by the mouse movement
+  // kept from the game (its cursor stays where it was, so the page under the
+  // screen does not react to it).
+  bool pointer_set = false;
+  float px = 0, py = 0;
+  int dx = 0, dy = 0;  // movement not yet applied (DirectInput units)
+  unsigned moves = 0;
+  Rml::TextureHandle pointer_tex = 0;
+  Rml::Vector2i pointer_dims;
+  bool pointer_tried = false;
   int mouse_x = -1, mouse_y = -1;
   // Statistics (logged every few seconds while open).
   unsigned frames = 0, key_events = 0, clicks = 0, saves = 0, reloads = 0;
@@ -677,17 +681,36 @@ void DoInput(const RECT& game_rect) {
     for (auto& b : buttons) b.second = false;
     g.joy_buttons = 0;
   }
-  // The pointer: the game's own cursor (640x480 menu pixels).
-  POINT c{};
-  if (ModePromptCursor(&c)) {
-    const double sx = (game_rect.right - game_rect.left) / 640.0, sy = (game_rect.bottom - game_rect.top) / 480.0;
-    const int x = game_rect.left + static_cast<int>((c.x + 0.5) * sx), y = game_rect.top + static_cast<int>((c.y + 0.5) * sy);
-    if (c.x != g.last_cursor.x || c.y != g.last_cursor.y) {
-      g.last_cursor = c;
-      g.mouse_x = x;
-      g.mouse_y = y;
-      g.context->ProcessMouseMove(x, y, 0);
+  // The pointer starts where the game's cursor was, then moves by the
+  // mouse movement the game no longer gets: one unit = one menu pixel (as
+  // the game's cursor), in window pixels.
+  const float dp = (game_rect.bottom - game_rect.top) / 480.0f;
+  int mdx, mdy;
+  {
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    mdx = g.dx;
+    mdy = g.dy;
+    g.dx = g.dy = 0;
+  }
+  if (!g.pointer_set) {
+    POINT c{};
+    if (ModePromptCursor(&c)) {
+      g.px = game_rect.left + (c.x + 0.5f) * dp;
+      g.py = game_rect.top + (c.y + 0.5f) * dp;
+    } else {
+      g.px = (game_rect.left + game_rect.right) * 0.5f;
+      g.py = (game_rect.top + game_rect.bottom) * 0.5f;
     }
+    g.pointer_set = true;
+    patch::Log("MenuMaX: pointer starts at %.0f,%.0f (game cursor %s)", g.px, g.py, ModePromptCursor(&c) ? "seen" : "not seen");
+    mdx = mdy = 1;  // send a first position
+  }
+  if (mdx || mdy) {
+    g.px = std::min(std::max(g.px + mdx * dp, 0.0f), static_cast<float>(g.context->GetDimensions().x - 1));
+    g.py = std::min(std::max(g.py + mdy * dp, 0.0f), static_cast<float>(g.context->GetDimensions().y - 1));
+    g.mouse_x = static_cast<int>(g.px);
+    g.mouse_y = static_cast<int>(g.py);
+    g.context->ProcessMouseMove(g.mouse_x, g.mouse_y, 0);
   }
   for (const auto& b : buttons) {
     if (b.second) g.context->ProcessMouseButtonDown(b.first, 0);
@@ -719,17 +742,39 @@ void DoInput(const RECT& game_rect) {
   }
 }
 
+// The screen's pointer: UI\MaX\images\pointer.png, its top left corner
+// at the pointer, 22dp tall.
+void DrawPointer(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, UINT w, UINT h, float dp) {
+  if (!g.pointer_set) return;
+  if (!g.pointer_tried) {
+    g.pointer_tried = true;
+    g.pointer_tex = g.render->LoadTexture(g.pointer_dims, Narrow(UiDir()) + "images\\pointer.png");
+    if (!g.pointer_tex) patch::Log("MenuMaX: no images\\pointer.png; the screen has no pointer");
+  }
+  if (!g.pointer_tex || g.pointer_dims.y <= 0) return;
+  const float hgt = 22.0f * dp, wid = hgt * g.pointer_dims.x / g.pointer_dims.y;
+  const Rml::ColourbPremultiplied white(255, 255, 255, 255);
+  Rml::Vertex v[4] = {{{0, 0}, white, {0, 0}}, {{wid, 0}, white, {1, 0}}, {{wid, hgt}, white, {1, 1}}, {{0, hgt}, white, {0, 1}}};
+  const int idx[6] = {0, 1, 2, 0, 2, 3};
+  Rml::CompiledGeometryHandle geo = g.render->CompileGeometry(Rml::Span<const Rml::Vertex>(v, 4), Rml::Span<const int>(idx, 6));
+  if (!geo) return;
+  g.render->Begin(ctx, rtv, w, h);
+  g.render->RenderGeometry(geo, Rml::Vector2f(std::floor(g.px), std::floor(g.py)), g.pointer_tex);
+  g.render->End();
+  g.render->ReleaseGeometry(geo);
+}
+
 void Report(bool force) {
   const DWORD now = GetTickCount();
   if (!force && now - g.last_report < 5000) return;
   g.last_report = now;
   RenderD3D11::Stats& s = g.render->GetStats();
   patch::Log("MenuMaX: %s: %u frames, %u draws, %u new geometry, %u textures (%u failed), %u keys, %u clicks, %u saves, "
-             "%u reloads, pointer %d,%d",
+             "%u reloads, %u mouse moves, pointer %d,%d",
              g.open_name.c_str(), g.frames, s.draws, s.geometry, s.textures, s.texture_failures, g.key_events, g.clicks,
-             g.saves, g.reloads, g.mouse_x, g.mouse_y);
+             g.saves, g.reloads, g.moves, g.mouse_x, g.mouse_y);
   s = RenderD3D11::Stats{};
-  g.frames = g.key_events = g.clicks = g.saves = g.reloads = 0;
+  g.frames = g.key_events = g.clicks = g.saves = g.reloads = g.moves = 0;
 }
 
 }  // namespace
@@ -804,7 +849,7 @@ void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rec
     }
     g.opened_at = GetTickCount();
     g.last_report = g.opened_at;
-    g.last_cursor = {-1, -1};
+    g.pointer_set = false;
     if (!LoadDoc(open, std::string())) {
       Close("screen could not be loaded");
       return;
@@ -834,22 +879,7 @@ void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rec
   g.render->Begin(ctx, rtv, w, h);
   g.context->Render();
   g.render->End();
-  // The game's cursor goes over the screen (it is drawn into the 640x480
-  // picture, which the screen covers).
-  dd::BlitParams p;
-  if (dd::UiCursorSprite(&p)) {
-    const double sx = (game_rect.right - game_rect.left) / 640.0, sy = (game_rect.bottom - game_rect.top) / 480.0;
-    RECT r = p.dst_rect;
-    p.dst_rect = {game_rect.left + static_cast<LONG>(r.left * sx), game_rect.top + static_cast<LONG>(r.top * sy),
-                  game_rect.left + static_cast<LONG>(r.right * sx), game_rect.top + static_cast<LONG>(r.bottom * sy)};
-    p.dst = rtv;
-    p.dst9 = nullptr;
-    p.dst_w = w;
-    p.dst_h = h;
-    p.linear = false;
-    p.opaque = true;
-    dd::Blit(p);
-  }
+  DrawPointer(ctx, rtv, w, h, dp);
   dd::ContextTouched();
   ++g.frames;
   Report(false);
@@ -865,6 +895,13 @@ void KeyEvent(unsigned dik, bool down) {
 void MouseButton(int button, bool down) {
   std::lock_guard<std::recursive_mutex> l(g.mu);
   if (g.buttons.size() < 64) g.buttons.emplace_back(button, down);
+}
+
+void MouseMove(int dx, int dy) {
+  std::lock_guard<std::recursive_mutex> l(g.mu);
+  g.dx += dx;
+  g.dy += dy;
+  ++g.moves;
 }
 
 void MouseWheel(int delta) {

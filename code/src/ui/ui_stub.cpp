@@ -14,6 +14,7 @@ void Close(const char*) {}
 void Present11(ID3D11RenderTargetView*, UINT, UINT, const RECT&) {}
 void KeyEvent(unsigned, bool) {}
 void MouseButton(int, bool) {}
+void MouseMove(int, int) {}
 void MouseWheel(int) {}
 void JoyState(DWORD, DWORD) {}
 }  // namespace ui
