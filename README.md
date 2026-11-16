@@ -49,6 +49,8 @@ The same DLL also runs on **Windows XP SP3**, where it uses Direct3D 9.
 - [Uninstalling](#uninstalling)
 - [Renderers and fullscreen](#renderers-and-fullscreen)
 - [Windows XP](#windows-xp)
+- [Future work](#future-work)
+- [Hypothetical future work](#hypothetical-future-work)
 - [Sound, EAX and DSOAL](#sound-eax-and-dsoal)
 - [Music](#music)
 - [MCM2MaX.ini reference](#mcm2maxini-reference)
@@ -276,7 +278,7 @@ are welcome.
 ## Hypothetical future work
 
 - **Split-screen multiplayer**: Needs checked for feasibility.
-- **3D skyboxes: moving clouds, weather effects. Save this one for if I get really bored.
+- **3D skyboxes**: moving clouds, weather effects. Save this one for if I get really bored.
 
 ## Installing
 
