@@ -249,7 +249,7 @@ Windows 10 and 11.
 - **A Pentium II / Pentium Pro, AMD Athlon / Duron or newer CPU** (any CPU
   with the CMOV instruction). The original Pentium, Pentium MMX and AMD K6
   series (K6-2, K6-III) are not supported; on machines that old, run the
-  original game. No MMX or SSE is needed.
+  original game. No MMX or SSE is needed, but SSE will be used if available.
 - Nothing else. You don't need the DirectX 7 runtime, `d3drm.dll` from an
   old Windows, the Indeo codec or compatibility settings. If you set
   compatibility modes on `Mcm2.exe` earlier, it's best to remove them.
