@@ -310,6 +310,19 @@ void LoadConfig() {
       g_config.fs_hz = hz > 0 && hz <= 1000 ? hz : 0;
     }
   }
+  {
+    // DefaultResolution=Desktop, <width>x<height>, or Game (the game's own).
+    char m[48] = {};
+    GetPrivateProfileStringA(sec, "DefaultResolution", "Desktop", m, sizeof(m), ini);
+    m[std::strcspn(m, " \t;")] = 0;
+    int w = 0, h = 0;
+    if (!_stricmp(m, "Game") || !std::strcmp(m, "0")) {
+      g_config.default_res_w = g_config.default_res_h = -1;
+    } else if (std::sscanf(m, "%dx%d", &w, &h) == 2 && w >= 640 && h >= 480 && w <= 16384 && h <= 16384) {
+      g_config.default_res_w = w;
+      g_config.default_res_h = h;
+    }
+  }
   g_config.renderer_label = GetPrivateProfileIntA(sec, "RendererLabel", 1, ini) != 0;
   g_config.gpu_text = GetPrivateProfileIntA(sec, "GpuText", 1, ini) != 0;
   g_config.hud_text = GetPrivateProfileIntA(sec, "HudText", 1, ini) != 0;

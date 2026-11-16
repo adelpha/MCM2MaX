@@ -17,6 +17,7 @@ add_library(MCM2MaX SHARED
   src/fixes_registry.cpp
   src/fixes_files.cpp
   src/fixes_widescreen.cpp
+  src/fixes_resolution.cpp
   src/fixes_detail.cpp
   src/fixes_arrow.cpp
   src/fixes_restart.cpp

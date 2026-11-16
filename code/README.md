@@ -118,6 +118,15 @@ Fullscreen=Borderless
 ;   <width>x<height>@<Hz>    - e.g. 1024x768@85.
 FullscreenMode=Desktop
 
+; DefaultResolution: the game's resolution until you pick one in Options.
+; Your pick is then remembered by its size, so it survives changes to the
+; list of resolutions (another desktop size, a video card re-test).
+;   Desktop                  - the desktop's size (default).
+;   <width>x<height>         - e.g. 1280x720.
+;   Game                     - the game's own choice (640x480 at first) and
+;                              its own saving by list position.
+DefaultResolution=Desktop
+
 ; VSync: 1 = wait for the monitor's refresh before showing each frame: no
 ; tearing, frame rate limited to the refresh rate (default).
 ; 0 = show frames as soon as they are ready: higher frame rate, tearing where
