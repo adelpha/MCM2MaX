@@ -25,11 +25,14 @@
 
 #include "../config.h"
 #include "../framerate.h"
+#include "../mode_prompt.h"
 #include "directdraw.h"
 #include "msaa.h"
 #include "texreplace.h"
 
 namespace dd {
+
+void NoteCursorSprite(const void* native, const BlitParams& p);  // below, with Flip
 unsigned g_surface_gen = 0;
 extern unsigned g_devices_made, g_devices_gone;
 namespace {
@@ -1025,8 +1028,10 @@ void Surface::BltGpu(const RECT& dr, Surface* src, const RECT& sr, bool key, DWO
   }
   p.opaque = layout_.mask[3] == 0;
   Blit(p);
-  if (key)
+  if (key) {
     GpuTextOccludeSprite(d->Native(), p);
+    NoteCursorSprite(d->Native(), p);
+  }
   else
     GpuTextOcclude(d->Native(), &dr, "blt");
   // Text on the source goes with the copy (menus are put together on an
@@ -1319,6 +1324,25 @@ HRESULT Surface::EnumOverlayZOrders(DWORD, LPVOID, LPDDENUMSURFACESCALLBACK7) {
   return DDERR_UNSUPPORTED;
 }
 
+// The menu cursor is a colour-keyed sprite the game draws last; while the
+// "Keep this display mode?" prompt is up, its shape is cut out of the
+// prompt (GPU text, which is over the picture) so the cursor stays on top.
+struct CursorSprite {
+  const void* native = nullptr;
+  BlitParams p;
+} g_cursor_sprite;
+
+void NoteCursorSprite(const void* native, const BlitParams& p) {
+  if (!ModePromptActive()) return;
+  POINT c{};
+  if (!ModePromptCursor(&c)) return;
+  const RECT& r = p.dst_rect;
+  if (c.x < r.left || c.y < r.top || c.x >= r.right || c.y >= r.bottom) return;
+  if (r.right - r.left > 64 || r.bottom - r.top > 64) return;  // not a cursor-sized sprite
+  g_cursor_sprite.native = native;
+  g_cursor_sprite.p = p;
+}
+
 HRESULT Surface::Flip(LPDIRECTDRAWSURFACE7 s, DWORD flags) {
   FlushPendingDraws(kBreakFlip);
   HRESULT hr;
@@ -1356,6 +1380,18 @@ HRESULT Surface::FlipImpl(LPDIRECTDRAWSURFACE7, DWORD flags) {
   // "Keep this display mode?" over the frame, erased again once shown.
   RECT prompt_area{};
   const bool prompt = ModePromptDraw(this, &prompt_area);
+  if (prompt) {
+    const bool cut = g_cursor_sprite.native && g_cursor_sprite.native == GpuKey();
+    static int logged = 0;
+    if (logged < 3) {
+      ++logged;
+      const RECT& r = g_cursor_sprite.p.dst_rect;
+      Log("mode prompt: cursor sprite %s (%ld,%ld-%ld,%ld)", cut ? "cut out of the prompt" : "not found this frame",
+          r.left, r.top, r.right, r.bottom);
+    }
+    if (cut) GpuTextOccludeSprite(GpuKey(), g_cursor_sprite.p);
+  }
+  g_cursor_sprite.native = nullptr;
   // VSync in mcm2max.ini decides, whatever the game asked for.
   PresentFront(GetConfig().vsync ? 1 : 0);
   if (prompt) GpuTextOcclude(GpuKey(), &prompt_area, "mode prompt");
