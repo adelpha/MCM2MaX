@@ -32,7 +32,7 @@
 //   * Sky boxes (.cub in SKIES.RES) and the terrain's own textures (.trn)
 //     hold bare "u32 format, mip table" records.
 //   * Names: a texture loaded by name (every "<name>.tga" member: the game's
-//     TextureMap loader 0x50fd00) is called <name> by mcm2fix (lower case, no
+//     TextureMap loader 0x50fd00) is called <name> by MCM2MaX (lower case, no
 //     extension). One read from a stream (sky tiles, terrain textures) is
 //     "<member>_<hex offset of its mip table in the decoded archive>"
 //     (fixes_textures.cpp), e.g. terra12_51af51 or nat01_459aad.
@@ -256,7 +256,7 @@ std::string SafeFile(std::string s) {
   if (s.empty()) s = "_";
   return s;
 }
-// mcm2fix's TextureKey (dd/texreplace.cpp).
+// MCM2MaX's TextureKey (dd/texreplace.cpp).
 std::string TextureKey(const std::string& name) {
   std::string s = StripExt(name);
   for (char& c : s) {
@@ -579,7 +579,7 @@ bool SavePng16(const std::string& path, int w, int h, const std::vector<uint16_t
   return WriteFile(path, out.data(), out.size());
 }
 
-uint8_t Expand5(unsigned v) { return static_cast<uint8_t>((v * 255 + 15) / 31); }  // as mcm2fix's dump
+uint8_t Expand5(unsigned v) { return static_cast<uint8_t>((v * 255 + 15) / 31); }  // as MCM2MaX's dump
 uint8_t Expand6(unsigned v) { return static_cast<uint8_t>((v * 255 + 31) / 63); }
 
 // Plain TGA (types 1/2/3 and RLE 9/10/11; 8/15/16/24/32 bits).
@@ -794,7 +794,7 @@ int MipTable(const uint8_t* d, size_t n, size_t p, int bpp, std::vector<size_t>&
 // ---------------------------------------------------------------- texture catalogue
 
 struct TexEntry {
-  std::string name;      // mcm2fix name (file name without .png)
+  std::string name;      // MCM2MaX name (file name without .png)
   std::string archive;   // e.g. OBJECTS.RES
   std::string member;    // e.g. Antenna01.tga
   std::string how;       // "name" or "stream"
@@ -3124,7 +3124,7 @@ void WriteIndex(const std::string& game) {
   h += "<p class=\"dim\">From " + HtmlEsc(game) + Fmt(". %u textures, %u pictures, %u models, %u animations, %u collision shapes, %u tracks, %u files.",
                                                        g_count.textures, g_count.images, g_count.models, g_count.anims,
                                                        g_count.colls, g_count.tracks, g_count.files) +
-       " Texture file names are the names mcm2fix uses: copy a picture into the game's <code>textures\\</code> "
+       " Texture file names are the names MCM2MaX uses: copy a picture into the game's <code>textures\\</code> "
        "folder (or <code>%LOCALAPPDATA%\\Motocross Madness 2\\textures\\</code>), edit it, and the game uses it "
        "(TextureReplace=1).</p>\n";
 
@@ -3369,7 +3369,7 @@ void ListArchive(const std::string& path) {
   }
 }
 
-// Compares a folder of PNGs (e.g. mcm2fix's textures_dump) with the names we produce.
+// Compares a folder of PNGs (e.g. MCM2MaX's textures_dump) with the names we produce.
 void Check(const std::string& folder, const std::string& game) {
   g_out = Join(ExeDir(), "mcm2res_check_tmp");
   // Names only: run a full extract into a scratch folder would be slow, so
@@ -3400,11 +3400,11 @@ void Check(const std::string& folder, const std::string& game) {
 }
 
 const char kUsage[] =
-    "mcm2res - Motocross Madness 2 resource viewer and extractor (mcm2fix)\n"
+    "mcm2res - Motocross Madness 2 resource viewer and extractor (MCM2MaX)\n"
     "\n"
     "  mcm2res [extract] [game folder | archive...] [-o folder] [--only text]... [--obj-step N] [--raw-all]\n"
     "      Extracts every archive (RES\\*.RES, RES\\*.TEX, UI\\*.DAT, TERAFORM\\*\\*.ENV):\n"
-    "      textures as PNG named for mcm2fix's textures folder, pictures, sounds,\n"
+    "      textures as PNG named for MCM2MaX's textures folder, pictures, sounds,\n"
     "      text files, models and collision shapes as OBJ, animations as glTF,\n"
     "      and for each track a height map,\n"
     "      ground texture, race maps and a terrain OBJ. Writes index.html to\n"
@@ -3416,7 +3416,7 @@ const char kUsage[] =
     "  mcm2res list <archive>...\n"
     "      Lists the files inside archives.\n"
     "  mcm2res check <folder>\n"
-    "      Compares a folder of PNGs (e.g. mcm2fix's textures_dump) with the\n"
+    "      Compares a folder of PNGs (e.g. MCM2MaX's textures_dump) with the\n"
     "      texture names from the last extract.\n"
     "\n"
     "Double-click: extract (finds the game next to or above the tool).\n"
@@ -3479,7 +3479,7 @@ int main(int argc, char** argv) {
     Pause();
     return 0;
   }
-  std::printf("%s\n", "mcm2res - Motocross Madness 2 resource extractor (mcm2fix)");
+  std::printf("%s\n", "mcm2res - Motocross Madness 2 resource extractor (MCM2MaX)");
   if (mode == "files" || (mode == "extract" && !inputs.empty() && !IsDir(inputs[0]))) {
     ExtractFiles(inputs, out.empty() ? Join(ExeDir(), "mcm2res_out") : out);
     Pause();

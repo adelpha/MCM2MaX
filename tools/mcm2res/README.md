@@ -32,14 +32,14 @@ mcm2res check <folder of PNGs>
 * `--raw-all` also saves the texture records, terrain and sky files exactly
   as stored, and a raw `.r16` height map.
 * `list` prints the files inside archives.
-* `check` compares a folder of PNGs, e.g. mcm2fix's `textures_dump\`, with the
+* `check` compares a folder of PNGs, e.g. MCM2MaX's `textures_dump\`, with the
   names from the last extract and lists any name mcm2res doesn't produce.
 
 ## What you get
 
 | Folder | What |
 |---|---|
-| `textures\` | Every game texture as PNG (with alpha where it has it), named the way mcm2fix names it. Edit one, keep the file name, and put it in the game's `textures\` folder or `%LOCALAPPDATA%\Motocross Madness 2\textures\` (TextureReplace=1). |
+| `textures\` | Every game texture as PNG (with alpha where it has it), named the way MCM2MaX names it. Edit one, keep the file name, and put it in the game's `textures\` folder or `%LOCALAPPDATA%\Motocross Madness 2\textures\` (TextureReplace=1). |
 | `textures\_same_name\<archive>\` | Textures that share a name with a different picture: the four stadiums' `texturePanel0..`. The game loads them by that name, so a replacement is used in every stadium. |
 | `textures.txt` | Every texture: name, size, format, how the game loads it, archive, member. |
 | `images\<archive>\` | Plain TGA pictures (track preview shots, menu art) as PNG. |
@@ -54,7 +54,7 @@ Texture names: a texture stored as `<name>.tga` in a RES (bikes, riders,
 objects, trees, the stadiums' panels) is `<name>`; sky tiles and terrain
 textures are read from inside a bigger file, so their names are
 `<file>_<offset>` (e.g. `terra12_51af51`, `baja01_488689`). These match
-mcm2fix's texture dump.
+MCM2MaX's texture dump.
 
 OBJ files are in feet. The game's axes are left-handed, so z is negated in
 the OBJ to keep it from being mirrored.
