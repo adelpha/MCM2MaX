@@ -20,6 +20,9 @@ struct Mode {
 // any mode change, so the desktop mode is the real one.
 void Init();
 
+// Builds GameModes() again for the current Fullscreen mode (Options switch).
+void Rebuild();
+
 // The monitor's desktop mode at start, and its area on the virtual screen.
 Mode Desktop();
 RECT MonitorRect();

@@ -111,6 +111,9 @@ Windows 10 and 11.
 - **Starts at your desktop resolution**, and the resolution you pick in
   Options is saved in the ini (`BorderlessResolution` /
   `ExclusiveResolution`), which always wins over the game's own setting.
+  "Desktop" at the top of the list goes back to following the desktop.
+- **Borderless / Exclusive buttons** in Options > Graphics, switched at once
+  (Direct3D 11), each with its own resolution.
 - **Widescreen field of view** (`WideFov`): wider screens show more to the
   sides instead of cropping the top and bottom. The speedometer stays round.
   `Fov` sets the base field of view.
@@ -488,6 +491,7 @@ The file has three parts:
 | `Monitor` | `1` | `1`, `2`, ... | The monitor to use: `1` = primary, `2` and up = the other monitors in Windows' order. |
 | `BorderlessResolution` | `Desktop` | `Desktop`, `<w>x<h>` | The resolution the game renders at in Borderless, scaled to the monitor with black bars where the shape differs. Picking one in the game's Options writes it here. Up to the desktop's size; a size that's no longer available uses the desktop for that start. |
 | `ExclusiveResolution` | `Desktop` | `Desktop`, `<w>x<h>`, `<w>x<h>@<Hz>` | The screen mode in Exclusive. Picking one in the game's Options writes it here and (Direct3D 11) switches the screen at once. Without `@<Hz>`, the highest refresh rate is used. A mode the monitor doesn't have uses the desktop for that start. The menus stay at this mode too, scaled. |
+| `CardTest` | `0` | `0`, `1` | `0` skips the game's video card test at start (MCM2MaX's renderer always gives the same answers, so the card gets them directly). `1` runs the game's own test, as before. |
 | `VSync` | `1` | `0`, `1` | `1` waits for the monitor's refresh before showing each frame: no tearing, and the frame rate is limited to the refresh rate. `0` shows frames as soon as they are ready, with tearing where Windows allows it. |
 | `FrameCap` | `0` | `0`, frames/s | The most frames per second, on top of VSync. `0` = no cap. Useful with `VSync=0`. It does not change game speed. |
 | `WideFov` | `1` | `0`, `1` | `1` widens the view on widescreen resolutions, so you see more to the sides. `0` keeps the 4:3 width and crops the top and bottom, like the original. |

@@ -108,9 +108,10 @@ Renderer=D3D11
 ;   Exclusive  - the game takes over the screen and sets its mode to
 ;                ExclusiveResolution. Alt+Tab leaves fullscreen and it comes
 ;                back when you return. Can help VSync on Windows XP.
-; Each has its own resolution below. The game's Options list the monitor's
-; own resolutions for the current one (Exclusive: with refresh rates), and
-; picking one writes it here. The menus are always 640x480 inside, scaled to
+; Each has its own resolution below. Options > Graphics has Borderless /
+; Exclusive buttons (they switch at once with Direct3D 11) and lists the
+; monitor's own resolutions for the current one (Exclusive: with refresh
+; rates), with "Desktop" first; picking one writes it here. The menus are always 640x480 inside, scaled to
 ; the screen with black bars; races run at the chosen resolution.
 Fullscreen=Borderless
 
@@ -133,6 +134,11 @@ BorderlessResolution=Desktop
 ; Direct3D 11 a new pick switches the screen at once; on Direct3D 9 at the
 ; next start.
 ExclusiveResolution=Desktop
+
+; CardTest: 0 = skip the game's video card test at start; MCM2MaX's renderer
+; always gives the same answers, so the card gets them directly (default).
+; 1 = run the game's own test, as before.
+CardTest=0
 
 ; VSync: 1 = wait for the monitor's refresh before showing each frame: no
 ; tearing, frame rate limited to the refresh rate (default).

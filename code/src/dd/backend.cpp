@@ -610,8 +610,21 @@ void EnterExclusive11() {
 
 void TrackExclusive11() {
   Backend& b = g_backend;
-  if (!GetConfig().exclusive || !b.swapchain) return;
+  if (!b.swapchain) return;
   static BOOL was = FALSE;
+  if (!GetConfig().exclusive) {
+    // Switched to Borderless in Options: leave fullscreen (Windows puts the
+    // desktop mode back), the window then covers the monitor again.
+    if (was) {
+      b.swapchain->SetFullscreenState(FALSE, nullptr);
+      was = FALSE;
+      g_fs_target_w = g_fs_target_h = g_fs_target_hz = -1;
+      g_fs_changed_mode = false;
+      b.swap_w = b.swap_h = 0;
+      Log("exclusive: left fullscreen (Borderless chosen in Options)");
+    }
+    return;
+  }
   BOOL fs = FALSE;
   b.swapchain->GetFullscreenState(&fs, nullptr);
   if (was && !fs) Log("exclusive: left fullscreen (focus lost or alt-tab)");
@@ -966,7 +979,11 @@ void Present(const GpuTexture& src_tex, UINT src_w, UINT src_h, UINT interval) {
   DrawRendererLabel(b.swap_rtv, nullptr, b.swap_w, b.swap_h);
   PerfBeforePresent();
   zone.Switch(prof::kSwapPresent);
-  HRESULT hr = b.swapchain->Present(interval, interval == 0 && g_tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+  // ALLOW_TEARING is not allowed while in exclusive fullscreen (Fullscreen can
+  // be switched in Options while the swap chain has the flag).
+  BOOL fs_now = FALSE;
+  if (g_tearing && GetConfig().exclusive) b.swapchain->GetFullscreenState(&fs_now, nullptr);
+  HRESULT hr = b.swapchain->Present(interval, interval == 0 && g_tearing && !fs_now ? DXGI_PRESENT_ALLOW_TEARING : 0);
   if (FAILED(hr)) LogOnce("Present failed %08lx", hr);
   zone.Switch(prof::kCompose);
   GpuTimerFrame11();

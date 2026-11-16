@@ -91,6 +91,10 @@ constexpr int kNumSliders = 3;
 constexpr int kMsaaSlider = 1;
 constexpr int kNumChecks = static_cast<int>(sizeof(g_checks) / sizeof(g_checks[0]));
 constexpr char kFootName[] = "Mcm2fixFootnote";
+// Fullscreen: Borderless / Exclusive in the Display Resolution box.
+constexpr const char* kFsNames[2] = {"Mcm2fixBorderless", "Mcm2fixExclusive"};
+constexpr const char* kFsLabels[2] = {"Borderless", "Exclusive"};
+int g_fs_value[2] = {};  // bound to the two checkboxes while the page is up
 constexpr char kFootText[] = "* after restarting the game";
 // Page layout (control pixels; the page's controls are placed 20,35 menu
 // pixels further on). StOo: every box a border-only plate; the two columns
@@ -100,7 +104,7 @@ constexpr char kFootText[] = "* after restarting the game";
 constexpr int kGap = 9;
 constexpr int kBoxW = 228;
 constexpr int kLeftX = 8, kRightX = kLeftX + kBoxW + kGap;
-constexpr int kTopY = 7, kTopH = 66;
+constexpr int kTopY = 7, kTopH = 76;  // 66 before the Borderless / Exclusive row
 constexpr int kLowY = kTopY + kTopH + kGap;
 constexpr int kRowTop = 27, kRowStep = 22;  // first checkbox, checkbox to checkbox
 constexpr int kFeaturesH = kRowTop + 2 * kRowStep + 20 + 7;
@@ -166,6 +170,20 @@ std::string OptGraphControls() {
                   "StateDisable0=\"CheckBoxOffGrey\"\r\nStateDisable1=\"CheckBoxOnGrey\"\r\nText=\"%s\"\r\n"
                   "TextColor=16777215\r\nTextLMargin=3\r\nXywh=8,%d,211,20\r\n\r\n",
                   g_checks[i].name, 22 + i, y * 15, g_checks[i].label, y);
+    t += buf;
+  }
+  // Borderless / Exclusive, side by side above the resolution dropdown
+  // (checkbox sprites, kept to one ticked by OptGraphEvent).
+  for (int i = 0; i < 2; ++i) {
+    const int x = i ? 118 : 8, w = i ? 101 : 105;
+    std::snprintf(buf, sizeof(buf),
+                  "[%s]\r\nNumStates=2\r\nType=MULTISTATE\r\nAnchor=DisplayResolutionBox\r\nRelAnchor=1\r\n"
+                  "Height=300\r\nLeft=%d\r\nTabIndex=%d\r\nTop=390\r\nWidth=%d\r\nDropColor=0\r\nTextDrop=-1'True\r\n"
+                  "TextAlignV=TOP\r\nTextAlign=RIGHT\r\nSourceBlit=-1'True\r\nSoundPush=\"Beep\"\r\n"
+                  "Broken_Enable=0'False\r\nState0=\"CheckBoxOff\"\r\nState1=\"CheckBoxOn\"\r\n"
+                  "StateDisable0=\"CheckBoxOffGrey\"\r\nStateDisable1=\"CheckBoxOnGrey\"\r\nText=\"%s\"\r\n"
+                  "TextColor=16777215\r\nTextLMargin=3\r\nXywh=%d,26,%d,20\r\n\r\n",
+                  kFsNames[i], x * 15, 60 + i, w * 15, kFsLabels[i], x, w);
     t += buf;
   }
   std::snprintf(buf, sizeof(buf),
@@ -396,7 +414,7 @@ constexpr Plate kPlates[] = {{"Mcm2fixPlateTop", kTopH}, {"Mcm2fixPlateFeatures"
 void RelayoutOptGraph(std::string& t) {
   Place(t, "DisplayResolutionBox", kLeftX, kTopY, kBoxW, kTopH);
   SetKey(t, "DisplayResolutionBox", "AnimNorm", "\"Mcm2fixPlateTop\"");
-  Place(t, "DisplayResolutionDropDown", 25, 28, 178, 83);
+  Place(t, "DisplayResolutionDropDown", 25, 50, 178, 83);
   Place(t, "TerrainQualityBox", kRightX, kTopY, kBoxW, kTopH);
   SetKey(t, "TerrainQualityBox", "AnimNorm", "\"Mcm2fixPlateTop\"");
   Place(t, "TerrainQualitySliderBar", 11, 28, 204, 16);
@@ -690,6 +708,16 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
       patch::Log("menus: slider %s (vtable %08x) bound at step %d (%s=%d)", m.name,
                  static_cast<unsigned>(*reinterpret_cast<uintptr_t*>(c)), m.pos, m.key, m.saved);
     }
+    for (int i = 0; i < 2; ++i) {
+      const uintptr_t box = FindCheckbox(self, kFsNames[i]);
+      g_fs_value[i] = (i == 1) == GetConfig().exclusive;
+      if (!box) {
+        patch::Log("menus: %s not on the page", kFsNames[i]);
+        continue;
+      }
+      const uintptr_t bind = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + kBindSlot);
+      reinterpret_cast<BindFn>(bind)(box, nullptr, &g_fs_value[i]);
+    }
     g_bound = bound > 0 || sbound > 0;
     patch::Log("menus: %d of %d checkboxes and %d of %d sliders bound", bound, kNumChecks, sbound, kNumSliders);
   }
@@ -697,6 +725,8 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   if (type == 5) {
     SetLabel(self, "Mcm2fixBoxText", "Enhancements");
     for (const MenuCheck& m : g_checks) SetLabel(self, m.name, m.label);
+    for (int i = 0; i < 2; ++i) SetLabel(self, kFsNames[i], kFsLabels[i]);
+    ResolutionFillDropdown(FindAny(self, "DisplayResolutionDropDown"));
     SetLabel(self, kFootName, kFootText);
     for (const MenuSlider& m : g_sliders) SliderLabel(self, m, m.pos);
     UpdateGreying(self, g_sliders[kMsaaSlider].pos);
@@ -726,6 +756,21 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   }
   if (type == 3) {
     const char* clicked = SafeName(event);
+    // Borderless / Exclusive: the clicked one is ticked, the other cleared
+    // (clicking the ticked one keeps it), and the switch happens now.
+    for (int i = 0; i < 2; ++i) {
+      if (std::strcmp(clicked, kFsNames[i]) != 0) continue;
+      g_fs_value[i] = 1;
+      g_fs_value[1 - i] = 0;
+      for (int k = 0; k < 2; ++k) {
+        if (const uintptr_t box = FindCheckbox(self, kFsNames[k])) {
+          CallSlot(box, kExchangeSlot, 0);  // bound value -> control
+          CallSlot(box, kRedrawSlot, 0);
+        }
+      }
+      patch::Log("menus: %s clicked", kFsNames[i]);
+      ResolutionSetExclusive(i == 1, FindAny(self, "DisplayResolutionDropDown"));
+    }
     for (MenuCheck& m : g_checks) {
       if (std::strcmp(clicked, m.name) != 0) continue;
       if (const uintptr_t box = FindCheckbox(self, m.name)) {

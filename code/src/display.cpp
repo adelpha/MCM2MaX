@@ -149,6 +149,11 @@ void Init() {
   BuildLists();
 }
 
+void Rebuild() {
+  Init();
+  BuildLists();
+}
+
 Mode Desktop() {
   Init();
   return g_desktop;

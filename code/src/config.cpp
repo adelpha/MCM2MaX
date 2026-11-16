@@ -96,6 +96,11 @@ const char* SetFromMenu(const char* key, int value) {
   return SetStringFromMenu(key, v);
 }
 
+const char* SetFullscreenFromMenu(bool exclusive) {
+  g_config.exclusive = exclusive;
+  return SetStringFromMenu("Fullscreen", exclusive ? "Exclusive" : "Borderless");
+}
+
 const char* SetStringFromMenu(const char* key, const char* v) {
   // mcm2max.ini itself when it can be written (only that key's line changes);
   // then any older choice for the key in the per-user file is dropped so it
@@ -327,8 +332,14 @@ void LoadConfig() {
   {
     char r[32] = {};
     GetPrivateProfileStringA(sec, "Fullscreen", "Borderless", r, sizeof(r), ini);
+    if (g_menu_ini[0]) {  // a choice from the menus, when mcm2max.ini couldn't be written
+      char o[32] = {};
+      GetPrivateProfileStringA(g_menu_section, "Fullscreen", "", o, sizeof(o), g_menu_ini);
+      if (o[0]) std::snprintf(r, sizeof(r), "%s", o);
+    }
     r[std::strcspn(r, " \t;")] = 0;
     g_config.exclusive = _strnicmp(r, "Excl", 4) == 0;
+    g_config.card_test = GetPrivateProfileIntA(sec, "CardTest", 0, ini) != 0;
     g_config.monitor = GetPrivateProfileIntA(sec, "Monitor", 1, ini);
     if (g_config.monitor < 1 || g_config.monitor > 16) g_config.monitor = 1;
     // BorderlessResolution=Desktop or <w>x<h>; ExclusiveResolution=Desktop or

@@ -39,6 +39,9 @@
 namespace {
 
 int g_want_w = 0, g_want_h = 0, g_want_hz = 0;  // the mode the game should use (never 0 after Init)
+bool g_want_desktop = true;  // ...because the ini says Desktop (the dropdown shows "Desktop")
+// The dropdown's "Desktop" entry: item data the game's mode positions never reach.
+constexpr int kDesktopData = 1000;
 bool g_logged_table = false;
 int g_last_fixed = -2;  // last position written (for the log)
 bool g_ready = false;
@@ -93,6 +96,7 @@ void ChooseFromIni() {
     g_want_w = w;
     g_want_h = h;
     g_want_hz = hz;
+    g_want_desktop = why[0] == 'D';
     patch::Log("resolution: Fullscreen=Exclusive, mode %dx%d@%d (%s)", w, h, hz, why);
   } else {
     int w = c.bl_width, h = c.bl_height;
@@ -113,22 +117,49 @@ void ChooseFromIni() {
     g_want_w = w;
     g_want_h = h;
     g_want_hz = 0;
+    g_want_desktop = why[0] == 'D';
     patch::Log("resolution: Fullscreen=Borderless, rendering at %dx%d (%s), scaled to %dx%d", w, h, why, desk.w, desk.h);
   }
 }
 
-// Options OK: the player picked the mode at this position.
+// Options OK: the player picked the mode at this position (or "Desktop").
 void __stdcall NotePick(int pos) {
   const uint8_t* arr = nullptr;
   const int n = Modes(&arr);
+  const bool excl = GetConfig().exclusive;
+  if (pos == kDesktopData) {
+    const display::Mode d = display::Desktop();
+    int real = -1;
+    for (int i = 0; i < n && real < 0; ++i) {
+      const GameMode m = ModeAt(arr, i);
+      if (m.w == d.w && m.h == d.h && (!excl || m.hz == d.hz)) real = i;
+    }
+    for (int i = 0; i < n && real < 0; ++i) {
+      const GameMode m = ModeAt(arr, i);
+      if (m.w == d.w && m.h == d.h) real = i;
+    }
+    // The game keeps a mode position: give it the desktop's.
+    *reinterpret_cast<int*>(0x68E918) = real >= 0 ? real : 0;
+    const char* key = excl ? "ExclusiveResolution" : "BorderlessResolution";
+    if (!g_want_desktop) {
+      const char* file = SetStringFromMenu(key, "Desktop");
+      patch::Log("resolution: player picked Desktop (%dx%d@%d, position %d); saved as %s=Desktop in %s", d.w, d.h,
+                 excl ? d.hz : 0, real, key, file);
+    }
+    g_want_w = d.w;
+    g_want_h = d.h;
+    g_want_hz = excl ? d.hz : 0;
+    g_want_desktop = true;
+    return;
+  }
   if (pos < 0 || pos >= n) {
     patch::Log("resolution: Options picked position %d, outside the %d modes; not saved", pos, n);
     return;
   }
   const GameMode m = ModeAt(arr, pos);
-  const bool excl = GetConfig().exclusive;
   const int hz = excl ? m.hz : 0;
-  if (m.w == g_want_w && m.h == g_want_h && hz == g_want_hz) return;
+  if (m.w == g_want_w && m.h == g_want_h && hz == g_want_hz && !g_want_desktop) return;
+  g_want_desktop = false;
   g_want_w = m.w;
   g_want_h = m.h;
   g_want_hz = hz;
@@ -223,11 +254,138 @@ bool HookLabelSite(uintptr_t site) {
   return true;
 }
 
+// ---- The game's video card test (CardTest=0: replaced) -----------------
+// At start the game loads each card's cached test results from the registry
+// (DriverInfo) or tests the card (0x4c5460: a 640x480 mode switch, video
+// memory, AGP, texture formats, a partial blit), after writing the card's
+// identity to the registry (0x4c5e00). With MCM2MaX's renderer the answers
+// never change, so both are skipped and the card gets the values the test
+// itself gave on Direct3D 11 (res-1 log, 2026-11-16).
+constexpr uintptr_t kCards = 0x690894, kCardCount = 0x6908A4;
+
+int __fastcall CardSetup(uintptr_t /*game*/) {
+  const int n = *reinterpret_cast<const int*>(kCardCount);
+  for (int i = 0; i < n && i < 8; ++i) {
+    const uintptr_t card = reinterpret_cast<const uintptr_t*>(kCards)[i];
+    if (!card) continue;
+    *reinterpret_cast<int*>(card + 0x54) = 256 << 20;      // TotalVideoMemory (GetAvailableVidMem)
+    *reinterpret_cast<int*>(card + 0x60) = 0x7FFFFFFF;     // TextureCacheLimit: none
+    *reinterpret_cast<int*>(card + 0x5BC) = 0;             // PartialTextureBlt
+    *reinterpret_cast<int*>(card + 0x9F0) = 1;             // IsAGP
+    const int modes = *reinterpret_cast<const int*>(card + 0x8);
+    uint8_t* arr = *reinterpret_cast<uint8_t**>(card + 0x10);
+    for (int m = 0; arr && m < modes && m < 512; ++m) {  // every mode usable
+      reinterpret_cast<int*>(arr + m * 0x24)[5] = 1;
+      reinterpret_cast<int*>(arr + m * 0x24)[6] = 1;
+    }
+    patch::Log("resolution: card %d \"%s\": the game's card test skipped (CardTest=0); %d modes, video memory 256 MB, "
+               "flags70 %02x, disabled %02x",
+               i, reinterpret_cast<const char*>(card + 0x4BC), modes, *reinterpret_cast<const uint8_t*>(card + 0x70),
+               *reinterpret_cast<const uint8_t*>(card + 0xB74));
+  }
+  return 1;
+}
+
+int __fastcall SkipCardIdentity(uintptr_t) { return 1; }
+
+void ReplaceCardTest() {
+  const uint8_t id_call[] = {0xE8};
+  const bool a = patch::Matches(0x4C4716, id_call, 1) &&
+                 0x4C4716 + 5 + *reinterpret_cast<const int32_t*>(0x4C4717) == 0x4C5E00;
+  const bool b = patch::Matches(0x4C471D, id_call, 1) &&
+                 0x4C471D + 5 + *reinterpret_cast<const int32_t*>(0x4C471E) == 0x4C5460;
+  if (!a || !b) {
+    patch::Log("resolution: card test code differs (%d/%d); the game's own test runs", a, b);
+    return;
+  }
+  patch::Call(0x4C4716, reinterpret_cast<void*>(&SkipCardIdentity), 5);
+  patch::Call(0x4C471D, reinterpret_cast<void*>(&CardSetup), 5);
+  patch::Log("resolution: the game's video card test is replaced (CardTest=1 runs it)");
+}
+
+// ---- Borderless / Exclusive switched in Options --------------------------
+// The game's mode table is refilled through its own EnumDisplayModes callback
+// (0x4cddb0, stdcall(desc, card)), which grows the array as needed.
+constexpr uintptr_t kEnumCallback = 0x4CDDB0;
+using EnumCbFn = HRESULT(__stdcall*)(void* desc, void* ctx);
+
+void RefillGameTable() {
+  const uintptr_t game = *reinterpret_cast<const uintptr_t*>(0x5743AC);
+  if (!game) return;
+  const uintptr_t card = *reinterpret_cast<const uintptr_t*>(game + 0xC);
+  if (!card) return;
+  const uint8_t cb_start[] = {0x56, 0x8B, 0x74, 0x24, 0x0C};  // push esi; mov esi,[esp+0c]
+  if (!patch::Matches(kEnumCallback, cb_start, sizeof(cb_start))) {
+    patch::Log("resolution: mode list code differs; the list changes at the next start");
+    return;
+  }
+  const int before = *reinterpret_cast<const int*>(card + 0x8);
+  *reinterpret_cast<int*>(card + 0x8) = 0;
+  for (const display::Mode& m : display::GameModes()) {
+    uint8_t desc[0x7C] = {};
+    *reinterpret_cast<uint32_t*>(desc + 0x00) = 0x7C;
+    *reinterpret_cast<uint32_t*>(desc + 0x08) = m.h;
+    *reinterpret_cast<uint32_t*>(desc + 0x0C) = m.w;
+    *reinterpret_cast<uint32_t*>(desc + 0x18) = m.hz ? m.hz : 60;
+    *reinterpret_cast<uint32_t*>(desc + 0x54) = 16;
+    reinterpret_cast<EnumCbFn>(kEnumCallback)(desc, reinterpret_cast<void*>(card));
+  }
+  g_logged_table = false;  // log the new table next frame
+  g_last_fixed = -2;
+  patch::Log("resolution: the game's mode list refilled: %d -> %d modes", before,
+             *reinterpret_cast<const int*>(card + 0x8));
+}
+
+// The resolution dropdown (list object at control +0x1fc): items 0x38 bytes
+// at +0x214, count +0x1ec, selection +0x1f4; text (item +0x14) allocated
+// with the game's allocator 0x4a4410, freed with 0x4a4450.
+using AddItemFn = int(__fastcall*)(uintptr_t list, void*, const char* text, int data, int flags);
+using SelectFn = int(__fastcall*)(uintptr_t list, void*, int data);
+using FreeFn = void(__cdecl*)(void* p, const char* file, int line);
+
+void RefillDropdown(uintptr_t control) {
+  if (!control || IsBadReadPtr(reinterpret_cast<void*>(control), 0x200)) return;
+  const uintptr_t list = *reinterpret_cast<const uintptr_t*>(control + 0x1FC);
+  if (!list || IsBadReadPtr(reinterpret_cast<void*>(list), 0x218)) {
+    patch::Log("resolution: dropdown list not found");
+    return;
+  }
+  const int count = *reinterpret_cast<const int*>(list + 0x1EC);
+  uint8_t* items = *reinterpret_cast<uint8_t**>(list + 0x214);
+  for (int i = 0; items && i < count; ++i) {
+    void*& text = *reinterpret_cast<void**>(items + i * 0x38 + 0x14);
+    if (text) reinterpret_cast<FreeFn>(0x4A4450)(text, "MCM2MaX", 0);
+    text = nullptr;
+  }
+  *reinterpret_cast<int*>(list + 0x1EC) = 0;
+  *reinterpret_cast<int*>(list + 0x1F4) = -1;
+  const uint8_t* arr = nullptr;
+  const int n = Modes(&arr);
+  // "Desktop" first: picking it writes Desktop to the ini (NotePick).
+  reinterpret_cast<AddItemFn>(0x477D10)(list, nullptr, "Desktop", kDesktopData, 0);
+  int select = -1;
+  for (int i = 0; i < n; ++i) {
+    const GameMode m = ModeAt(arr, i);
+    char label[48];
+    LabelFormat(i, label, m.w, m.h);
+    reinterpret_cast<AddItemFn>(0x477D10)(list, nullptr, label, i, 0);
+    if (select < 0 && m.w == g_want_w && m.h == g_want_h && (!g_want_hz || m.hz == g_want_hz)) select = i;
+  }
+  if (select < 0) select = 0;
+  // The page's working copy of the mode position stays a real position.
+  *reinterpret_cast<int*>(0x68E918) = select;
+  reinterpret_cast<SelectFn>(0x477AC0)(list, nullptr, g_want_desktop ? kDesktopData : select);
+  patch::Log("resolution: dropdown filled: %d -> %d entries + Desktop, showing %s (position %d)", count, n,
+             g_want_desktop ? "Desktop" : "the mode", select);
+}
+
 }  // namespace
 
 void ApplyResolutionDefault() {
   display::Init();
   MigrateDisplayKeys();
+  if (!GetConfig().card_test) ReplaceCardTest();
+  else patch::Log("resolution: CardTest=1, the game's own video card test runs");
   const bool a = HookPickSite(0x4B6DA3);  // Options > Graphics
   const bool b = HookPickSite(0x453846);
   const bool l1 = HookLabelSite(0x4B6BDB);
@@ -235,6 +393,20 @@ void ApplyResolutionDefault() {
   ChooseFromIni();
   g_ready = true;
   patch::Log("resolution: hooks: Options graphics %d, other %d, labels %d/%d", a, b, l1, l2);
+}
+
+void ResolutionFillDropdown(uintptr_t dropdown) {
+  if (g_ready) RefillDropdown(dropdown);
+}
+
+void ResolutionSetExclusive(bool exclusive, uintptr_t dropdown) {
+  if (exclusive == GetConfig().exclusive) return;
+  const char* file = SetFullscreenFromMenu(exclusive);
+  patch::Log("resolution: Fullscreen=%s from Options, saved to %s", exclusive ? "Exclusive" : "Borderless", file);
+  display::Rebuild();
+  ChooseFromIni();
+  RefillGameTable();
+  RefillDropdown(dropdown);
 }
 
 void ResolutionWanted(int* w, int* h, int* hz) {
