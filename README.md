@@ -7,7 +7,7 @@ change the game's display resolution.
 
 ---
 
-You need the no-CD `Mcm2.exe`. mcm2fix only works with the widely available no-CD exe (1,577,005 bytes; see [Requirements](#requirements)). The original `Mcm2.exe` from the CD uses SafeDisc copy protection, which Windows 10 and 11 can't run at all, and mcm2fix doesn't patch it. With any other exe mcm2fix does nothing.
+***You need the no-CD `Mcm2.exe`.*** mcm2fix only works with the widely available no-CD exe (1,577,005 bytes; see [Requirements](#requirements)). The original `Mcm2.exe` from the CD uses SafeDisc copy protection, which Windows 10 and 11 can't run at all, and mcm2fix doesn't patch it. With any other exe mcm2fix does nothing.
 
 ---
 
