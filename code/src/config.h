@@ -104,6 +104,7 @@ struct Config {
   int xinput_steer_curve = 33;    // XInputSteerCurve: left stick X exponent in percent (game cubes it on top)
   int xinput_steer_smooth = 40;    // XInputSteerSmooth: ms the steering takes to ease toward the stick (0 = off)
   bool keep_control_preset = true;  // KeepControlPreset: keep the chosen control preset between runs
+  int xinput_rumble_min_ms = 150;   // XInputRumbleMinMs: shortest rumble, held at full strength before fading
   int xinput_rumble_threshold = 10;  // XInputRumbleThreshold: % jump in the game's stick force that rumbles
   bool xinput_rumble_forces = false;  // XInputRumbleForces: the game's steady stick forces rumble too
   bool xinput_trigger_buttons = true;   // XInputTriggerButtons: triggers also as buttons 11 (LT) and 12 (RT)

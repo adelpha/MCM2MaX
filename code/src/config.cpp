@@ -296,6 +296,9 @@ void LoadConfig() {
   if (g_config.xinput_steer_smooth < 0) g_config.xinput_steer_smooth = 0;
   if (g_config.xinput_steer_smooth > 500) g_config.xinput_steer_smooth = 500;
   g_config.keep_control_preset = GetPrivateProfileIntA(sec, "KeepControlPreset", 1, ini) != 0;
+  g_config.xinput_rumble_min_ms = GetPrivateProfileIntA(sec, "XInputRumbleMinMs", 150, ini);
+  if (g_config.xinput_rumble_min_ms < 0) g_config.xinput_rumble_min_ms = 0;
+  if (g_config.xinput_rumble_min_ms > 1000) g_config.xinput_rumble_min_ms = 1000;
   g_config.xinput_rumble_threshold = GetPrivateProfileIntA(sec, "XInputRumbleThreshold", 10, ini);
   if (g_config.xinput_rumble_threshold < 1) g_config.xinput_rumble_threshold = 1;
   if (g_config.xinput_rumble_threshold > 100) g_config.xinput_rumble_threshold = 100;

@@ -162,6 +162,7 @@ int g_rumble_pct = 100;
 float g_deadzone = 0.15f;
 float g_curve = 1.0f;          // XInputSteerCurve / 100: left stick X response exponent
 bool g_rumble_forces = false;  // XInputRumbleForces: steady stick forces rumble too
+double g_min_pulse_us = 150000;  // XInputRumbleMinMs * 1000: shortest rumble at full strength
 double g_kick_threshold = 1000;  // XInputRumbleThreshold * 100: force jump that rumbles
 float g_steer_smooth_us = 0;   // XInputSteerSmooth (ms) * 1000: steering follows the stick with this time constant
 LARGE_INTEGER g_freq;
@@ -284,13 +285,14 @@ class Effect final : public IDirectInputEffect {
   // over kKickUs.
   // A crash stops the force outright (the game's crash state); that rumbles
   // at least kCrashKick for kCrashUs. Short jolts (70 ms in the game) are too
-  // brief for pad motors to spin up, so they last at least kMinPulseUs.
-  static constexpr double kKickUs = 400000, kCrashKick = 8000, kCrashUs = 700000,
-                          kMinPulseUs = 160000;
+  // brief for pad motors to spin up, so they last at least XInputRumbleMinMs.
+  static constexpr double kKickUs = 400000, kCrashKick = 8000, kCrashUs = 700000;
   double kick_len_us_ = kKickUs;
   double KickLevel(double now_us) const {
-    const double t = now_us - kick_us_;
-    return t >= kick_len_us_ || t < 0 ? 0 : kick_ * (1.0 - t / kick_len_us_);
+    // Full strength for XInputRumbleMinMs, then a straight fade.
+    const double t = now_us - kick_us_ - g_min_pulse_us;
+    if (t < 0) return now_us >= kick_us_ ? kick_ : 0;
+    return t >= kick_len_us_ ? 0 : kick_ * (1.0 - t / kick_len_us_);
   }
   void Kick(double now_us, double level, double len_us) {
     const double left = KickLevel(now_us);
@@ -1193,8 +1195,8 @@ void Effect::Strength(double now_us, float* low, float* high) {
       playing_ = false;
       return;
     }
-    // A single short pulse is held to kMinPulseUs so the motors can feel it.
-    const double span = iterations_ == 1 ? std::max<double>(duration_, kMinPulseUs) : duration_;
+    // A single short pulse is held to XInputRumbleMinMs so the motors can feel it.
+    const double span = iterations_ == 1 ? std::max<double>(duration_, g_min_pulse_us) : duration_;
     const double it = std::floor(t / span);
     if (iterations_ != INFINITE && it >= iterations_) {
       playing_ = false;
@@ -1512,6 +1514,7 @@ void Apply() {
   g_curve = static_cast<float>(c.xinput_steer_curve) / 100.0f;
   g_rumble_forces = c.xinput_rumble_forces;
   g_kick_threshold = c.xinput_rumble_threshold * 100.0;
+  g_min_pulse_us = c.xinput_rumble_min_ms * 1000.0;
   g_steer_smooth_us = static_cast<float>(c.xinput_steer_smooth) * 1000.0f;
   g_trigger_buttons = c.xinput_trigger_buttons;
   constexpr uintptr_t kDirectInputCreateEx = 0x555028;  // DINPUT!DirectInputCreateEx
@@ -1521,9 +1524,9 @@ void Apply() {
   }
   g_create = reinterpret_cast<CreateExFn>(
       patch::HookIat(kDirectInputCreateEx, reinterpret_cast<void*>(&MyDirectInputCreateEx)));
-  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputRumbleThreshold=%d XInputDeadzone=%d XInputSteerCurve=%d XInputSteerSmooth=%d KeepControlPreset=%d "
+  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputRumbleThreshold=%d XInputRumbleMinMs=%d XInputDeadzone=%d XInputSteerCurve=%d XInputSteerSmooth=%d KeepControlPreset=%d "
              "XInputTriggerButtons=%d XInputLog=%d)",
-             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_rumble_threshold, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
+             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_rumble_threshold, c.xinput_rumble_min_ms, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
              g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
 }
 

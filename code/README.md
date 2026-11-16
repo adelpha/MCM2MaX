@@ -702,6 +702,11 @@ XInputRumbleForces=0
 ; Lower = more bumps felt (too low becomes a constant rumble). Default 10.
 XInputRumbleThreshold=10
 
+; XInputRumbleMinMs: shortest rumble in milliseconds, 0-1000. Each bump is
+; held at full strength this long before it fades (bumps fade over 0.4 s,
+; crashes over 0.7 s). Default 150.
+XInputRumbleMinMs=150
+
 ; XInputTriggerButtons: 1 = the triggers also work as buttons 11 (LT) and
 ; 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the Z axis,
 ; Brake on button 11) works as it is (default). 0 = axes only. The game can't
