@@ -302,6 +302,16 @@ void LoadConfig() {
   g_config.xinput_rumble_threshold = GetPrivateProfileIntA(sec, "XInputRumbleThreshold", 10, ini);
   if (g_config.xinput_rumble_threshold < 1) g_config.xinput_rumble_threshold = 1;
   if (g_config.xinput_rumble_threshold > 100) g_config.xinput_rumble_threshold = 100;
+  {
+    // Event numbers as in game+0x2d78: 0 Quarry, 1 Baja, 2 Nationals, 3 Supercross, 4 Moto-Tag, 5 Enduro.
+    const char* keys[6] = {"QuarryRumbleThreshold", "BajaRumbleThreshold", "NationalsRumbleThreshold",
+                           "SupercrossRumbleThreshold", "TagRumbleThreshold", "EnduroRumbleThreshold"};
+    const int defs[6] = {0, 0, 20, 20, 0, 0};
+    for (int e = 0; e < 6; ++e) {
+      int v = GetPrivateProfileIntA(sec, keys[e], defs[e], ini);
+      g_config.xinput_rumble_threshold_event[e] = v < 0 ? 0 : v > 100 ? 100 : v;
+    }
+  }
   g_config.xinput_rumble_forces = GetPrivateProfileIntA(sec, "XInputRumbleForces", 0, ini) != 0;
   g_config.xinput_trigger_buttons = GetPrivateProfileIntA(sec, "XInputTriggerButtons", 1, ini) != 0;
   g_config.xinput_log = GetPrivateProfileIntA(sec, "XInputLog", 0, ini) != 0;

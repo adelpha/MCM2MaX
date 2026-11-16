@@ -164,6 +164,15 @@ float g_curve = 1.0f;          // XInputSteerCurve / 100: left stick X response 
 bool g_rumble_forces = false;  // XInputRumbleForces: steady stick forces rumble too
 double g_min_pulse_us = 150000;  // XInputRumbleMinMs * 1000: shortest rumble at full strength
 double g_kick_threshold = 1000;  // XInputRumbleThreshold * 100: force jump that rumbles
+double g_kick_threshold_event[6] = {};  // per event (game+0x2d78), 0 = g_kick_threshold
+
+// Threshold for the event being raced: game object 0x5743ac, event number at +0x2d78.
+double KickThreshold() {
+  const uintptr_t g = *reinterpret_cast<const uintptr_t*>(0x5743ac);
+  const int ev = g ? *reinterpret_cast<const int*>(g + 0x2d78) : -1;
+  if (ev >= 0 && ev < 6 && g_kick_threshold_event[ev] > 0) return g_kick_threshold_event[ev];
+  return g_kick_threshold;
+}
 float g_steer_smooth_us = 0;   // XInputSteerSmooth (ms) * 1000: steering follows the stick with this time constant
 LARGE_INTEGER g_freq;
 
@@ -1086,7 +1095,7 @@ HRESULT Effect::SetParameters(LPCDIEFFECT eff, DWORD flags) {
     } else if (!periodic_ && !ramp_ && eff->cbTypeSpecificParams >= sizeof(DICONSTANTFORCE)) {
       const LONG m = static_cast<const DICONSTANTFORCE*>(eff->lpvTypeSpecificParams)->lMagnitude;
       const double jump = std::fabs(static_cast<double>(m) - magnitude_);
-      if (jump >= g_kick_threshold) {
+      if (jump >= KickThreshold()) {
         Kick(NowUs(), jump, kKickUs);
         if (g_log && steady_ && !g_rumble_forces)
           patch::Log("xinput: effect %p (ConstantForce): force jump %ld -> %ld, rumble kick %.0f",
@@ -1514,6 +1523,7 @@ void Apply() {
   g_curve = static_cast<float>(c.xinput_steer_curve) / 100.0f;
   g_rumble_forces = c.xinput_rumble_forces;
   g_kick_threshold = c.xinput_rumble_threshold * 100.0;
+  for (int e = 0; e < 6; ++e) g_kick_threshold_event[e] = c.xinput_rumble_threshold_event[e] * 100.0;
   g_min_pulse_us = c.xinput_rumble_min_ms * 1000.0;
   g_steer_smooth_us = static_cast<float>(c.xinput_steer_smooth) * 1000.0f;
   g_trigger_buttons = c.xinput_trigger_buttons;
@@ -1528,6 +1538,9 @@ void Apply() {
              "XInputTriggerButtons=%d XInputLog=%d)",
              c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_rumble_threshold, c.xinput_rumble_min_ms, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
              g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
+  const auto& t = c.xinput_rumble_threshold_event;
+  patch::Log("xinput: per-event RumbleThreshold (0 = XInputRumbleThreshold): Quarry=%d Baja=%d Nationals=%d Supercross=%d Tag=%d Enduro=%d",
+             t[0], t[1], t[2], t[3], t[4], t[5]);
 }
 
 }  // namespace xpad

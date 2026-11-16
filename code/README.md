@@ -702,6 +702,18 @@ XInputRumbleForces=0
 ; Lower = more bumps felt (too low becomes a constant rumble). Default 10.
 XInputRumbleThreshold=10
 
+; QuarryRumbleThreshold, BajaRumbleThreshold, NationalsRumbleThreshold,
+; SupercrossRumbleThreshold, TagRumbleThreshold, EnduroRumbleThreshold:
+; XInputRumbleThreshold for one event type, 1-100; 0 = use
+; XInputRumbleThreshold. Nationals and Supercross tracks are full of ridges
+; and whoops, so they default to 20.
+QuarryRumbleThreshold=0
+BajaRumbleThreshold=0
+NationalsRumbleThreshold=20
+SupercrossRumbleThreshold=20
+TagRumbleThreshold=0
+EnduroRumbleThreshold=0
+
 ; XInputRumbleMinMs: shortest rumble in milliseconds, 0-1000. Each bump is
 ; held at full strength this long before it fades (bumps fade over 0.4 s,
 ; crashes over 0.7 s). Default 150.

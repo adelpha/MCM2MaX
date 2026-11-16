@@ -106,6 +106,7 @@ struct Config {
   bool keep_control_preset = true;  // KeepControlPreset: keep the chosen control preset between runs
   int xinput_rumble_min_ms = 150;   // XInputRumbleMinMs: shortest rumble, held at full strength before fading
   int xinput_rumble_threshold = 10;  // XInputRumbleThreshold: % jump in the game's stick force that rumbles
+  int xinput_rumble_threshold_event[6] = {};  // QuarryRumbleThreshold..EnduroRumbleThreshold (event number order), 0 = XInputRumbleThreshold
   bool xinput_rumble_forces = false;  // XInputRumbleForces: the game's steady stick forces rumble too
   bool xinput_trigger_buttons = true;   // XInputTriggerButtons: triggers also as buttons 11 (LT) and 12 (RT)
   bool xinput_log = false;    // XInputLog: log controller calls, buttons, effects and a summary every 10 s
