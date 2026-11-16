@@ -646,6 +646,39 @@ void TrackExclusive11() {
     if (EnumDisplaySettingsA(dev[0] ? dev : nullptr, ENUM_CURRENT_SETTINGS, &dm))
       Log("exclusive: Windows reports %s at %lux%lu@%lu Hz now", dev[0] ? dev : "the display", dm.dmPelsWidth,
           dm.dmPelsHeight, dm.dmDisplayFrequency);
+    // The signal the GPU actually sends the monitor (Windows' "Active signal
+    // mode"): the driver can keep it at the panel's native timing and scale
+    // (GPU scaling), whatever the display mode is.
+    UINT32 np = 0, nm = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &np, &nm) == ERROR_SUCCESS && np && nm) {
+      std::vector<DISPLAYCONFIG_PATH_INFO> paths(np);
+      std::vector<DISPLAYCONFIG_MODE_INFO> modes(nm);
+      if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &np, paths.data(), &nm, modes.data(), nullptr) == ERROR_SUCCESS) {
+        for (UINT32 i = 0; i < np; ++i) {
+          DISPLAYCONFIG_SOURCE_DEVICE_NAME sn{};
+          sn.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+          sn.header.size = sizeof(sn);
+          sn.header.adapterId = paths[i].sourceInfo.adapterId;
+          sn.header.id = paths[i].sourceInfo.id;
+          DisplayConfigGetDeviceInfo(&sn.header);
+          char src[64] = {};
+          WideCharToMultiByte(CP_ACP, 0, sn.viewGdiDeviceName, -1, src, sizeof(src), nullptr, nullptr);
+          if (dev[0] && _stricmp(src, dev) != 0) continue;
+          const UINT32 ti = paths[i].targetInfo.modeInfoIdx, si = paths[i].sourceInfo.modeInfoIdx;
+          if (ti < nm && modes[ti].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_TARGET) {
+            const DISPLAYCONFIG_VIDEO_SIGNAL_INFO& v = modes[ti].targetMode.targetVideoSignalInfo;
+            const double hz = v.vSyncFreq.Denominator ? double(v.vSyncFreq.Numerator) / v.vSyncFreq.Denominator : 0;
+            Log("exclusive: signal to the monitor (%s): %ux%u@%.2f Hz; desktop source %ux%u; path refresh %u/%u, "
+                "scaling %d",
+                src, v.activeSize.cx, v.activeSize.cy, hz,
+                si < nm && modes[si].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE ? modes[si].sourceMode.width : 0,
+                si < nm && modes[si].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE ? modes[si].sourceMode.height : 0,
+                paths[i].targetInfo.refreshRate.Numerator, paths[i].targetInfo.refreshRate.Denominator,
+                static_cast<int>(paths[i].targetInfo.scaling));
+          }
+        }
+      }
+    }
     DXGI_SWAP_CHAIN_FULLSCREEN_DESC fd{};
     if (SUCCEEDED(b.swapchain->GetFullscreenDesc(&fd)))
       Log("exclusive: swap chain fullscreen desc refresh %u/%u, windowed %d", fd.RefreshRate.Numerator,
