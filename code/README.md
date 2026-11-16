@@ -676,19 +676,27 @@ InputTiming=1
 AltTabFix=1
 
 ; XInput: 1 = Xbox (XInput) controllers connected when the game starts are
-; listed as "Xbox Controller 1" to 4 with analog sticks (left stick X/Y,
-; right stick X/Y Rotation), the right trigger on the Z axis and the left
-; trigger on the Z Rotation axis (each zero when let go), the d-pad as the
-; hat, buttons 1-10 A B X Y LB RB Back Start and the stick clicks, 11 LT and
-; 12 RT, and the game's force feedback as rumble (default). Windows' own
-; DirectInput copies of these controllers are left out of the list. 0 = the
-; original: Windows' copy, which the game treats as a gamepad (sticks act as
-; on/off presses), with both triggers on one axis and no rumble.
+; listed under their own names with analog sticks (left stick X/Y, right
+; stick X/Y Rotation), the right trigger on the Z axis and the left trigger
+; on the Z Rotation axis (each rests at the centre and moves one way, so the
+; game can bind them), the d-pad as the hat, buttons 1-10 A B X Y LB RB Back
+; Start and the stick clicks, and the game's force feedback as rumble
+; (default). Windows' own DirectInput copies of these controllers are left
+; out of the list. 0 = the original: Windows' copy, which the game treats as
+; a gamepad (sticks act as on/off presses), with both triggers on one axis
+; and no rumble.
 XInput=1
 
 ; XInputRumble: rumble strength in percent, 0-200. 0 = no rumble, and the
 ; controller doesn't offer force feedback to the game. Default 100.
 XInputRumble=100
+
+; XInputTriggerButtons: 1 = the triggers also work as buttons 11 (LT) and
+; 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the Z axis,
+; Brake on button 11) works as it is (default). 0 = axes only: use it to
+; remap an action to a trigger's axis, as pressing a trigger while remapping
+; otherwise picks its button.
+XInputTriggerButtons=1
 
 ; XInputDeadzone: how far either stick has to move from the centre before it
 ; counts, in percent, 0-50. Default 15.

@@ -24,10 +24,13 @@
 // leaves out the DirectInput copies Windows makes of the same pads (their HID
 // path has "IG_"). The pads are DirectInput devices implemented here:
 //   X, Y   left stick          Rx, Ry  right stick
-//   Z      right trigger (sent inverted, so after the game's own inversion it
-//          reads 0 at rest)    Rz      left trigger
+//   Z      right trigger       Rz      left trigger
+//          Each trigger rests at the centre of its axis and moves one way
+//          (the game binds actions to half axes and finds a control by its
+//          movement from the centre). Z moves down, so after the game's own
+//          inversion pressing RT raises it.
 //   POV 1  d-pad
-//   buttons 1-10 A B X Y LB RB Back Start LS RS, 11 LT, 12 RT (as buttons)
+//   buttons 1-10 A B X Y LB RB Back Start LS RS (XInputTriggerButtons: 11 LT, 12 RT)
 // Force feedback effects become rumble: constant and ramp forces and slow
 // periodic ones drive the left (heavy) motor, faster periodic ones the right.
 // A thread samples the pads every 4 ms, so buffered events carry their own
@@ -199,6 +202,10 @@ const ObjDesc kObj[kObjects] = {
 
 bool RumbleOn() { return g_set_state && g_rumble_pct > 0; }
 
+bool g_trigger_buttons = true;   // XInputTriggerButtons: LT/RT also as buttons 11/12
+bool ObjPresent(int i) { return g_trigger_buttons || i < kObjButton0 + 10; }
+int ButtonCount() { return g_trigger_buttons ? kButtons : kButtons - 2; }
+
 DWORD ObjType(int i) {
   DWORD t = kObj[i].type | DIDFT_MAKEINSTANCE(kObj[i].instance);
   if (i < 2 && RumbleOn()) t |= DIDFT_FFACTUATOR;
@@ -338,7 +345,7 @@ class Pad final : public IDirectInputDevice7A {
     if (RumbleOn()) c.dwFlags |= DIDC_FORCEFEEDBACK | DIDC_FFATTACK | DIDC_FFFADE;
     c.dwDevType = DevType();
     c.dwAxes = kAxes;
-    c.dwButtons = kButtons;
+    c.dwButtons = static_cast<DWORD>(ButtonCount());
     c.dwPOVs = kPovs;
     if (RumbleOn()) {
       c.dwFFSamplePeriod = 4000;
@@ -355,6 +362,7 @@ class Pad final : public IDirectInputDevice7A {
     const DWORD want = DIDFT_GETTYPE(flags);
     int n = 0;
     for (int i = 0; i < kObjects; ++i) {
+      if (!ObjPresent(i)) continue;
       if (want && !(kObj[i].type & want)) continue;
       if ((flags & DIDFT_FFACTUATOR) && !(ObjType(i) & DIDFT_FFACTUATOR)) continue;
       DIDEVICEOBJECTINSTANCEA o;
@@ -544,7 +552,7 @@ class Pad final : public IDirectInputDevice7A {
       const DWORD inst = DIDFT_GETINSTANCE(odf->dwType);
       int found = -1;
       for (int i = 0; i < kObjects && found < 0; ++i) {
-        if (ofs_[i] >= 0) continue;
+        if (ofs_[i] >= 0 || !ObjPresent(i)) continue;
         if (types && !(kObj[i].type & types)) continue;
         if (odf->pguid && !Same(*odf->pguid, *kObj[i].guid)) continue;
         if (!any && kObj[i].instance != inst) continue;
@@ -754,7 +762,7 @@ class Pad final : public IDirectInputDevice7A {
       const DWORD types = DIDFT_GETTYPE(obj);
       const DWORD inst = DIDFT_GETINSTANCE(obj);
       for (int i = 0; i < kObjects; ++i)
-        if ((kObj[i].type & types) && kObj[i].instance == inst) return i;
+        if (ObjPresent(i) && (kObj[i].type & types) && kObj[i].instance == inst) return i;
       return -1;
     }
     return -1;
@@ -814,7 +822,7 @@ class Pad final : public IDirectInputDevice7A {
     LONG v[kObjects];
     v[0] = AxisCentered(0, lx);
     v[1] = AxisCentered(1, -ly);
-    v[2] = AxisTrigger(2, rt, true);  // the game reads Z as max - Z
+    v[2] = AxisTrigger(2, rt, true);  // the game reads Z as max - Z: RT raises it
     v[3] = AxisCentered(3, rx);
     v[4] = AxisCentered(4, -ry);
     v[5] = AxisTrigger(5, lt, false);
@@ -823,8 +831,8 @@ class Pad final : public IDirectInputDevice7A {
                              XINPUT_GAMEPAD_LEFT_SHOULDER, XINPUT_GAMEPAD_RIGHT_SHOULDER, XINPUT_GAMEPAD_BACK,
                              XINPUT_GAMEPAD_START, XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_THUMB};
     for (int b = 0; b < 10; ++b) v[kObjButton0 + b] = (g.wButtons & kMasks[b]) ? 0x80 : 0;
-    v[kObjButton0 + 10] = g.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD ? 0x80 : 0;
-    v[kObjButton0 + 11] = g.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD ? 0x80 : 0;
+    v[kObjButton0 + 10] = g_trigger_buttons && g.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD ? 0x80 : 0;
+    v[kObjButton0 + 11] = g_trigger_buttons && g.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD ? 0x80 : 0;
 
     const DWORD stamp = GetTickCount();
     bool changed = false;
@@ -879,10 +887,16 @@ class Pad final : public IDirectInputDevice7A {
     return min_[axis] + static_cast<LONG>(std::lround(u * static_cast<double>(max_[axis] - min_[axis])));
   }
 
-  LONG AxisTrigger(int axis, float t, bool inverted) const {
+  // A trigger rests at the centre of its axis and moves one way: the game
+  // binds each action to one half of an axis and detects a control by its
+  // movement away from the centre (xinput-3: a trigger resting at one end
+  // could not be bound, and its button copy was picked instead).
+  LONG AxisTrigger(int axis, float t, bool toward_min) const {
     const float s = Shape(axis, t);
-    const LONG span = static_cast<LONG>(std::lround(s * static_cast<double>(max_[axis] - min_[axis])));
-    return inverted ? max_[axis] - span : min_[axis] + span;
+    const double half = static_cast<double>(max_[axis] - min_[axis]) / 2.0;
+    const LONG mid = min_[axis] + static_cast<LONG>(std::lround(half));
+    const LONG span = static_cast<LONG>(std::lround(s * half));
+    return toward_min ? mid - span : mid + span;
   }
 
   static DWORD Pov(WORD b) {
@@ -1409,6 +1423,7 @@ void Apply() {
   g_log = c.xinput_log;
   g_rumble_pct = c.xinput_rumble;
   g_deadzone = static_cast<float>(c.xinput_deadzone) / 100.0f;
+  g_trigger_buttons = c.xinput_trigger_buttons;
   constexpr uintptr_t kDirectInputCreateEx = 0x555028;  // DINPUT!DirectInputCreateEx
   if (!*reinterpret_cast<void**>(kDirectInputCreateEx)) {
     patch::Log("xinput: DirectInputCreateEx import not bound, XInput not installed");
@@ -1416,8 +1431,8 @@ void Apply() {
   }
   g_create = reinterpret_cast<CreateExFn>(
       patch::HookIat(kDirectInputCreateEx, reinterpret_cast<void*>(&MyDirectInputCreateEx)));
-  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputDeadzone=%d XInputLog=%d)", c.xinput_rumble, c.xinput_deadzone,
-             g_log ? 1 : 0);
+  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputDeadzone=%d XInputTriggerButtons=%d XInputLog=%d)", c.xinput_rumble,
+             c.xinput_deadzone, g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
 }
 
 }  // namespace xpad

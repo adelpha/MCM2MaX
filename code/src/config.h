@@ -101,6 +101,7 @@ struct Config {
   bool xinput = true;         // XInput: Xbox controllers as analog DirectInput joysticks with rumble (xinput_pad.cpp)
   int xinput_rumble = 100;    // XInputRumble: rumble strength in percent (0 = off, no force feedback offered)
   int xinput_deadzone = 15;   // XInputDeadzone: stick dead zone in percent of the stick's travel
+  bool xinput_trigger_buttons = true;   // XInputTriggerButtons: triggers also as buttons 11 (LT) and 12 (RT)
   bool xinput_log = false;    // XInputLog: log controller calls, buttons, effects and a summary every 10 s
   int sim_rate = 30;          // SimRate: race simulation steps per second, drawing stays per frame (0 = one step per frame)
   int ai_accel[3] = {80, 130, 150};      // AiAccelEasy/Normal/Hard: computer rider acceleration, percent of the base curve (fixes_ai.cpp)

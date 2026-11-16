@@ -239,8 +239,8 @@ Windows 10 and 11.
 - A built-in profiler for finding hitches (`Profile`).
 
 ### Other
-- **Xbox controllers**: XInput controllers show up as "Xbox Controller 1"
-  and so on, with analog sticks, separate trigger axes and rumble
+- **Xbox controllers**: XInput controllers show up under their own names,
+  with analog sticks, separate trigger axes and rumble
   (`XInput`).
 - **Easier Easy**: on Easy, computer riders accelerate less hard and have a
   slightly lower top speed than in the original, where Easy was barely easier
@@ -619,8 +619,9 @@ The file has three parts:
 
 | Setting | Default | Values | Description |
 |---|---|---|---|
-| `XInput` | `1` | `0`, `1` | Xbox (XInput) controllers connected when the game starts are listed as "Xbox Controller 1" to "Xbox Controller 4", in place of the copies Windows makes of them for older games. The sticks are analog: left stick X and Y, right stick X Rotation and Y Rotation. The right trigger is the Z axis and the left trigger the Z Rotation axis, each reading zero when let go, so they work for throttle and brake. The d-pad is the point-of-view hat, A B X Y LB RB Back Start and the stick clicks are buttons 1 to 10, and the triggers are also buttons 11 (LT) and 12 (RT). The game's force feedback becomes rumble. A controller unplugged mid-game reads as centred and works again when plugged back in. `0` = the original: Windows' DirectInput copy, which the game treats as a gamepad (sticks act as on/off presses), with both triggers on one axis and no rumble. Needs Windows Vista or later (or the DirectX XInput DLL). |
+| `XInput` | `1` | `0`, `1` | Xbox (XInput) controllers connected when the game starts are listed under their own names (such as "Controller (Xbox One For Windows) (XInput 1)"), in place of the copies Windows makes of them for older games. The sticks are analog: left stick X and Y, right stick X Rotation and Y Rotation. The right trigger is the Z axis and the left trigger the Z Rotation axis; each rests at the centre of its axis and moves one way, because the game binds each action to one half of an axis. The "Dual Analog Game Pad" preset puts Accelerate on the right trigger and Brake on the left trigger. The d-pad is the point-of-view hat, and A B X Y LB RB Back Start and the stick clicks are buttons 1 to 10. The game's force feedback becomes rumble. A controller unplugged mid-game reads as centred and works again when plugged back in. `0` = the original: Windows' DirectInput copy, which the game treats as a gamepad (sticks act as on/off presses), with both triggers on one axis and no rumble. Needs Windows Vista or later (or the DirectX XInput DLL). |
 | `XInputRumble` | `100` | 0-200, percent | Rumble strength. `0` = no rumble, and the controller doesn't offer force feedback to the game. |
+| `XInputTriggerButtons` | `1` | `0`, `1` | The triggers also work as buttons 11 (LT) and 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the right trigger's axis, Brake on button 11) works as it is. `0` = axes only: use it to remap an action to a trigger's axis, as pressing a trigger while remapping otherwise picks its button. |
 | `XInputDeadzone` | `15` | 0-50, percent | How far either stick has to move from the centre before it counts. Raise it if the bike steers by itself. |
 
 ### 2. Advanced: changing these is not recommended
