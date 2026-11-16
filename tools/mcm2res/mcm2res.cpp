@@ -1904,13 +1904,36 @@ std::vector<std::pair<std::string, std::string>> GameArchives(const std::string&
 
 std::vector<std::string> g_only;
 
-void Extract(const std::string& game, const std::string& out) {
+void Begin(const std::string& out) {
+  g_tex.clear();
+  g_tex_by_name.clear();
+  g_models.clear();
+  g_tracks.clear();
+  g_archives.clear();
+  g_count = Counts();
   g_out = out;
   MakeDirs(g_out);
   MakeDirs(Join(g_out, "textures"));
   g_log = Open(Join(g_out, "mcm2res.log"), "wb");
   std::time_t now = std::time(nullptr);
   Log("mcm2res, %s", std::ctime(&now));
+}
+void Finish(const std::string& source);
+
+// Archives dropped on the tool: each into its own folder, mcm2res_out\<name>\.
+void ExtractFiles(const std::vector<std::string>& files, const std::string& out_root) {
+  for (const std::string& f : files) {
+    Begin(Join(out_root, SafeFile(StripExt(BaseName(f)))));
+    Say("Archive: %s", f.c_str());
+    Say("Output: %s", g_out.c_str());
+    ProcessArchive(f, BaseName(f));
+    Finish(f);
+    Say("");
+  }
+}
+
+void Extract(const std::string& game, const std::string& out) {
+  Begin(out);
   Say("Game: %s", game.c_str());
   Say("Output: %s", g_out.c_str());
   auto arcs = GameArchives(game);
@@ -1929,6 +1952,10 @@ void Extract(const std::string& game, const std::string& out) {
     }
     ProcessArchive(a.first, a.second);
   }
+  Finish(game);
+}
+
+void Finish(const std::string& game) {
   WriteIndex(game);
   // A plain list of every texture name.
   std::string list = "# name\tsize\tformat\tloaded\tarchive\tmember\tfile\n";
@@ -1997,7 +2024,7 @@ void Check(const std::string& folder, const std::string& game) {
 const char kUsage[] =
     "mcm2res - Motocross Madness 2 resource viewer and extractor (mcm2fix)\n"
     "\n"
-    "  mcm2res [extract] [game folder] [-o folder] [--only text]... [--obj-step N] [--raw-all]\n"
+    "  mcm2res [extract] [game folder | archive...] [-o folder] [--only text]... [--obj-step N] [--raw-all]\n"
     "      Extracts every archive (RES\\*.RES, RES\\*.TEX, UI\\*.DAT, TERAFORM\\*\\*.ENV):\n"
     "      textures as PNG named for mcm2fix's textures folder, pictures, sounds,\n"
     "      text files, tree models as OBJ, and for each track a height map,\n"
@@ -2015,7 +2042,8 @@ const char kUsage[] =
     "\n"
     "Double-click: extract (finds the game next to or above the tool).\n"
     "Drop the game folder on it: extract from that folder.\n"
-    "Drop an archive on it: list it.\n";
+    "Drop .ENV/.RES/.TEX/.DAT files on it: extract just those, each into\n"
+    "mcm2res_out\\<name>\\.\n";
 
 }  // namespace
 
@@ -2054,11 +2082,11 @@ int main(int argc, char** argv) {
     }
   }
   if (mode.empty()) {
-    // Dropped archives: list them; a dropped folder or nothing: extract.
+    // Dropped archives: extract each; a dropped folder or nothing: the whole game.
     bool files = !inputs.empty();
     for (const std::string& in : inputs)
       if (IsDir(in)) files = false;
-    mode = files ? "list" : "extract";
+    mode = files ? "files" : "extract";
   }
   if (mode == "list") {
     if (inputs.empty()) Fail("name an archive to list");
@@ -2073,6 +2101,11 @@ int main(int argc, char** argv) {
     return 0;
   }
   std::printf("%s\n", "mcm2res - Motocross Madness 2 resource extractor (mcm2fix)");
+  if (mode == "files" || (mode == "extract" && !inputs.empty() && !IsDir(inputs[0]))) {
+    ExtractFiles(inputs, out.empty() ? Join(ExeDir(), "mcm2res_out") : out);
+    Pause();
+    return 0;
+  }
   if (!g_only.empty()) {
     std::string o;
     for (const std::string& x : g_only) o += (o.empty() ? "" : ", ") + x;

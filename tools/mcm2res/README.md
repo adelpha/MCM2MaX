@@ -11,13 +11,17 @@ browser. It only reads the game's files and never changes them.
    folder with `RES\` and `TERAFORM\`) next to the tool, in a `mcm2` folder
    next to it, or one or two folders up. If it can't find it, drag the game
    folder onto `mcm2res.exe`.
-2. It writes `mcm2res_out\` next to the tool (all tracks take about 1 GB and
+2. To extract only some archives, drag one or more `.ENV`, `.RES`, `.TEX`
+   or `.DAT` files onto `mcm2res.exe`: each goes into its own folder,
+   `mcm2res_out\<name>\` (e.g. `mcm2res_out\BAJA01\`), with its own
+   `index.html`.
+3. A full extract writes `mcm2res_out\` next to the tool (all tracks take about 1 GB and
    a few minutes) and says where `index.html` is. Open it in a browser.
 
 Command line:
 
 ```
-mcm2res [extract] [game folder] [-o folder] [--only text]... [--obj-step N] [--raw-all]
+mcm2res [extract] [game folder | archive...] [-o folder] [--only text]... [--obj-step N] [--raw-all]
 mcm2res list <archive>...
 mcm2res check <folder of PNGs>
 ```
@@ -27,7 +31,7 @@ mcm2res check <folder of PNGs>
 * `--obj-step N`: the terrain OBJ uses every Nth height point (default 8).
 * `--raw-all` also saves the texture records, terrain and sky files exactly
   as stored, and a raw `.r16` height map.
-* `list` prints the files inside archives (drop an archive on the exe).
+* `list` prints the files inside archives.
 * `check` compares a folder of PNGs, e.g. mcm2fix's `textures_dump\`, with the
   names from the last extract and lists any name mcm2res doesn't produce.
 
