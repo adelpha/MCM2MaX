@@ -77,7 +77,7 @@ Windows 10 and 11.
 | A game copied off the CD by hand (rather than installed with Setup) quits silently at startup: the licence check needs `EBUEula.dll` and `EULA.rtf` from the CD root. | When either file is missing, the licence check is skipped. |
 | With Windows display scaling above 100%, Windows stretches the game (blurry, widescreen modes capped below your real resolution) and the menu mouse drifts, so slow moves can go the wrong way. | The game is declared DPI aware, so it runs at your real resolution (`DpiAware`). |
 | A video card picker and a "hardware has changed" dialog appear. | No picker. The best Direct3D adapter is chosen automatically and the dialog is skipped. |
-| Saved hardware-test results (`DriverInfo`) could leave the window not redrawing. | The cache is dropped whenever the list of display modes changes. |
+| Saved hardware-test results (`DriverInfo`) could leave the window not redrawing. | The cache is never used: the game's quick card check runs against MCM2MaX's renderer at every start, with the resolution list built from your monitor. |
 | Videos (intro, credits, menu previews) need the Indeo 5 codec and DirectShow, which modern Windows don't have. | MCM2MaX has its own AVI player: Indeo 5 through FFmpeg, MS ADPCM sound, played with waveOut. No codec install is needed. |
 | In-game Help opens `MCM2HELP.HLP`, and Windows 10/11 can't open WinHelp files. | The Help buttons open `MCM2HELP.html`, a full conversion with pages, pictures, stunt videos, index and search. |
 | The game asks for video memory as a signed number, so a card with 2 GB or more makes widescreen modes unusable. | The renderer reports 256 MB. |
@@ -104,12 +104,18 @@ Windows 10 and 11.
   resolution you choose in the game's options and scaled to the screen with
   its aspect ratio kept. The desktop never changes resolution.
 - **Optional exclusive fullscreen** (`Fullscreen=Exclusive`), at the desktop
-  mode or any mode you name (`FullscreenMode=1024x768@85`).
-- **Widescreen resolutions**: 1280x720, 1280x800, 1366x768, 1440x900,
-  1600x900, 1680x1050, 1920x1080, 1920x1200, 2560x1080, 2560x1440,
-  2560x1600, 3440x1440, 3840x1600 and 3840x2160 are offered alongside the
-  original 4:3 modes. Only sizes that fit your desktop are listed, and your
-  exact desktop size is always one of them.
+  mode or any mode the monitor has, refresh rate included, picked in the
+  game's Options or named in the ini (`ExclusiveResolution=1024x768@85`).
+- **Your monitor's own resolutions**, widescreen included: the game's
+  Options list the sizes your monitor supports, up to your desktop size, and
+  your exact desktop size is always one of them. With exclusive fullscreen
+  every mode is listed with its refresh rate.
+- **Starts at your desktop resolution**, and the resolution you pick in
+  Options is saved in the ini (`BorderlessResolution` /
+  `ExclusiveResolution`), which always wins over the game's own setting.
+  "Desktop" at the top of the list goes back to following the desktop.
+- **Borderless / Exclusive buttons** in Options > Graphics, switched at once
+  (Direct3D 11), each with its own resolution.
 - **Widescreen field of view** (`WideFov`): wider screens show more to the
   sides instead of cropping the top and bottom. The speedometer stays round.
   `Fov` sets the base field of view.
@@ -367,7 +373,7 @@ fullscreen.
 | `Fullscreen=` | What it does |
 |---|---|
 | `Borderless` (default) | A window that covers the primary monitor at desktop resolution. Alt+Tab and second monitors behave like any window. |
-| `Exclusive` | The game owns the screen, at the desktop mode or `FullscreenMode=<w>x<h>[@<Hz>]`. The game's picture is still scaled into it. Alt+Tab leaves fullscreen, and fullscreen comes back when you return to the game. This can help with VSync on Windows XP. |
+| `Exclusive` | The game owns the screen, at the desktop mode or `ExclusiveResolution=<w>x<h>[@<Hz>]` (pick it in the game's Options). The game's picture is still scaled into it. Alt+Tab leaves fullscreen, and fullscreen comes back when you return to the game. This can help with VSync on Windows XP. |
 
 The resolution you pick in the game's options is the size the game renders
 at. Borderless or exclusive, the picture is scaled to fill the screen with
@@ -498,8 +504,11 @@ The file has three parts:
 | Setting | Default | Values | Description |
 |---|---|---|---|
 | `Renderer` | `D3D11` | `D3D11`, `D3D9` | The graphics API. D3D9 is a fixed-function Direct3D 9 renderer, and it's used automatically when Direct3D 11 is missing (Windows XP, very old cards). |
-| `Fullscreen` | `Borderless` | `Borderless`, `Exclusive` | *Borderless*: a borderless window covering the primary monitor at its current resolution. The desktop resolution never changes and Alt+Tab is instant. *Exclusive*: the game takes over the screen, Alt+Tab leaves fullscreen and it comes back when you return. This can help VSync on XP. Either way, the game renders at the resolution chosen in its own Options, scaled to the screen with its shape kept. |
-| `FullscreenMode` | `Desktop` | `Desktop`, `<w>x<h>`, `<w>x<h>@<Hz>` | With `Fullscreen=Exclusive` only: the screen mode. `Desktop` keeps the current mode. Without `@<Hz>`, the highest refresh rate is used. Example: `1024x768@85`. |
+| `Fullscreen` | `Borderless` | `Borderless`, `Exclusive` | *Borderless*: a borderless window covering the monitor at its current resolution. The desktop resolution never changes and Alt+Tab is instant. *Exclusive*: the game takes over the screen at `ExclusiveResolution`, Alt+Tab leaves fullscreen and it comes back when you return. This can help VSync on XP. Each has its own resolution, and the game's Options list the monitor's own resolutions for the current one (Exclusive: with refresh rates). |
+| `Monitor` | `1` | `1`, `2`, ... | The monitor to use: `1` = primary, `2` and up = the other monitors in Windows' order. |
+| `BorderlessResolution` | `Desktop` | `Desktop`, `<w>x<h>` | The resolution the game renders at in Borderless, scaled to the monitor with black bars where the shape differs. Picking one in the game's Options writes it here. Up to the desktop's size; a size that's no longer available uses the desktop for that start. |
+| `ExclusiveResolution` | `Desktop` | `Desktop`, `<w>x<h>`, `<w>x<h>@<Hz>` | The screen mode in Exclusive. Picking one in the game's Options writes it here and (Direct3D 11) switches the screen at once, then asks *Keep this display mode?*: Keep (Enter) or Revert (Esc), and with no answer in 10 seconds the previous mode comes back. Without `@<Hz>`, the highest refresh rate is used. A mode the monitor doesn't have uses the desktop for that start. The menus stay at this mode too, scaled. |
+| `CardTest` | `0` | `0`, `1` | `0` skips the game's video card test at start (MCM2MaX's renderer always gives the same answers, so the card gets them directly). `1` runs the game's own test, as before. |
 | `VSync` | `1` | `0`, `1` | `1` waits for the monitor's refresh before showing each frame: no tearing, and the frame rate is limited to the refresh rate. `0` shows frames as soon as they are ready, with tearing where Windows allows it. |
 | `FrameCap` | `500` | `0`, frames/s | The most frames per second, on top of VSync. `0` = no cap. It matters with `VSync=0`. It does not change game speed. |
 | `MenuFpsCap` | `240` | `0`, frames/s | The most frames per second outside races (menus, rider and bike select, loading, the pause menu), even with `VSync=0`. Races, including the intro, countdown and podium cutscene, are not affected. `0` = no menu cap. If `FrameCap` is lower, that wins. |

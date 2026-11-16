@@ -28,6 +28,7 @@
 #include "config.h"
 #include "patch.h"
 #include "xp_compat.h"
+#include "dd/gputext.h"
 #include "dd/menubg.h"
 
 namespace {
@@ -91,6 +92,12 @@ constexpr int kNumSliders = 3;
 constexpr int kMsaaSlider = 1;
 constexpr int kNumChecks = static_cast<int>(sizeof(g_checks) / sizeof(g_checks[0]));
 constexpr char kFootName[] = "Mcm2fixFootnote";
+// Fullscreen: Borderless / Exclusive in the Display Resolution box.
+constexpr const char* kFsNames[2] = {"Mcm2fixBorderless", "Mcm2fixExclusive"};
+constexpr const char* kFsLabels[2] = {"Borderless", "Exclusive"};
+constexpr int kFsGroup = 731;            // AttachId of the pair (unused by the game's pages)
+constexpr int kFindRadio = 4;            // FindControl type for radio buttons (0x4b73c8)
+constexpr uintptr_t kRadioSelect = 0x47A240;  // thiscall(int): checks it, clears the rest of its group
 constexpr char kFootText[] = "* after restarting the game";
 // Page layout (control pixels; the page's controls are placed 20,35 menu
 // pixels further on). StOo: every box a border-only plate; the two columns
@@ -100,7 +107,8 @@ constexpr char kFootText[] = "* after restarting the game";
 constexpr int kGap = 9;
 constexpr int kBoxW = 228;
 constexpr int kLeftX = 8, kRightX = kLeftX + kBoxW + kGap;
-constexpr int kTopY = 7, kTopH = 66;
+constexpr int kListH = 200;  // resolution list height (the game's: 62, 4 rows)
+constexpr int kTopY = 7, kTopH = 76;  // 66 before the Borderless / Exclusive row
 constexpr int kLowY = kTopY + kTopH + kGap;
 constexpr int kRowTop = 27, kRowStep = 22;  // first checkbox, checkbox to checkbox
 constexpr int kFeaturesH = kRowTop + 2 * kRowStep + 20 + 7;
@@ -166,6 +174,21 @@ std::string OptGraphControls() {
                   "StateDisable0=\"CheckBoxOffGrey\"\r\nStateDisable1=\"CheckBoxOnGrey\"\r\nText=\"%s\"\r\n"
                   "TextColor=16777215\r\nTextLMargin=3\r\nXywh=8,%d,211,20\r\n\r\n",
                   g_checks[i].name, 22 + i, y * 15, g_checks[i].label, y);
+    t += buf;
+  }
+  // Borderless / Exclusive: a radio button pair (the game's own, as on the
+  // Sound page: one group by AttachId, shared RadioButton sprites), side by
+  // side above the resolution dropdown.
+  for (int i = 0; i < 2; ++i) {
+    const int x = i ? 118 : 8, w = i ? 101 : 105;
+    std::snprintf(buf, sizeof(buf),
+                  "[%s]\r\nType=RADIOBUTTON\r\nAnchor=DisplayResolutionBox\r\nRelAnchor=1\r\nHeight=255\r\n"
+                  "Left=%d\r\nTabIndex=%d\r\nTop=420\r\nWidth=%d\r\nDropColor=0\r\nTextDrop=-1'True\r\n"
+                  "TextAlignV=MIDDLE\r\nTextAlign=LEFT\r\nSourceBlit=-1'True\r\nBroken_Enable=0'False\r\n"
+                  "AttachId=%d\r\nAnimOn=\"RadioButtonOn\"\r\nAnimOff=\"RadioButtonOff\"\r\n"
+                  "AnimOnDisable=\"RadioButtonOnGrey\"\r\nAnimOffDisable=\"RadioButtonOffGrey\"\r\n"
+                  "TextColor=16777215\r\nText=\"%s\"\r\nTextLMargin=3\r\nXywh=%d,28,%d,17\r\n\r\n",
+                  kFsNames[i], x * 15, 60 + i, w * 15, kFsGroup, kFsLabels[i], x, w);
     t += buf;
   }
   std::snprintf(buf, sizeof(buf),
@@ -314,6 +337,37 @@ bool BorderPlate(const std::vector<char>& d, const char* src_name, int w, int h,
   return true;
 }
 
+// A taller copy of a list background (the dropdown's list box and its
+// scroll bar track, 62 rows for 4 entries): the top and bottom 4 rows kept,
+// the scan-line pattern between them repeated (period 2) to h rows.
+bool TallSprite(const std::vector<char>& d, const char* src_name, int h, std::vector<char>& tga) {
+  const size_t e = FindEntry(d, src_name);
+  if (!e) return false;
+  const uint32_t off = Get32(d, e), size = Get32(d, e + 4);
+  const unsigned char* s = reinterpret_cast<const unsigned char*>(d.data() + off);
+  if (size < 18 || s[2] != 2 || s[16] != 16) return patch::Log("menus: %s is not a plain 16-bit TGA", src_name), false;
+  const int sw = s[12] | s[13] << 8, sh = s[14] | s[15] << 8;
+  const size_t start = 18 + s[0];
+  if (sw < 4 || sh < 12 || start + static_cast<size_t>(sw) * sh * 2 > size) return patch::Log("menus: %s too small", src_name), false;
+  const bool top_down = (s[17] & 0x20) != 0;
+  const int period = ((sh - 8) / 2) * 2;
+  // Rows counted from the top of the picture.
+  auto src_row = [&](int y) { return y < 4 ? y : y >= h - 4 ? sh - (h - y) : 4 + (y - 4) % period; };
+  tga.assign(18 + static_cast<size_t>(sw) * h * 2, 0);
+  std::memcpy(tga.data(), s, 18);
+  tga[0] = 0;
+  tga[14] = static_cast<char>(h & 0xff);
+  tga[15] = static_cast<char>(h >> 8);
+  for (int y = 0; y < h; ++y) {
+    const int sy = src_row(y);
+    const int from = top_down ? sy : sh - 1 - sy;  // stored row
+    const int to = top_down ? y : h - 1 - y;
+    std::memcpy(tga.data() + 18 + static_cast<size_t>(to) * sw * 2, s + start + static_cast<size_t>(from) * sw * 2,
+                static_cast<size_t>(sw) * 2);
+  }
+  return true;
+}
+
 // A slider track without the original's tick marks (they are spaced for its
 // own 10 steps): the bar along the top of GHorizontalSlider01 (the rows that
 // are not magenta), stretched to w, magenta below.
@@ -396,7 +450,10 @@ constexpr Plate kPlates[] = {{"Mcm2fixPlateTop", kTopH}, {"Mcm2fixPlateFeatures"
 void RelayoutOptGraph(std::string& t) {
   Place(t, "DisplayResolutionBox", kLeftX, kTopY, kBoxW, kTopH);
   SetKey(t, "DisplayResolutionBox", "AnimNorm", "\"Mcm2fixPlateTop\"");
-  Place(t, "DisplayResolutionDropDown", 25, 28, 178, 83);
+  // Taller list (StOo: the Exclusive list is long; 4 rows were too few).
+  Place(t, "DisplayResolutionDropDown", 25, 50, 178, 21 + kListH);
+  SetKey(t, "DisplayResolutionDropDown", "AnimListBack", "\"Mcm2fixListBack\"");
+  SetKey(t, "DisplayResolutionDropDown", "AnimScrollBack", "\"Mcm2fixScrollBack\"");
   Place(t, "TerrainQualityBox", kRightX, kTopY, kBoxW, kTopH);
   SetKey(t, "TerrainQualityBox", "AnimNorm", "\"Mcm2fixPlateTop\"");
   Place(t, "TerrainQualitySliderBar", 11, 28, 204, 16);
@@ -427,12 +484,20 @@ bool EditOptGraph(std::vector<char>& d) {
   }
   std::vector<char> track;
   if (!TrackSprite(d, "Options\\Graphics\\GHorizontalSlider01.tga", kSliderW, track)) return false;
+  std::vector<char> list_back, scroll_back;
+  if (!TallSprite(d, "Options\\Graphics\\DropDownBG05.tga", kListH, list_back)) return false;
+  if (!TallSprite(d, "Options\\Graphics\\VerticleScroll04.tga", kListH, scroll_back)) return false;
+  anims += "[Mcm2fixListBack]\r\nFiles1 = Options\\Graphics\\Mcm2fixListBack.tga\r\nMSecDelay = 0\r\nLoopCount = 0\r\n\r\n";
+  anims += "[Mcm2fixScrollBack]\r\nFiles1 = Options\\Graphics\\Mcm2fixScrollBack.tga\r\nMSecDelay = 0\r\nLoopCount = 0\r\n\r\n";
   anims += "[Mcm2fixTrack]\r\nFiles1 = Options\\Graphics\\Mcm2fixTrack.tga\r\nMSecDelay = 0\r\nLoopCount = 0\r\n\r\n";
   text.insert(anim + std::strlen("[Set_Anim]\r\n"), anims);
   text.insert(anim, OptGraphControls());
   RelayoutOptGraph(text);
   ReplaceEntry(d, e, text.data(), text.size());
   AddEntry(d, "Options\\Graphics\\Mcm2fixTrack.tga", track);
+  AddEntry(d, "Options\\Graphics\\Mcm2fixListBack.tga", list_back);
+  AddEntry(d, "Options\\Graphics\\Mcm2fixScrollBack.tga", scroll_back);
+  patch::Log("menus: resolution list %d px tall (list and scroll bar backgrounds stretched from 62)", kListH);
   for (int i = 0; i < 3; ++i)
     AddEntry(d, (std::string("Options\\Graphics\\") + kPlates[i].anim + ".tga").c_str(), plates[i]);
   patch::Log("menus: border-only plates added (228x%d, 228x%d, 228x%d; edge of GPlate03, magenta inside)", kTopH,
@@ -559,6 +624,12 @@ void SetLabel(uintptr_t page, const char* name, const char* text) {
 
 unsigned g_events_logged = 0;
 bool g_bound = false;  // the checkboxes have been bound to g_checks[].value
+// The Options > Graphics page while it is open (page set-up event 5 until
+// its close event 6): radio buttons send the page no event when clicked, so
+// MenusFrame() reads the Borderless/Exclusive pair every frame instead.
+uintptr_t g_graph_page = 0;
+uintptr_t g_graph_vtable = 0;
+int g_radio_logged = 0;
 
 uintptr_t FindCheckbox(uintptr_t page, const char* name) {
   const uintptr_t c = reinterpret_cast<FindControlFn>(kFindControl)(page, nullptr, name, 0);
@@ -693,10 +764,28 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
     g_bound = bound > 0 || sbound > 0;
     patch::Log("menus: %d of %d checkboxes and %d of %d sliders bound", bound, kNumChecks, sbound, kNumSliders);
   }
+  if (type == 6 || type == 4) {  // page closing (6) or being built again (4)
+    if (g_graph_page) patch::Log("menus: Options > Graphics closed (event %d)", type);
+    g_graph_page = 0;
+  }
   reinterpret_cast<EventFn>(kOptGraphEvent)(self, edx, event);
   if (type == 5) {
     SetLabel(self, "Mcm2fixBoxText", "Enhancements");
     for (const MenuCheck& m : g_checks) SetLabel(self, m.name, m.label);
+    for (int i = 0; i < 2; ++i) SetLabel(self, kFsNames[i], kFsLabels[i]);
+    {
+      const int pick = GetConfig().exclusive ? 1 : 0;
+      const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(self, nullptr, kFsNames[pick], kFindRadio);
+      if (r && !IsBadReadPtr(reinterpret_cast<void*>(r), 4)) {
+        reinterpret_cast<EnableFn>(kRadioSelect)(r, nullptr, 0);
+        patch::Log("menus: %s selected (vtable %08x)", kFsNames[pick], static_cast<unsigned>(*reinterpret_cast<uintptr_t*>(r)));
+      } else {
+        patch::Log("menus: radio button %s not on the page", kFsNames[pick]);
+      }
+    }
+    ResolutionFillDropdown(FindAny(self, "DisplayResolutionDropDown"));
+    g_graph_page = self;
+    g_graph_vtable = *reinterpret_cast<uintptr_t*>(self);
     SetLabel(self, kFootName, kFootText);
     for (const MenuSlider& m : g_sliders) SliderLabel(self, m, m.pos);
     UpdateGreying(self, g_sliders[kMsaaSlider].pos);
@@ -726,6 +815,8 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   }
   if (type == 3) {
     const char* clicked = SafeName(event);
+    // Borderless / Exclusive (the radio group keeps one selected): switch now.
+    // (Borderless / Exclusive: see MenusFrame; radio buttons send no event.)
     for (MenuCheck& m : g_checks) {
       if (std::strcmp(clicked, m.name) != 0) continue;
       if (const uintptr_t box = FindCheckbox(self, m.name)) {
@@ -740,6 +831,62 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
 }
 
 }  // namespace
+
+// Every frame (game thread): while Options > Graphics is open, switch
+// Borderless / Exclusive as soon as the player picks the other radio button.
+// Mark every control on a page for redrawing (vtable +0xc8, what the game
+// does after changing a control's text), walking the page's control list
+// the way FindControl 0x46fb20 does (iterator 0x46a880 / next 0x46a980 /
+// end 0x46a970 over [page+0x7f3c], every control: mode 1, class 0x5717a0).
+using IterInitFn = void(__fastcall*)(void* it, void* edx, uintptr_t list, int mode, uintptr_t cls);
+using IterNextFn = uintptr_t(__fastcall*)(void* it, void* edx);
+using IterEndFn = void(__fastcall*)(void* it, void* edx);
+
+int RedrawAllControls(uintptr_t page) {
+  const uintptr_t list = *reinterpret_cast<const uintptr_t*>(page + 0x7F3C);
+  if (!list) return -1;
+  alignas(16) uint8_t it[0x100] = {};
+  reinterpret_cast<IterInitFn>(0x46A880)(it, nullptr, list, 1, 0x5717A0);
+  int n = 0;
+  for (uintptr_t c; (c = reinterpret_cast<IterNextFn>(0x46A980)(it, nullptr)) != 0;) {
+    if (IsBadReadPtr(reinterpret_cast<void*>(c), 0x200)) continue;
+    const uintptr_t redraw = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(c) + kRedrawSlot);
+    reinterpret_cast<RedrawFn>(redraw)(c, nullptr);
+    ++n;
+  }
+  reinterpret_cast<IterEndFn>(0x46A970)(it, nullptr);
+  return n;
+}
+
+void MenusFrame() {
+  const uintptr_t page = g_graph_page;
+  const bool rescaled = dd::GpuTextTakeRescaled();
+  if (!page) return;
+  if (IsBadReadPtr(reinterpret_cast<void*>(page), 4) || *reinterpret_cast<uintptr_t*>(page) != g_graph_vtable) {
+    patch::Log("menus: Options > Graphics page gone without a close event; radio buttons no longer watched");
+    g_graph_page = 0;
+    return;
+  }
+  // The screen scale changed (mode switch): the page's text was drawn at the
+  // old scale and is gone; the game redraws a control's text only when it
+  // changes, so ask every control to redraw.
+  if (rescaled) patch::Log("menus: screen scale changed, %d controls redrawn", RedrawAllControls(page));
+  // A resolution picked in the dropdown applies now, not when the page closes.
+  ResolutionPickNow(FindAny(page, "DisplayResolutionDropDown"));
+  const bool excl = GetConfig().exclusive;
+  // Each radio button's own state is at +0x1f0 (1 = checked; the game's
+  // getter 0x479d00). 0x47a320 is NOT a per-button state: it returns the
+  // 1-based position of the checked button in the group, the same for both.
+  const uintptr_t r = reinterpret_cast<FindControlFn>(kFindControl)(page, nullptr, kFsNames[1], kFindRadio);
+  if (!r) {
+    if (g_radio_logged++ < 3) patch::Log("menus: radio button %s not found while watching", kFsNames[1]);
+    return;
+  }
+  const bool want = *reinterpret_cast<const int*>(r + kStateOffset) == 1;
+  if (want == excl) return;
+  patch::Log("menus: %s picked", kFsNames[want ? 1 : 0]);
+  ResolutionSetExclusive(want, FindAny(page, "DisplayResolutionDropDown"));
+}
 
 void ApplyMenuOptions() {
   const Config& c = GetConfig();

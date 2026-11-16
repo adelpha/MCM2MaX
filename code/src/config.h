@@ -1,5 +1,6 @@
 // Settings from mcm2max.ini next to the exe (all optional; see README.md).
 #pragma once
+#include <cstdint>
 
 struct Config {
   bool one_core = false;      // OneCore: pin the game to one CPU core (old stopgap)
@@ -55,7 +56,10 @@ struct Config {
   bool dd_stats = false;      // DDStats: log renderer activity every 2 seconds
   int renderer = 11;          // Renderer: 11 = Direct3D 11, 9 = Direct3D 9 (also used when D3D11 is missing)
   bool exclusive = false;     // Fullscreen: false = borderless window (default), true = exclusive fullscreen
-  int fs_width = 0, fs_height = 0, fs_hz = 0;  // FullscreenMode: 0 = the desktop's
+  bool card_test = false;     // CardTest: 1 = run the game's own video card test (0 = MCM2MaX's fixed values)
+  int monitor = 1;            // Monitor: 1 = primary display, 2.. = the other displays
+  int bl_width = 0, bl_height = 0;             // BorderlessResolution: 0 = the desktop's
+  int fs_width = 0, fs_height = 0, fs_hz = 0;  // ExclusiveResolution: 0 = the desktop's; hz 0 = highest
   bool renderer_label = true;  // RendererLabel: name the active renderer in the corner of the menus
   bool gpu_text = true;       // GpuText: draw the game's GDI text on the GPU at screen resolution
   float hud_scale = 2.0f;     // HudScale: race HUD text panels drawn this many times larger (1..4)
@@ -169,5 +173,24 @@ const char* MenuIniPath();
 // else to MenuIniPath(); returns the file used. MotionBlur, VSync and
 // AlphaToCoverage and Anisotropy also change at once; the rest apply at the next start.
 const char* SetFromMenu(const char* key, int value);
+// The same for a text value (e.g. Resolution=1920x1080).
+const char* SetStringFromMenu(const char* key, const char* value);
+// Options > Graphics Borderless / Exclusive: changes Fullscreen now and saves it.
+const char* SetFullscreenFromMenu(bool exclusive);
+// Moves old Resolution= / FullscreenMode= values to BorderlessResolution= /
+// ExclusiveResolution= (once; logs).
+void MigrateDisplayKeys();
+// Resolution (fixes_resolution.cpp): the mode the game renders races at, and
+// with Fullscreen=Exclusive the screen mode: the player's pick or the ini's
+// BorderlessResolution / ExclusiveResolution, else the desktop's. hz 0 = any.
+void ResolutionWanted(int* w, int* h, int* hz);
+// Options > Graphics Borderless / Exclusive: switches now, refills the game's
+// mode list and the resolution dropdown (its control, or 0).
+void ResolutionSetExclusive(bool exclusive, uintptr_t dropdown);
+// Options > Graphics, every frame: a new pick in the resolution dropdown
+// (its control, or 0) is applied and saved now.
+void ResolutionPickNow(uintptr_t dropdown);
+// Options > Graphics set-up: the resolution dropdown with "Desktop" first.
+void ResolutionFillDropdown(uintptr_t dropdown);
 // A value read from mcm2max.ini, replaced by the menus' choice if there is one.
 int MenuOverride(const char* key, int value);

@@ -118,6 +118,8 @@ bool InitDevice9();
 bool AttachWindow(HWND hwnd);
 // Re-apply the borderless window if the game moved or resized it.
 void KeepBorderless();
+// Leaves exclusive fullscreen and restores the desktop mode (game quitting).
+void RestoreDisplayAtExit();
 
 // Compile HLSL with the system d3dcompiler_47.dll.
 ID3DBlob* Compile(const char* source, const char* entry, const char* target);

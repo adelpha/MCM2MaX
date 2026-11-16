@@ -107,6 +107,7 @@ struct Overlay {
 
 std::map<const void*, Overlay> g_overlays;
 unsigned g_nonempty = 0;
+bool g_rescaled = false;  // an overlay with text was remade at a new scale
 
 void MarkUsed(Overlay& o) {
   if (o.empty) {
@@ -176,6 +177,10 @@ Overlay* EnsureOverlay(const void* native, UINT bw, UINT bh) {
   FitSize(bw, bh, &ow, &oh);
   Overlay& o = g_overlays[native];
   if (o.tex.Valid() && o.tex.width == ow && o.tex.height == oh && o.base_w == bw && o.base_h == bh) return &o;
+  // Same surface at a new screen scale (e.g. Exclusive 640x480 -> Borderless
+  // 1920x1080): its text is lost. Menus draw text only when it changes, so
+  // the menu code asks the page to redraw (GpuTextTakeRescaled).
+  if (o.tex.Valid() && !o.empty && o.base_w == bw && o.base_h == bh) g_rescaled = true;
   MarkEmpty(o);
   GpuTexture old = o.tex;  // reset below, outside the map's bookkeeping
   o.tex = GpuTexture{};
@@ -1094,6 +1099,14 @@ void GpuTextMemoryLog() {
   }
   Log("memory: GPU text: %u overlays (%u with text, %u MB of textures), %u fonts, %u known GDI fonts", n, used,
       static_cast<unsigned>(bytes >> 20), static_cast<unsigned>(g_fonts.size()), static_cast<unsigned>(g_known.size()));
+}
+
+void GpuTextRequestRedraw() { g_rescaled = true; }
+
+bool GpuTextTakeRescaled() {
+  const bool r = g_rescaled;
+  g_rescaled = false;
+  return r;
 }
 
 }  // namespace dd

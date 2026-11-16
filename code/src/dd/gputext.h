@@ -57,6 +57,11 @@ void GpuTextOccludeSprite(const void* native, const BlitParams& sprite);
 // Blend the overlay of `src` (if any) over r of the destination.
 void GpuTextComposite(const GpuTexture& src, ID3D11RenderTargetView* dst, IDirect3DSurface9* dst9, UINT dst_w,
                       UINT dst_h, const RECT& r);
+// True once after an overlay that held text was remade at a new screen
+// scale (its text is gone until the game draws it again).
+bool GpuTextTakeRescaled();
+// Ask the menus to redraw their text (as after a rescale).
+void GpuTextRequestRedraw();
 // The texture is going away.
 void GpuTextForget(const void* native);
 // Direct3D 9 device reset: overlays live in D3DPOOL_DEFAULT.

@@ -17,6 +17,12 @@ bool SimDrawPoint(unsigned* tick, float* alpha);
 // True while races run at the fixed simulation rate.
 bool SimRacing();
 
+// Resolution (fixes_resolution.cpp): once a frame, keep the game's
+// saved display mode pointed at the player's choice, or the desktop size.
+void ResolutionFrame();
+// Options > Graphics Borderless/Exclusive radio buttons, read every frame (menus.cpp).
+void MenusFrame();
+
 // A race (BikeRace) has set its countdown / is being destroyed (race title
 // hooks, dd/racetitle.cpp). MenuFpsCap leaves the frame rate alone between.
 void RaceAlive(uintptr_t race);

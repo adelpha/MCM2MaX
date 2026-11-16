@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "../config.h"
+#include "../display.h"
 #include "../patch.h"
 #include "../prof.h"
 #include "gdihook.h"
@@ -418,6 +419,13 @@ bool InitDevice9() {
   }
   const UINT count = b.d3d9->GetAdapterCount();
   b.adapter9 = D3DADAPTER_DEFAULT;
+  // Monitor= (display.cpp): Direct3D 9 has one adapter per monitor.
+  for (UINT i = 0; i < count; ++i)
+    if (b.d3d9->GetAdapterMonitor(i) == display::Monitor()) {
+      if (i != b.adapter9) Log("adapter %u drives the chosen monitor %s", i, display::DeviceName());
+      b.adapter9 = i;
+      break;
+    }
   for (UINT i = 0; i < count; ++i) {
     D3DADAPTER_IDENTIFIER9 id{};
     b.d3d9->GetAdapterIdentifier(i, 0, &id);
@@ -460,8 +468,10 @@ bool InitDevice9() {
 
 namespace {
 
-// Picks the fullscreen mode: FullscreenMode if the card has it (closest
-// refresh rate), else the desktop's.
+// Picks the fullscreen mode: ExclusiveResolution or the player's pick
+// (fixes_resolution.cpp), if the card has that size (wanted refresh rate, else the
+// highest), else the desktop's. Direct3D 9 sets it once, when the device is
+// made: a resolution picked later reaches the screen at the next start.
 D3DDISPLAYMODE PickMode9() {
   Backend& b = B();
   const Config& c = GetConfig();
@@ -469,23 +479,31 @@ D3DDISPLAYMODE PickMode9() {
   b.d3d9->GetAdapterDisplayMode(b.adapter9, &desk);
   D3DDISPLAYMODE pick = desk;
   pick.Format = D3DFMT_X8R8G8B8;
-  if (c.fs_width) {
+  (void)c;
+  int w = 0, h = 0, hz = 0;
+  ResolutionWanted(&w, &h, &hz);
+  if (static_cast<UINT>(w) == desk.Width && static_cast<UINT>(h) == desk.Height &&
+      (!hz || static_cast<UINT>(hz) == desk.RefreshRate))
+    w = h = 0;
+  if (w) {
     const UINT n = b.d3d9->GetAdapterModeCount(b.adapter9, D3DFMT_X8R8G8B8);
     bool found = false;
     for (UINT i = 0; i < n; ++i) {
       D3DDISPLAYMODE m{};
       if (FAILED(b.d3d9->EnumAdapterModes(b.adapter9, D3DFMT_X8R8G8B8, i, &m))) continue;
-      if (m.Width != static_cast<UINT>(c.fs_width) || m.Height != static_cast<UINT>(c.fs_height)) continue;
+      if (m.Width != static_cast<UINT>(w) || m.Height != static_cast<UINT>(h)) continue;
       // Wanted refresh rate, or else the highest.
-      const int want = c.fs_hz ? c.fs_hz : 100000;
+      const int want = hz ? hz : 100000;
       if (!found || std::abs(static_cast<int>(m.RefreshRate) - want) <
                         std::abs(static_cast<int>(pick.RefreshRate) - want)) {
         pick = m;
         found = true;
       }
     }
-    Log("exclusive: FullscreenMode %dx%d@%d -> %s %ux%u@%u", c.fs_width, c.fs_height, c.fs_hz,
+    Log("exclusive: ExclusiveResolution %dx%d@%d -> %s %ux%u@%u", w, h, hz,
         found ? "mode" : "not available, desktop", pick.Width, pick.Height, pick.RefreshRate);
+  } else {
+    Log("exclusive: desktop mode %ux%u@%u", pick.Width, pick.Height, pick.RefreshRate);
   }
   return pick;
 }

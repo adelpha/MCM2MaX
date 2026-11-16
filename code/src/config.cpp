@@ -1,4 +1,5 @@
 #include "config.h"
+#include "patch.h"
 #include "xp_compat.h"
 
 #include <windows.h>
@@ -58,6 +59,9 @@ float ReadFloat(const char* key, float def, const char* ini) {
 int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 char g_menu_ini[MAX_PATH] = {};
+// Values of the old Resolution= / FullscreenMode= keys still to be moved to
+// BorderlessResolution= / ExclusiveResolution= (MigrateDisplayKeys).
+char g_display_migrate[2][48] = {};
 char g_game_ini[MAX_PATH] = {};  // mcm2max.ini next to Mcm2.exe
 
 // A key set from the menus (MCM2MaX-menu.ini) wins over mcm2max.ini.
@@ -89,6 +93,15 @@ const char* SetFromMenu(const char* key, int value) {
   char v[16];
   std::snprintf(v, sizeof(v), "%d", value);
   if (!std::strcmp(key, "ViewDistance")) std::snprintf(v, sizeof(v), "%g", value / 100.0);  // value in hundredths
+  return SetStringFromMenu(key, v);
+}
+
+const char* SetFullscreenFromMenu(bool exclusive) {
+  g_config.exclusive = exclusive;
+  return SetStringFromMenu("Fullscreen", exclusive ? "Exclusive" : "Borderless");
+}
+
+const char* SetStringFromMenu(const char* key, const char* v) {
   // mcm2max.ini itself when it can be written (only that key's line changes);
   // then any older choice for the key in the per-user file is dropped so it
   // can't win at the next start. Otherwise the per-user file.
@@ -103,6 +116,28 @@ const char* SetFromMenu(const char* key, int value) {
   CreateDirectoryA(xp::LocalAppData().append("\\Motocross Madness 2").c_str(), nullptr);
   WritePrivateProfileStringA(g_menu_section, key, v, g_menu_ini);
   return g_menu_ini;
+}
+
+void MigrateDisplayKeys() {
+  static const char* const kNew[2] = {"BorderlessResolution", "ExclusiveResolution"};
+  static const char* const kOld[2] = {"Resolution", "FullscreenMode"};
+  for (int i = 0; i < 2; ++i) {
+    if (!g_display_migrate[i][0]) continue;
+    char v[48];
+    std::snprintf(v, sizeof(v), "%s", g_display_migrate[i]);
+    v[std::strcspn(v, " \t;")] = 0;
+    int w = 0, h = 0, hz = 0;
+    const int n = std::sscanf(v, "%dx%d@%d", &w, &h, &hz);
+    if (n < 2) std::snprintf(v, sizeof(v), "Desktop");  // Desktop, Resolution, Game: all mean the desktop now
+    if (i == 0 && n >= 2) std::snprintf(v, sizeof(v), "%dx%d", w, h);
+    const char* file = SetStringFromMenu(kNew[i], v);
+    const DWORD attr = GetFileAttributesA(g_game_ini);
+    const bool removed = attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_READONLY) &&
+                         WritePrivateProfileStringA(g_ini_section, kOld[i], nullptr, g_game_ini);
+    patch::Log("config: old %s=%s moved to %s=%s in %s (old key %s)", kOld[i], g_display_migrate[i], kNew[i], v, file,
+               removed ? "removed" : "left in place");
+    g_display_migrate[i][0] = 0;
+  }
 }
 
 const Config& GetConfig() { return g_config; }
@@ -299,18 +334,45 @@ void LoadConfig() {
   {
     char r[32] = {};
     GetPrivateProfileStringA(sec, "Fullscreen", "Borderless", r, sizeof(r), ini);
+    if (g_menu_ini[0]) {  // a choice from the menus, when mcm2max.ini couldn't be written
+      char o[32] = {};
+      GetPrivateProfileStringA(g_menu_section, "Fullscreen", "", o, sizeof(o), g_menu_ini);
+      if (o[0]) std::snprintf(r, sizeof(r), "%s", o);
+    }
     r[std::strcspn(r, " \t;")] = 0;
     g_config.exclusive = _strnicmp(r, "Excl", 4) == 0;
-    // FullscreenMode=Desktop or <width>x<height>[@<hz>], e.g. 1024x768@85.
-    char m[48] = {};
-    GetPrivateProfileStringA(sec, "FullscreenMode", "Desktop", m, sizeof(m), ini);
-    m[std::strcspn(m, " \t;")] = 0;
-    int w = 0, h = 0, hz = 0;
-    if (std::sscanf(m, "%dx%d@%d", &w, &h, &hz) >= 2 && w >= 320 && h >= 200 && w <= 16384 && h <= 16384) {
-      g_config.fs_width = w;
-      g_config.fs_height = h;
-      g_config.fs_hz = hz > 0 && hz <= 1000 ? hz : 0;
-    }
+    g_config.card_test = GetPrivateProfileIntA(sec, "CardTest", 0, ini) != 0;
+    g_config.monitor = GetPrivateProfileIntA(sec, "Monitor", 1, ini);
+    if (g_config.monitor < 1 || g_config.monitor > 16) g_config.monitor = 1;
+    // BorderlessResolution=Desktop or <w>x<h>; ExclusiveResolution=Desktop or
+    // <w>x<h>[@<hz>]. Older inis: Resolution= and FullscreenMode= stand in
+    // for them (see MigrateDisplayKeys).
+    auto read = [&](const char* key, const char* old_key, int* w, int* h, int* hz) {
+      char m[48] = {};
+      GetPrivateProfileStringA(sec, key, "", m, sizeof(m), ini);
+      if (g_menu_ini[0]) {
+        char o[48] = {};
+        GetPrivateProfileStringA(g_menu_section, key, "", o, sizeof(o), g_menu_ini);
+        if (o[0]) std::snprintf(m, sizeof(m), "%s", o);
+      }
+      if (!m[0] && old_key) {
+        GetPrivateProfileStringA(sec, old_key, "", m, sizeof(m), ini);
+        if (m[0]) {
+          std::snprintf(g_display_migrate[key == std::string("BorderlessResolution") ? 0 : 1], 48, "%s", m);
+        }
+      }
+      m[std::strcspn(m, " \t;")] = 0;
+      int a = 0, b = 0, c = 0;
+      *w = *h = 0;
+      if (hz) *hz = 0;
+      if (std::sscanf(m, "%dx%d@%d", &a, &b, &c) >= 2 && a >= 640 && b >= 480 && a <= 16384 && b <= 16384) {
+        *w = a;
+        *h = b;
+        if (hz) *hz = c > 0 && c <= 1000 ? c : 0;
+      }
+    };
+    read("BorderlessResolution", "Resolution", &g_config.bl_width, &g_config.bl_height, nullptr);
+    read("ExclusiveResolution", "FullscreenMode", &g_config.fs_width, &g_config.fs_height, &g_config.fs_hz);
   }
   g_config.renderer_label = GetPrivateProfileIntA(sec, "RendererLabel", 1, ini) != 0;
   g_config.gpu_text = GetPrivateProfileIntA(sec, "GpuText", 1, ini) != 0;

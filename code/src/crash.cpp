@@ -22,6 +22,7 @@
 #include "config.h"
 #include "patch.h"
 #include "xp_compat.h"
+#include "dd/backend.h"
 #include "dd/surface.h"
 #include <malloc.h>
 
@@ -204,6 +205,7 @@ void WINAPI HookedExitProcess(UINT code) {
   if (name || code >= 0xC0000000u) LogStack(reinterpret_cast<uintptr_t>(CRASH_FRAME()), "exit");
   LogMemoryNow("at exit");
   power::Shutdown("game closing");
+  dd::RestoreDisplayAtExit();
   (g_exit ? g_exit : &ExitProcess)(code);
 }
 
