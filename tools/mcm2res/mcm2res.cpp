@@ -63,6 +63,15 @@
 //     of next paths; 14 u32 slot, u32 path = which path follows; 15/16 the
 //     start and finish lines: 10 floats, point, direction, half-width vector,
 //     width (point and vector scaled like nodes).
+//   * .esb ecosystems (trees and plants; loader 0x459d30, objects 0x45a690):
+//     u32 version; 256 slots of u8 present [u8 n, name, u8 n, LOD texture,
+//     23 floats (+0x180.. in the kind: height mean/min/max, width mean/min/
+//     max, billboard uv, ...), u8 present [u8 n, texture], u32 parts, parts x
+//     36 bytes]; u8 present [u8 n, placement picture]; version 2: u32, u8
+//     present [u8 n, probability picture]; u32 count; count x 9 bytes: u8
+//     kind (slot), u16 x, y, z (fractions of the terrain width, mgr+0x5a8),
+//     u8 height, u8 width (0x456d50 / 0x456db0: below 128 mean - (mean - min)
+//     * b / 128, else mean + (max - mean) * (255 - b) / 128).
 #include <algorithm>
 #include <cctype>
 #include <cstdarg>
@@ -1232,6 +1241,106 @@ struct Course {
   }
 };
 
+// An ecosystem file (.esb): the kinds of trees and plants and where every
+// one stands, read the way the game's loader 0x459d30 / 0x45a690 does.
+struct Eco {
+  struct Kind {
+    int slot = 0;
+    std::string name, lod_texture, texture;
+    float f[23] = {};
+    unsigned count = 0;
+  };
+  struct Obj {
+    uint8_t kind, a, b;  // a: height byte, b: width byte
+    uint16_t x, y, z;
+  };
+  uint32_t version = 0;
+  std::vector<Kind> kinds;
+  int slot_kind[256];
+  std::string placement, probability;
+  std::vector<Obj> objs;
+  std::string error;
+
+  // 0x456d50 / 0x456db0: a size between three values by a byte.
+  static float Lerp3(const float* v, uint8_t b) {
+    return b < 128 ? v[0] - (v[0] - v[1]) * b / 128.0f : v[0] + (v[2] - v[0]) * (255 - b) / 128.0f;
+  }
+  float Height(const Obj& o) const { return Lerp3(kinds[slot_kind[o.kind]].f + 0, o.a); }
+  float Width(const Obj& o) const { return Lerp3(kinds[slot_kind[o.kind]].f + 3, o.b); }
+
+  bool Parse(const std::vector<uint8_t>& d) {
+    for (int& k : slot_kind) k = -1;
+    size_t p = 0;
+    auto need = [&](size_t n) {
+      if (p + n > d.size()) return error = Fmt("cut short at byte %zu", p), false;
+      return true;
+    };
+    auto str = [&](std::string& out) {  // u8 present, u8 length, bytes
+      if (!need(1)) return false;
+      if (!d[p++]) return true;
+      if (!need(1)) return false;
+      const size_t n = d[p++];
+      if (!need(n)) return false;
+      out.assign(reinterpret_cast<const char*>(&d[p]), n);
+      out = out.c_str();
+      p += n;
+      return true;
+    };
+    if (!need(4)) return false;
+    version = U32(&d[p]);
+    p += 4;
+    for (int slot = 0; slot < 256; ++slot) {
+      if (!need(1)) return false;
+      if (!d[p++]) continue;
+      Kind k;
+      k.slot = slot;
+      if (!need(1)) return false;
+      size_t n = d[p++];
+      if (!need(n + 1)) return false;
+      k.name.assign(reinterpret_cast<const char*>(&d[p]), n);
+      k.name = k.name.c_str();
+      p += n;
+      n = d[p++];
+      if (!need(n + 92)) return false;
+      k.lod_texture.assign(reinterpret_cast<const char*>(&d[p]), n);
+      k.lod_texture = k.lod_texture.c_str();
+      p += n;
+      for (float& v : k.f) v = F32(&d[p]), p += 4;
+      if (!str(k.texture) || !need(4)) return false;
+      const uint32_t parts = U32(&d[p]);
+      p += 4;
+      if (parts > 1000 || !need(36ull * parts)) return error = "bad part count", false;
+      p += 36ull * parts;
+      slot_kind[slot] = static_cast<int>(kinds.size());
+      kinds.push_back(k);
+    }
+    if (!str(placement)) return false;
+    if (version == 2) {
+      if (!need(4)) return false;
+      p += 4;
+      if (!str(probability)) return false;
+    }
+    if (!need(4)) return false;
+    const uint32_t n = U32(&d[p]);
+    p += 4;
+    if (!need(9ull * n)) return false;
+    objs.reserve(n);
+    for (uint32_t i = 0; i < n; ++i, p += 9) {
+      Obj o;
+      o.kind = d[p];
+      o.x = static_cast<uint16_t>(d[p + 1] | d[p + 2] << 8);
+      o.y = static_cast<uint16_t>(d[p + 3] | d[p + 4] << 8);
+      o.z = static_cast<uint16_t>(d[p + 5] | d[p + 6] << 8);
+      o.a = d[p + 7];
+      o.b = d[p + 8];
+      if (slot_kind[o.kind] < 0) return error = Fmt("object %u is of kind %d, which is not defined", i, o.kind), false;
+      ++kinds[slot_kind[o.kind]].count;
+      objs.push_back(o);
+    }
+    return true;
+  }
+};
+
 struct Race {
   std::string name, file, tdf;
   std::vector<std::pair<double, double>> pts;  // x, z
@@ -1710,6 +1819,7 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
   SavePng(Join(g_out, Join(t.dir, "relief.png")), relief);
   info += "relief.png: heights as colours with hill shading\n";
 
+  std::string tree_info;
   // Race maps: ground picture with each race's waypoints.
   static const uint8_t cols[6][3] = {{255, 60, 40}, {255, 230, 40}, {60, 220, 255}, {120, 255, 90}, {255, 120, 255}, {255, 160, 40}};
   const uint8_t white[3] = {255, 255, 255}, black[3] = {0, 0, 0};
@@ -1848,6 +1958,61 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
     info += "course_raceN.obj: race N's course as lines (centre line per path, start and finish lines), to load "
             "with terrain.obj\n";
 
+  // Trees and plants (.esb): where each one stands, on the ground picture.
+  {
+    std::string esb_file = scn.Get("Environment", "EcosystemFile");
+    const Member* em = nullptr;
+    for (auto& kv : members)
+      if ((!esb_file.empty() && Lower(kv.first) == Lower(esb_file)) || (esb_file.empty() && Ext(kv.first) == "esb"))
+        em = kv.second, esb_file = kv.first;
+    Eco eco;
+    if (em) {
+      std::vector<uint8_t> ed;
+      ar.ReadMember(*em, ed);
+      if (!eco.Parse(ed)) {
+        Log("  %s %s: %s", ar.name().c_str(), esb_file.c_str(), eco.error.c_str());
+        ++g_count.failed;
+        em = nullptr;
+      }
+    }
+    if (em && !eco.objs.empty()) {
+      // Positions are 16-bit fractions of the terrain's width (mgr+0x5a8).
+      const double unit = (W - 1) * sc / 65536.0;
+      Log("    %s: %zu kinds, %zu objects", esb_file.c_str(), eco.kinds.size(), eco.objs.size());
+      static const uint8_t pal[12][3] = {{230, 25, 75},  {60, 180, 75},   {255, 225, 25}, {67, 99, 216},
+                                         {245, 130, 49}, {145, 30, 180},  {66, 212, 244}, {240, 50, 230},
+                                         {191, 239, 69}, {250, 190, 212}, {70, 153, 144}, {255, 255, 255}};
+      Image tm = ground;
+      for (size_t i = 0; i < tm.rgba.size(); i += 4)
+        for (int c = 0; c < 3; ++c) tm.rgba[i + c] = static_cast<uint8_t>(tm.rgba[i + c] * 0.45);
+      for (const Eco::Obj& o : eco.objs) {
+        const int k = eco.slot_kind[o.kind];
+        Disc(tm, o.x * unit / sc, o.z * unit / sc, std::max(0.8, eco.Width(o) / 2.0 / sc), pal[k % 12]);
+      }
+      SavePng(Join(g_out, Join(t.dir, "trees.png")), tm);
+      t.pictures.push_back(Join(t.dir, "trees.png"));
+      std::string csv = "kind,model,x,y,z,height,width\n";
+      csv.reserve(eco.objs.size() * 48);
+      for (const Eco::Obj& o : eco.objs) {
+        const Eco::Kind& k = eco.kinds[eco.slot_kind[o.kind]];
+        csv += Fmt("%d,%s,%.2f,%.2f,%.2f,%.2f,%.2f\n", k.slot, k.name.c_str(), o.x * unit, o.y * unit, o.z * unit,
+                   eco.Height(o), eco.Width(o));
+      }
+      WriteText(Join(g_out, Join(t.dir, "trees.csv")), csv);
+      tree_info = Fmt("Trees and plants (%s): %zu, of %zu kinds%s%s\n", esb_file.c_str(), eco.objs.size(),
+                      eco.kinds.size(), eco.probability.empty() ? "" : "; placed by the editor from ",
+                      eco.probability.c_str());
+      for (size_t i = 0; i < eco.kinds.size(); ++i) {
+        const Eco::Kind& k = eco.kinds[i];
+        tree_info += Fmt("  #%02x%02x%02x %-14s %6u, height %.0f-%.0f ft, width %.0f-%.0f ft (model models\\ECO.RES\\%s.obj)\n",
+                         pal[i % 12][0], pal[i % 12][1], pal[i % 12][2], k.name.c_str(), k.count, k.f[1], k.f[2],
+                         k.f[4], k.f[5], k.name.c_str());
+      }
+      info += "trees.png: every tree and plant, coloured by kind (colours in the list below), on the darkened ground\n"
+              "trees.csv: every tree and plant: kind number, model name, x, y, z (feet, the base), height, width\n";
+    }
+  }
+
   // Terrain mesh (OBJ), every g_obj_step points, textured with ground.png.
   {
     const int st = std::max(1, g_obj_step);
@@ -1886,6 +2051,7 @@ void ProcessTrack(const Archive& ar, const std::map<std::string, std::vector<uin
       info += Fmt("  %2zu: %9.2f, %9.2f  (ground %.1f ft)\n", i + 1, x, z, hm[static_cast<size_t>(gz) * W + gx]);
     }
   }
+  if (!tree_info.empty()) info += "\n" + tree_info;
   // Courses as text.
   for (size_t r = 0; r < races.size(); ++r) {
     if (!races[r].has_course) continue;

@@ -43,7 +43,7 @@ mcm2res check <folder of PNGs>
 | `textures\_same_name\<archive>\` | Textures that share a name with a different picture: the four stadiums' `texturePanel0..`. The game loads them by that name, so a replacement is used in every stadium. |
 | `textures.txt` | Every texture: name, size, format, how the game loads it, archive, member. |
 | `images\<archive>\` | Plain TGA pictures (track preview shots, menu art) as PNG. |
-| `tracks\<track>\` | Per track: `info.txt` (name, event, sky, races, waypoints with ground height, course points, start and finish lines), `heightmap16.png` (16-bit, range in info.txt), `ground.png` (the terrain texture as laid on the ground, 1 pixel per height point), `relief.png` (shaded heights), `map_raceN.png` (race N's waypoints, white = first, and its course from the `.tdf`: white centre line, black sides, green start line, red finish line; cut down to the course when it is small, as in stadiums), `course_raceN.obj` (the course as lines, to load with the terrain), `terrain.obj` + `terrain.mtl` (textured with ground.png). |
+| `tracks\<track>\` | Per track: `info.txt` (name, event, sky, races, waypoints with ground height, course points, start and finish lines), `heightmap16.png` (16-bit, range in info.txt), `ground.png` (the terrain texture as laid on the ground, 1 pixel per height point), `relief.png` (shaded heights), `map_raceN.png` (race N's waypoints, white = first, and its course from the `.tdf`: white centre line, black sides, green start line, red finish line; cut down to the course when it is small, as in stadiums), `course_raceN.obj` (the course as lines, to load with the terrain), `trees.png` (every tree and plant from the `.esb`, coloured by kind; the colours are listed in info.txt), `trees.csv` (every tree and plant: kind, model, x, y, z, height, width), `terrain.obj` + `terrain.mtl` (textured with ground.png). |
 | `models\<archive>\` | Tree and plant models (`.slt`) as OBJ + MTL, textured from `textures\`. |
 | `archives\<archive>\` | Everything else as stored: sounds (`.wav`), scene, waypoint and config text (`.scn`, `.wpt`, `.ini`, `.mcf`, `.pb`, ...) and binary data. |
 | `mcm2res.log` | What was found, and anything that could not be read. |
@@ -58,7 +58,7 @@ OBJ files are in feet. The game's axes are left-handed, so z is negated in
 the OBJ to keep it from being mirrored.
 
 Not yet converted: bike, rider and object models (`.slb`, a binary format),
-animations (`.mot`), collision shapes (`.col`) and tree placement (`.esb`);
+animations (`.mot`) and collision shapes (`.col`);
 they are saved as stored.
 
 ## Format notes
