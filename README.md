@@ -17,6 +17,7 @@ Here's just a few of Motocross Madness 2 MaXimuM's core features:
 |---|---|
 | Ease of use | Drop the files into your MCM2 directory with the no-CD exe and it just works |
 | No wrappers, codecs, external DLLs or compatibility settings required | Indeo5 decoder built-in for the game's video files, "Modern" rendering on the GPU using D3D11 or, for Windows XP compatibility, DX9 |
+| No physics changes | Game physics runs at a locked 30fps, separated from the renderer. It runs the original game's code straight from its own exe for all physics calculations, guaranteeing a 100% behaviour match to the original game |
 | Performance | With GPU terrain rendering enabled, it can render a full map at 10x extended view distance with maximum terrain quality across the entire map at hundreds of frames per second on a modern GPU |
 | Graphical enhancements | Widescreen, AA, AF, FoV, Alpha-to-coverage, support for high-resolution replacement textures, environment mapped reflections on bikes and riders, soft shadows for all riders, and more! |
 | Audio | Drop in [DSOAL](https://github.com/kcat/dsoal) and the EAX effects will just work |
