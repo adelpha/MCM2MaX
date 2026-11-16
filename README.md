@@ -17,7 +17,7 @@ Motocross Madness 2 MaXimuM's core features are:
 |---|---|
 | Ease of use | Drop the files into your MCM2 directory with the no-CD exe and it just works |
 | No wrappers, codecs, external DLLs or compatibility settings required | Indeo5 decoder built-in for the game's video files, "Modern" rendering on the GPU using D3D11 or, for Windows XP compatibility, DX9 |
-| Performance | It can render a full Baja map at 10x view distance with maximum terrain quality across the entire map at hundreds of frames per second on a modern GPU |
+| Performance | It can render a full Baja map at 10x extended view distance with maximum terrain quality across the entire map at hundreds of frames per second on a modern GPU |
 | Graphical enhancements | Widescreen, AA, AF, FoV, Alpha-to-coverage, replacement textures, environment mapped reflections, soft shadows for all riders, and more! |
 | Audio | Drop in DSOAL and the EAX effects will just work |
 | Music | Optional music tracks, either per-event or per-track (provide your own) |
