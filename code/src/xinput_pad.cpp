@@ -281,10 +281,23 @@ class Effect final : public IDirectInputEffect {
   void Strength(double now_us, float* low, float* high);
   // Force jumps at least this big (of 10000) rumble; the kick fades out
   // over kKickUs.
-  static constexpr double kKickThreshold = 2000, kKickUs = 400000;
+  // A crash stops the force outright (the game's crash state); that rumbles
+  // at least kCrashKick for kCrashUs. Short jolts (70 ms in the game) are too
+  // brief for pad motors to spin up, so they last at least kMinPulseUs.
+  static constexpr double kKickThreshold = 2000, kKickUs = 400000, kCrashKick = 8000, kCrashUs = 700000,
+                          kMinPulseUs = 160000;
+  double kick_len_us_ = kKickUs;
   double KickLevel(double now_us) const {
     const double t = now_us - kick_us_;
-    return t >= kKickUs || t < 0 ? 0 : kick_ * (1.0 - t / kKickUs);
+    return t >= kick_len_us_ || t < 0 ? 0 : kick_ * (1.0 - t / kick_len_us_);
+  }
+  void Kick(double now_us, double level, double len_us) {
+    const double left = KickLevel(now_us);
+    if (level >= left) {
+      kick_ = std::min(10000.0, level);
+      kick_us_ = now_us;
+      kick_len_us_ = len_us;
+    }
   }
 
   Pad* pad_;
@@ -1071,10 +1084,7 @@ HRESULT Effect::SetParameters(LPCDIEFFECT eff, DWORD flags) {
       const LONG m = static_cast<const DICONSTANTFORCE*>(eff->lpvTypeSpecificParams)->lMagnitude;
       const double jump = std::fabs(static_cast<double>(m) - magnitude_);
       if (jump >= kKickThreshold) {
-        const double now = NowUs();
-        const double left = KickLevel(now);
-        kick_ = std::max(left, std::min(10000.0, jump));
-        kick_us_ = now;
+        Kick(NowUs(), jump, kKickUs);
         if (g_log && steady_ && !g_rumble_forces)
           patch::Log("xinput: effect %p (ConstantForce): force jump %ld -> %ld, rumble kick %.0f",
                      static_cast<void*>(this), magnitude_, m, kick_);
@@ -1150,6 +1160,10 @@ HRESULT Effect::Start(DWORD iterations, DWORD flags) {
 HRESULT Effect::Stop() {
   Lock lock;
   if (g_log && playing_) patch::Log("xinput: effect %p (%s): Stop", static_cast<void*>(this), Pad::EffectName(type_));
+  if (playing_ && steady_ && !g_rumble_forces) {
+    Kick(NowUs(), std::max(kCrashKick, std::fabs(static_cast<double>(magnitude_))), kCrashUs);
+    if (g_log) patch::Log("xinput: effect %p (ConstantForce): stopped, crash kick %.0f", static_cast<void*>(this), kick_);
+  }
   playing_ = false;
   pad_->UpdateRumble(NowUs());
   return DI_OK;
@@ -1165,6 +1179,10 @@ HRESULT Effect::GetEffectStatus(LPDWORD status) {
 }
 
 void Effect::Strength(double now_us, float* low, float* high) {
+  if (steady_ && !g_rumble_forces) {  // only its kicks rumble, even after a Stop
+    *low += static_cast<float>(KickLevel(now_us) / 10000.0 * gain_ / 10000.0);
+    return;
+  }
   if (!playing_) return;
   double t = now_us - start_us_ - start_delay_;
   if (t < 0) return;
@@ -1174,20 +1192,20 @@ void Effect::Strength(double now_us, float* low, float* high) {
       playing_ = false;
       return;
     }
-    const double it = std::floor(t / duration_);
+    // A single short pulse is held to kMinPulseUs so the motors can feel it.
+    const double span = iterations_ == 1 ? std::max<double>(duration_, kMinPulseUs) : duration_;
+    const double it = std::floor(t / span);
     if (iterations_ != INFINITE && it >= iterations_) {
       playing_ = false;
       return;
     }
-    local = t - it * duration_;
+    local = std::min<double>(t - it * span, duration_);
   }
   double level;
   if (periodic_) {
     level = std::min(10000.0, static_cast<double>(magnitude_) + std::fabs(static_cast<double>(offset_)));
   } else if (ramp_ && duration_ != INFINITE) {
     level = std::fabs(magnitude_ + (ramp_end_ - magnitude_) * (local / duration_));
-  } else if (steady_ && !g_rumble_forces) {
-    level = KickLevel(now_us);
   } else {
     level = std::fabs(static_cast<double>(magnitude_));
   }

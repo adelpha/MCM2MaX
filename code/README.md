@@ -693,7 +693,8 @@ XInputRumble=100
 
 ; XInputRumbleForces: 1 = the game's steady stick forces rumble too (it
 ; pushes a force feedback joystick all the time while riding, which on a pad
-; is a constant buzz). 0 = only bumps, landings and crashes rumble (default).
+; is a constant buzz). 0 = only bumps, landings and crashes rumble (default);
+; short bumps are lengthened so the pad's motors can spin up.
 XInputRumbleForces=0
 
 ; XInputTriggerButtons: 1 = the triggers also work as buttons 11 (LT) and
@@ -716,8 +717,8 @@ XInputSteerCurve=33
 
 ; XInputSteerSmooth: how long, in milliseconds, the steering takes to catch
 ; up with the left stick, 0-500. Takes the edge off small thumb movements;
-; too much feels sluggish. 0 = off (default). Try 50-100.
-XInputSteerSmooth=0
+; too much feels sluggish. 0 = off. Default 40.
+XInputSteerSmooth=40
 
 ; KeepControlPreset: 1 = the control preset you chose (Options > Controls)
 ; is kept between runs as long as the same controller is used (default). The
