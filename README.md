@@ -106,8 +106,8 @@ Windows 10 and 11.
   2560x1600, 3440x1440, 3840x1600 and 3840x2160 are offered alongside the
   original 4:3 modes. Only sizes that fit your desktop are listed, and your
   exact desktop size is always one of them.
-- **Starts at your desktop resolution** (`DefaultResolution`), and the
-  resolution you pick in Options is remembered by its size.
+- **Starts at your desktop resolution** (`Resolution`), and the resolution
+  you pick in Options is saved by its size in the ini.
 - **Widescreen field of view** (`WideFov`): wider screens show more to the
   sides instead of cropping the top and bottom. The speedometer stays round.
   `Fov` sets the base field of view.
@@ -484,7 +484,7 @@ The file has three parts:
 | `Renderer` | `D3D11` | `D3D11`, `D3D9` | The graphics API. D3D9 is a fixed-function Direct3D 9 renderer, and it's used automatically when Direct3D 11 is missing (Windows XP, very old cards). |
 | `Fullscreen` | `Borderless` | `Borderless`, `Exclusive` | *Borderless*: a borderless window covering the primary monitor at its current resolution. The desktop resolution never changes and Alt+Tab is instant. *Exclusive*: the game takes over the screen, Alt+Tab leaves fullscreen and it comes back when you return. This can help VSync on XP. Either way, the game renders at the resolution chosen in its own Options, scaled to the screen with its shape kept. |
 | `FullscreenMode` | `Desktop` | `Desktop`, `<w>x<h>`, `<w>x<h>@<Hz>` | With `Fullscreen=Exclusive` only: the screen mode. `Desktop` keeps the current mode. Without `@<Hz>`, the highest refresh rate is used. Example: `1024x768@85`. |
-| `DefaultResolution` | `Desktop` | `Desktop`, `<w>x<h>`, `Game` | The game's resolution until you pick one in Options. Your pick is then remembered by size, so it survives changes to the list of resolutions. `Game` = the game's own behaviour (640x480 at first, saved by list position). |
+| `Resolution` | `Desktop` | `Desktop`, `<w>x<h>`, `Game` | The game's resolution, by size. Picking one in the game's Options writes it here, so it survives changes to the list of resolutions. `Game` = the game's own behaviour (640x480 at first, saved by list position). With `Fullscreen=Exclusive` the screen itself stays at `FullscreenMode`. |
 | `VSync` | `1` | `0`, `1` | `1` waits for the monitor's refresh before showing each frame: no tearing, and the frame rate is limited to the refresh rate. `0` shows frames as soon as they are ready, with tearing where Windows allows it. |
 | `FrameCap` | `0` | `0`, frames/s | The most frames per second, on top of VSync. `0` = no cap. Useful with `VSync=0`. It does not change game speed. |
 | `MenuFpsCap` | `240` | `0`, frames/s | The most frames per second whenever a race isn't running (menus, rider and bike select, loading, pause, results), even with `VSync=0`. Races are not affected. `0` = no menu cap. If `FrameCap` is lower, that wins. |

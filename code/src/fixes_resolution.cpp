@@ -1,5 +1,5 @@
-// DefaultResolution: start at the desktop resolution, and keep the player's
-// choice by size instead of by list position.
+// Resolution: start at the desktop resolution, and keep the player's
+// choice by size instead of by list position, in mcm2max.ini.
 //
 // The game saves its resolution as a position in the list of display modes
 // (options +0xfc4, the dropdown index), and starts at the first entry,
@@ -8,17 +8,19 @@
 // position points at a different mode, e.g. 1600x1200 in place of
 // 1920x1080 (StOo, 2026-11-16).
 //
-// So the size the player picks in Options is stored as "WxH" in
-// HKCU\Software\MCM2MaX\Motocross Madness 2\Resolution, and every frame the
-// game's saved position is pointed at that size, or at DefaultResolution
-// (the desktop by default) while the player has never picked one. The game
-// switches modes itself by comparing that position with the current one.
+// So the size the player picks in Options is written to mcm2max.ini as
+// Resolution=WxH (or the per-user menu ini when mcm2max.ini can't be
+// written), and every frame the game's saved position is pointed at that
+// size, or at the desktop while Resolution=Desktop. The game switches modes
+// itself by comparing that position with the current one.
 //
 // Exe (2008 no-CD Mcm2.exe):
 //   [0x5743ac] = game; game+0xfc4 = saved mode position;
 //   [game+0xc] = display device: +0x8 mode count, +0x10 mode array of
 //   0x24-byte records {width, height, bpp, ...} (compared at 0x4c5f53).
-//   0x453846 mov [0x68e918],eax: Options OK, eax = the dropdown's position.
+//   Options > Graphics save (OptGraph exchange 0x4b6d80):
+//     0x4b6da3 mov [0x68e918],eax, eax = the dropdown's position.
+//   Another dialog's OK at 0x453846 does the same.
 #include <windows.h>
 #include <cstdint>
 #include <cstdio>
@@ -29,10 +31,7 @@
 
 namespace {
 
-const char kKey[] = "Software\\MCM2MaX\\Motocross Madness 2";
-const char kValue[] = "Resolution";
-
-int g_pick_w = 0, g_pick_h = 0;  // the player's choice (0 = none yet)
+int g_pick_w = 0, g_pick_h = 0;  // Resolution=WxH or the player's pick (0 = desktop)
 bool g_logged_table = false;
 int g_last_fixed = -2;           // last position written (for the log)
 bool g_off = false;
@@ -59,35 +58,6 @@ Mode ModeAt(const uint8_t* arr, int i) {
   return {m[0], m[1], m[2]};
 }
 
-void LoadPick() {
-  HKEY key;
-  if (RegOpenKeyExA(HKEY_CURRENT_USER, kKey, 0, KEY_READ, &key) != ERROR_SUCCESS) return;
-  char v[32] = {};
-  DWORD size = sizeof(v) - 1, type = 0;
-  if (RegQueryValueExA(key, kValue, nullptr, &type, reinterpret_cast<BYTE*>(v), &size) == ERROR_SUCCESS &&
-      type == REG_SZ) {
-    int w = 0, h = 0;
-    if (std::sscanf(v, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
-      g_pick_w = w;
-      g_pick_h = h;
-    }
-  }
-  RegCloseKey(key);
-}
-
-void SavePick(int w, int h) {
-  HKEY key;
-  if (RegCreateKeyExA(HKEY_CURRENT_USER, kKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) !=
-      ERROR_SUCCESS) {
-    patch::Log("resolution: cannot open HKCU\\%s to save %dx%d", kKey, w, h);
-    return;
-  }
-  char v[32];
-  std::snprintf(v, sizeof(v), "%dx%d", w, h);
-  RegSetValueExA(key, kValue, 0, REG_SZ, reinterpret_cast<const BYTE*>(v), static_cast<DWORD>(std::strlen(v) + 1));
-  RegCloseKey(key);
-}
-
 // Options OK: the player picked the mode at this position.
 void __stdcall NotePick(int pos) {
   const uint8_t* arr = nullptr;
@@ -98,34 +68,32 @@ void __stdcall NotePick(int pos) {
   }
   const Mode m = ModeAt(arr, pos);
   if (m.w != g_pick_w || m.h != g_pick_h) {
-    patch::Log("resolution: player picked %dx%d (position %d); saved", m.w, m.h, pos);
     g_pick_w = m.w;
     g_pick_h = m.h;
-    SavePick(m.w, m.h);
+    char v[32];
+    std::snprintf(v, sizeof(v), "%dx%d", m.w, m.h);
+    const char* file = SetStringFromMenu("Resolution", v);
+    patch::Log("resolution: player picked %s (position %d); saved as Resolution=%s in %s", v, pos, v, file);
   }
 }
 
 }  // namespace
 
-void ApplyResolutionDefault() {
-  const Config& c = GetConfig();
-  if (c.default_res_w < 0) {
-    g_off = true;
-    patch::Log("resolution: DefaultResolution=Game, the game's own saved position is used");
-    return;
-  }
-  const uint8_t site[] = {0xA3, 0x18, 0xE9, 0x68, 0x00};  // 00453846 mov [0068e918],eax
-  if (!patch::Matches(0x453846, site, sizeof(site))) {
-    g_off = true;
-    patch::Log("resolution: Options code differs, DefaultResolution not applied");
-    return;
+namespace {
+// Replace "mov [0x68e918],eax" at site with a call to a stub that does the
+// same and then reports the position to NotePick.
+bool HookPickSite(uintptr_t site) {
+  const uint8_t code[] = {0xA3, 0x18, 0xE9, 0x68, 0x00};  // mov [0068e918],eax
+  if (!patch::Matches(site, code, sizeof(code))) {
+    patch::Log("resolution: Options save code at %08x differs, not hooked", static_cast<unsigned>(site));
+    return false;
   }
   auto* t = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-  if (!t) return;
+  if (!t) return false;
   // mov [0x68e918],eax; pushad; push eax; call NotePick; popad; ret
   size_t n = 0;
-  std::memcpy(t + n, site, sizeof(site));
-  n += sizeof(site);
+  std::memcpy(t + n, code, sizeof(code));
+  n += sizeof(code);
   t[n++] = 0x60;
   t[n++] = 0x50;
   t[n++] = 0xE8;
@@ -136,15 +104,32 @@ void ApplyResolutionDefault() {
   t[n++] = 0x61;
   t[n++] = 0xC3;
   FlushInstructionCache(GetCurrentProcess(), t, n);
-  patch::Call(0x453846, t, sizeof(site));
-  LoadPick();
+  patch::Call(site, t, sizeof(code));
+  return true;
+}
+}  // namespace
+
+void ApplyResolutionDefault() {
+  const Config& c = GetConfig();
+  if (c.default_res_w < 0) {
+    g_off = true;
+    patch::Log("resolution: Resolution=Game, the game's own saved position is used");
+    return;
+  }
+  const bool a = HookPickSite(0x4B6DA3);  // Options > Graphics
+  const bool b = HookPickSite(0x453846);
+  if (!a && !b) {
+    g_off = true;
+    patch::Log("resolution: no Options save code found; Resolution not applied");
+    return;
+  }
+  g_pick_w = c.default_res_w;
+  g_pick_h = c.default_res_h;
   if (g_pick_w)
-    patch::Log("resolution: player's saved choice %dx%d", g_pick_w, g_pick_h);
-  else if (c.default_res_w > 0)
-    patch::Log("resolution: no saved choice yet; DefaultResolution %dx%d", c.default_res_w, c.default_res_h);
+    patch::Log("resolution: Resolution=%dx%d (Options hooks: graphics %d, other %d)", g_pick_w, g_pick_h, a, b);
   else
-    patch::Log("resolution: no saved choice yet; DefaultResolution=Desktop (%dx%d)",
-               GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+    patch::Log("resolution: Resolution=Desktop (%dx%d) (Options hooks: graphics %d, other %d)",
+               GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), a, b);
 }
 
 // Called once a frame: point the game's saved position at the wanted size.
@@ -164,13 +149,12 @@ void ResolutionFrame() {
     }
     patch::Log("resolution: the game's %d display modes:%s", n, line);
   }
-  const Config& c = GetConfig();
   int w = g_pick_w, h = g_pick_h;
-  const char* why = "player's choice";
+  const char* why = "Resolution";
   if (!w) {
-    w = c.default_res_w > 0 ? c.default_res_w : GetSystemMetrics(SM_CXSCREEN);
-    h = c.default_res_h > 0 ? c.default_res_h : GetSystemMetrics(SM_CYSCREEN);
-    why = c.default_res_w > 0 ? "DefaultResolution" : "desktop";
+    w = GetSystemMetrics(SM_CXSCREEN);
+    h = GetSystemMetrics(SM_CYSCREEN);
+    why = "desktop";
   }
   // Exact size, else the largest mode that fits inside it.
   int best = -1;

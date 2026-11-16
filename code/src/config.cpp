@@ -89,6 +89,10 @@ const char* SetFromMenu(const char* key, int value) {
   char v[16];
   std::snprintf(v, sizeof(v), "%d", value);
   if (!std::strcmp(key, "ViewDistance")) std::snprintf(v, sizeof(v), "%g", value / 100.0);  // value in hundredths
+  return SetStringFromMenu(key, v);
+}
+
+const char* SetStringFromMenu(const char* key, const char* v) {
   // mcm2max.ini itself when it can be written (only that key's line changes);
   // then any older choice for the key in the per-user file is dropped so it
   // can't win at the next start. Otherwise the per-user file.
@@ -313,9 +317,15 @@ void LoadConfig() {
     }
   }
   {
-    // DefaultResolution=Desktop, <width>x<height>, or Game (the game's own).
+    // Resolution=Desktop, <width>x<height>, or Game (the game's own). The
+    // game's Options write the player's pick here (see fixes_resolution.cpp).
     char m[48] = {};
-    GetPrivateProfileStringA(sec, "DefaultResolution", "Desktop", m, sizeof(m), ini);
+    GetPrivateProfileStringA(sec, "Resolution", "Desktop", m, sizeof(m), ini);
+    if (g_menu_ini[0]) {
+      char o[48] = {};
+      GetPrivateProfileStringA(g_menu_section, "Resolution", "", o, sizeof(o), g_menu_ini);
+      if (o[0]) std::snprintf(m, sizeof(m), "%s", o);
+    }
     m[std::strcspn(m, " \t;")] = 0;
     int w = 0, h = 0;
     if (!_stricmp(m, "Game") || !std::strcmp(m, "0")) {
