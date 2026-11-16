@@ -24,11 +24,11 @@
 // leaves out the DirectInput copies Windows makes of the same pads (their HID
 // path has "IG_"). The pads are DirectInput devices implemented here:
 //   X, Y   left stick          Rx, Ry  right stick
-//   Z      right trigger       Rz      left trigger
-//          Each trigger rests at the centre of its axis and moves one way
-//          (the game binds actions to half axes and finds a control by its
-//          movement from the centre). Z moves down, so after the game's own
-//          inversion pressing RT raises it.
+//   Z      right trigger (sent inverted, so after the game's own inversion it
+//          reads 0 at rest)    Rz      left trigger
+//          The game's Accelerate uses the whole Z axis. Remapping an action
+//          by pressing a trigger finds its button copy (XInputTriggerButtons),
+//          not the axis: the game looks for movement from the centre.
 //   POV 1  d-pad
 //   buttons 1-10 A B X Y LB RB Back Start LS RS (XInputTriggerButtons: 11 LT, 12 RT)
 // Force feedback effects become rumble: constant and ramp forces and slow
@@ -822,7 +822,7 @@ class Pad final : public IDirectInputDevice7A {
     LONG v[kObjects];
     v[0] = AxisCentered(0, lx);
     v[1] = AxisCentered(1, -ly);
-    v[2] = AxisTrigger(2, rt, true);  // the game reads Z as max - Z: RT raises it
+    v[2] = AxisTrigger(2, rt, true);  // the game reads Z as max - Z
     v[3] = AxisCentered(3, rx);
     v[4] = AxisCentered(4, -ry);
     v[5] = AxisTrigger(5, lt, false);
@@ -887,16 +887,13 @@ class Pad final : public IDirectInputDevice7A {
     return min_[axis] + static_cast<LONG>(std::lround(u * static_cast<double>(max_[axis] - min_[axis])));
   }
 
-  // A trigger rests at the centre of its axis and moves one way: the game
-  // binds each action to one half of an axis and detects a control by its
-  // movement away from the centre (xinput-3: a trigger resting at one end
-  // could not be bound, and its button copy was picked instead).
-  LONG AxisTrigger(int axis, float t, bool toward_min) const {
+  // A trigger reads from one end of its axis (rest) to the other. The
+  // game's Accelerate uses the whole Z axis (xinput-4 rested triggers at the
+  // centre: half or more throttle with nothing pressed).
+  LONG AxisTrigger(int axis, float t, bool inverted) const {
     const float s = Shape(axis, t);
-    const double half = static_cast<double>(max_[axis] - min_[axis]) / 2.0;
-    const LONG mid = min_[axis] + static_cast<LONG>(std::lround(half));
-    const LONG span = static_cast<LONG>(std::lround(s * half));
-    return toward_min ? mid - span : mid + span;
+    const LONG span = static_cast<LONG>(std::lround(s * static_cast<double>(max_[axis] - min_[axis])));
+    return inverted ? max_[axis] - span : min_[axis] + span;
   }
 
   static DWORD Pov(WORD b) {
