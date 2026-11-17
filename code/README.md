@@ -675,6 +675,78 @@ InputTiming=1
 ; after alt-tab.
 AltTabFix=1
 
+; XInput: 1 = Xbox (XInput) controllers connected when the game starts are
+; listed under their own names with analog sticks (left stick X/Y, right
+; stick X/Y Rotation), the right trigger on the Z axis and the left trigger
+;
+; on the Z Rotation axis (each zero when let go), the d-pad as the hat, buttons 1-10 A B X Y LB RB Back
+; Start and the stick clicks, and the game's force feedback as rumble
+; (default). Windows' own DirectInput copies of these controllers are left
+; out of the list. 0 = the original: Windows' copy, which the game treats as
+; a gamepad (sticks act as on/off presses), with both triggers on one axis
+; and no rumble.
+XInput=1
+
+; XInputRumble: rumble strength in percent, 0-200. 0 = no rumble, and the
+; controller doesn't offer force feedback to the game. Default 100.
+XInputRumble=100
+
+; XInputRumbleForces: 1 = the game's steady stick forces rumble too (it
+; pushes a force feedback joystick all the time while riding, which on a pad
+; is a constant buzz). 0 = only bumps, landings and crashes rumble (default);
+; short bumps are lengthened so the pad's motors can spin up.
+XInputRumbleForces=0
+
+; XInputRumbleThreshold: with XInputRumbleForces=0, how sudden a change in
+; the game's stick force has to be to rumble, in percent of full force, 1-100.
+; Lower = more bumps felt (too low becomes a constant rumble). Default 10.
+XInputRumbleThreshold=10
+
+; QuarryRumbleThreshold, BajaRumbleThreshold, NationalsRumbleThreshold,
+; SupercrossRumbleThreshold, TagRumbleThreshold, EnduroRumbleThreshold:
+; XInputRumbleThreshold for one event type, 1-100; 0 = use
+; XInputRumbleThreshold. Nationals and Supercross tracks are full of ridges
+; and whoops, so they default to 20.
+QuarryRumbleThreshold=0
+BajaRumbleThreshold=0
+NationalsRumbleThreshold=20
+SupercrossRumbleThreshold=20
+TagRumbleThreshold=0
+EnduroRumbleThreshold=0
+
+; XInputRumbleMinMs: shortest rumble in milliseconds, 0-1000. Each bump is
+; held at full strength this long before it fades (bumps fade over 0.4 s,
+; crashes over 0.7 s). Default 150.
+XInputRumbleMinMs=150
+
+; XInputTriggerButtons: 1 = the triggers also work as buttons 11 (LT) and
+; 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the Z axis,
+; Brake on button 11) works as it is (default). 0 = axes only. The game can't
+; bind a trigger's axis by pressing it while remapping (it looks for movement
+; from the centre); use the preset for the right trigger.
+XInputTriggerButtons=1
+
+; XInputDeadzone: how far either stick has to move from the centre before it
+; counts, in percent, 0-50. Default 15.
+XInputDeadzone=15
+
+; XInputSteerCurve: steering response of the left stick, 33-300. The game
+; already turns a joystick's steering into a curve (gentle near the centre,
+; steep near the edge). 33 = the bike follows the stick in a straight line
+; (default); 100 = the game's own curve; higher is softer near the centre and
+; steeper at the edge.
+XInputSteerCurve=33
+
+; XInputSteerSmooth: how long, in milliseconds, the steering takes to catch
+; up with the left stick, 0-500. Takes the edge off small thumb movements;
+; too much feels sluggish. 0 = off. Default 60.
+XInputSteerSmooth=60
+
+; KeepControlPreset: 1 = the control preset you chose (Options > Controls)
+; is kept between runs as long as the same controller is used (default). The
+; game itself only keeps it when its "use last controller" setting is on.
+KeepControlPreset=1
+
 ; PreciseTimer: 1 = the game's frame time is measured with the precise
 ; QueryPerformanceCounter instead of whole milliseconds (default). Only used
 ; with SimRate=0; with SimRate the precise timer is always used.
@@ -941,6 +1013,11 @@ TextureLog=0
 ; gets: events given out early or held for a later step, held taps, joystick
 ; samples, plus a summary every 10 s. Default 0.
 InputLog=0
+
+; XInputLog: with XInput, the game's calls to the Xbox controllers
+; (properties, force feedback effects), button presses, and every 10 s a
+; summary per controller (axes, events, rumble). Default 0.
+XInputLog=0
 
 ; SortLog: the game's sorts per calling code every 10 s (count, largest,
 ; time). Sorts over 2 ms are always logged. Default 0.

@@ -98,6 +98,18 @@ struct Config {
   bool input_timing = true;   // InputTiming: race steps get the input of their own time slice; taps held one step (input_timing.cpp)
   bool alt_tab_fix = true;    // AltTabFix: keys let go while alt-tabbed are released; lost devices acquired again (input_timing.cpp)
   bool input_log = false;     // InputLog: log input timing (events per step, held taps, joystick samples)
+  bool xinput = true;         // XInput: Xbox controllers as analog DirectInput joysticks with rumble (xinput_pad.cpp)
+  int xinput_rumble = 100;    // XInputRumble: rumble strength in percent (0 = off, no force feedback offered)
+  int xinput_deadzone = 15;   // XInputDeadzone: stick dead zone in percent of the stick's travel
+  int xinput_steer_curve = 33;    // XInputSteerCurve: left stick X exponent in percent (game cubes it on top)
+  int xinput_steer_smooth = 60;    // XInputSteerSmooth: ms the steering takes to ease toward the stick (0 = off)
+  bool keep_control_preset = true;  // KeepControlPreset: keep the chosen control preset between runs
+  int xinput_rumble_min_ms = 150;   // XInputRumbleMinMs: shortest rumble, held at full strength before fading
+  int xinput_rumble_threshold = 10;  // XInputRumbleThreshold: % jump in the game's stick force that rumbles
+  int xinput_rumble_threshold_event[6] = {};  // QuarryRumbleThreshold..EnduroRumbleThreshold (event number order), 0 = XInputRumbleThreshold
+  bool xinput_rumble_forces = false;  // XInputRumbleForces: the game's steady stick forces rumble too
+  bool xinput_trigger_buttons = true;   // XInputTriggerButtons: triggers also as buttons 11 (LT) and 12 (RT)
+  bool xinput_log = false;    // XInputLog: log controller calls, buttons, effects and a summary every 10 s
   int sim_rate = 30;          // SimRate: race simulation steps per second, drawing stays per frame (0 = one step per frame)
   int ai_accel[3] = {80, 130, 150};      // AiAccelEasy/Normal/Hard: computer rider acceleration, percent of the base curve (fixes_ai.cpp)
   int ai_top_speed[3] = {90, 100, 100};  // AiTopSpeedEasy/Normal/Hard: computer rider top speed, percent

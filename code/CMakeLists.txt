@@ -42,6 +42,7 @@ add_library(MCM2MaX SHARED
   src/framerate.cpp
   src/freecam.cpp
   src/input_timing.cpp
+  src/xinput_pad.cpp
   src/prof.cpp
   src/simd.cpp
   src/simd_plain.cpp

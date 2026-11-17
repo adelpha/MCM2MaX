@@ -282,6 +282,39 @@ void LoadConfig() {
   g_config.input_timing = GetPrivateProfileIntA(sec, "InputTiming", 1, ini) != 0;
   g_config.alt_tab_fix = GetPrivateProfileIntA(sec, "AltTabFix", 1, ini) != 0;
   g_config.input_log = GetPrivateProfileIntA(sec, "InputLog", 0, ini) != 0;
+  g_config.xinput = GetPrivateProfileIntA(sec, "XInput", 1, ini) != 0;
+  g_config.xinput_rumble = GetPrivateProfileIntA(sec, "XInputRumble", 100, ini);
+  if (g_config.xinput_rumble < 0) g_config.xinput_rumble = 0;
+  if (g_config.xinput_rumble > 200) g_config.xinput_rumble = 200;
+  g_config.xinput_deadzone = GetPrivateProfileIntA(sec, "XInputDeadzone", 15, ini);
+  if (g_config.xinput_deadzone < 0) g_config.xinput_deadzone = 0;
+  if (g_config.xinput_deadzone > 50) g_config.xinput_deadzone = 50;
+  g_config.xinput_steer_curve = GetPrivateProfileIntA(sec, "XInputSteerCurve", 33, ini);
+  if (g_config.xinput_steer_curve < 33) g_config.xinput_steer_curve = 33;
+  if (g_config.xinput_steer_curve > 300) g_config.xinput_steer_curve = 300;
+  g_config.xinput_steer_smooth = GetPrivateProfileIntA(sec, "XInputSteerSmooth", 60, ini);
+  if (g_config.xinput_steer_smooth < 0) g_config.xinput_steer_smooth = 0;
+  if (g_config.xinput_steer_smooth > 500) g_config.xinput_steer_smooth = 500;
+  g_config.keep_control_preset = GetPrivateProfileIntA(sec, "KeepControlPreset", 1, ini) != 0;
+  g_config.xinput_rumble_min_ms = GetPrivateProfileIntA(sec, "XInputRumbleMinMs", 150, ini);
+  if (g_config.xinput_rumble_min_ms < 0) g_config.xinput_rumble_min_ms = 0;
+  if (g_config.xinput_rumble_min_ms > 1000) g_config.xinput_rumble_min_ms = 1000;
+  g_config.xinput_rumble_threshold = GetPrivateProfileIntA(sec, "XInputRumbleThreshold", 10, ini);
+  if (g_config.xinput_rumble_threshold < 1) g_config.xinput_rumble_threshold = 1;
+  if (g_config.xinput_rumble_threshold > 100) g_config.xinput_rumble_threshold = 100;
+  {
+    // Event numbers as in game+0x2d78: 0 Quarry, 1 Baja, 2 Nationals, 3 Supercross, 4 Moto-Tag, 5 Enduro.
+    const char* keys[6] = {"QuarryRumbleThreshold", "BajaRumbleThreshold", "NationalsRumbleThreshold",
+                           "SupercrossRumbleThreshold", "TagRumbleThreshold", "EnduroRumbleThreshold"};
+    const int defs[6] = {0, 0, 20, 20, 0, 0};
+    for (int e = 0; e < 6; ++e) {
+      int v = GetPrivateProfileIntA(sec, keys[e], defs[e], ini);
+      g_config.xinput_rumble_threshold_event[e] = v < 0 ? 0 : v > 100 ? 100 : v;
+    }
+  }
+  g_config.xinput_rumble_forces = GetPrivateProfileIntA(sec, "XInputRumbleForces", 0, ini) != 0;
+  g_config.xinput_trigger_buttons = GetPrivateProfileIntA(sec, "XInputTriggerButtons", 1, ini) != 0;
+  g_config.xinput_log = GetPrivateProfileIntA(sec, "XInputLog", 0, ini) != 0;
   g_config.sound_log = GetPrivateProfileIntA(sec, "SoundLog", 0, ini) != 0;
   {
     // Event numbers as in game+0x2d74/0x2d78: 0 Quarry, 1 Baja, 2 Nationals, 3 Supercross, 4 Moto-Tag, 5 Enduro.
