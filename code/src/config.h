@@ -103,6 +103,9 @@ struct Config {
   int xinput_deadzone = 15;   // XInputDeadzone: stick dead zone in percent of the stick's travel
   int xinput_steer_curve = 33;    // XInputSteerCurve: left stick X exponent in percent (game cubes it on top)
   int xinput_steer_smooth = 60;    // XInputSteerSmooth: ms the steering takes to ease toward the stick (0 = off)
+  bool controller_hub = true;     // ControllerHub: all gamepads (SDL3) as one game controller, last touched wins (pad_hub.cpp)
+  bool controller_picker = false; // ControllerPicker: show the game's startup "choose a controller" box
+  char disabled_controllers[512] = {};  // DisabledControllers: VID:PID or name parts, comma separated, the hub ignores
   bool keep_control_preset = true;  // KeepControlPreset: keep the chosen control preset between runs
   int xinput_rumble_min_ms = 150;   // XInputRumbleMinMs: shortest rumble, held at full strength before fading
   int xinput_rumble_threshold = 10;  // XInputRumbleThreshold: % jump in the game's stick force that rumbles

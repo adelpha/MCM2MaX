@@ -295,6 +295,10 @@ void LoadConfig() {
   g_config.xinput_steer_smooth = GetPrivateProfileIntA(sec, "XInputSteerSmooth", 60, ini);
   if (g_config.xinput_steer_smooth < 0) g_config.xinput_steer_smooth = 0;
   if (g_config.xinput_steer_smooth > 500) g_config.xinput_steer_smooth = 500;
+  g_config.controller_hub = GetPrivateProfileIntA(sec, "ControllerHub", 1, ini) != 0;
+  g_config.controller_picker = GetPrivateProfileIntA(sec, "ControllerPicker", 0, ini) != 0;
+  GetPrivateProfileStringA(sec, "DisabledControllers", "", g_config.disabled_controllers,
+                           sizeof(g_config.disabled_controllers), ini);
   g_config.keep_control_preset = GetPrivateProfileIntA(sec, "KeepControlPreset", 1, ini) != 0;
   g_config.xinput_rumble_min_ms = GetPrivateProfileIntA(sec, "XInputRumbleMinMs", 150, ini);
   if (g_config.xinput_rumble_min_ms < 0) g_config.xinput_rumble_min_ms = 0;

@@ -310,7 +310,7 @@ are welcome.
    | `UI\MAINMENU\01_MAIN\BackGround_01.png` | the main menu picture shown over the waving flag (`MenuFlag`); a new file, none of the game's are replaced |
    | `README.txt` | short player notes |
    | `README.md` | this document |
-   | `licenses\` | FFmpeg and font licences |
+   | `licenses\` | FFmpeg, SDL, Wuffs and font licences |
 
 3. Double-click `Mcm2.exe`.
 
@@ -619,6 +619,9 @@ The file has three parts:
 
 | Setting | Default | Values | Description |
 |---|---|---|---|
+| `ControllerHub` | `1` | `0`, `1` | Every gamepad (Xbox, PlayStation, Switch Pro and other pads SDL knows) drives one game controller, "Gamepad (any controller)", laid out as described under `XInput`. The pad you touched last drives it, and pads can be plugged in or out at any time. The Controls screen names buttons after the driving pad (A, Cross, LB, L1...). Windows' DirectInput copies of these pads are hidden from the game; wheels and other joysticks stay as they were. The `XInput*` settings apply to it too. `0` = one device per Xbox controller (`XInput=1`), or none. |
+| `ControllerPicker` | `0` | `0`, `1` | `1` = the game's startup box asking which controller to use (shown when it sees two or more and doesn't recognise the last one). `0` = no box: the last one used, else the first listed. |
+| `DisabledControllers` | empty | list | Pads the controller hub ignores, comma separated, by USB id (`045E:0B12`) or part of the name (`Razer`). The log lists each pad's name and id. |
 | `XInput` | `1` | `0`, `1` | Xbox (XInput) controllers connected when the game starts are listed under their own names (such as "Controller (Xbox One For Windows) (XInput 1)"), in place of the copies Windows makes of them for older games. The sticks are analog: left stick X and Y, right stick X Rotation and Y Rotation. The right trigger is the Z axis and the left trigger the Z Rotation axis, each reading zero when let go. The "Dual Analog Game Pad" preset puts Accelerate on the right trigger and Brake on the left trigger. The d-pad is the point-of-view hat, and A B X Y LB RB Back Start and the stick clicks are buttons 1 to 10. The game's force feedback becomes rumble. A controller unplugged mid-game reads as centred and works again when plugged back in. `0` = the original: Windows' DirectInput copy, which the game treats as a gamepad (sticks act as on/off presses), with both triggers on one axis and no rumble. Needs Windows Vista or later (or the DirectX XInput DLL). |
 | `XInputRumble` | `100` | 0-200, percent | Rumble strength. `0` = no rumble, and the controller doesn't offer force feedback to the game. |
 | `XInputTriggerButtons` | `1` | `0`, `1` | The triggers also work as buttons 11 (LT) and 12 (RT), so the "Dual Analog Game Pad" preset (Accelerate on the right trigger's axis, Brake on button 11) works as it is. `0` = axes only. The game can't bind a trigger's axis by pressing it while remapping (it looks for movement from the centre); use the preset for the right trigger. |

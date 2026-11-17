@@ -675,6 +675,26 @@ InputTiming=1
 ; after alt-tab.
 AltTabFix=1
 
+; ControllerHub: 1 = every gamepad (Xbox, PlayStation, Switch Pro and other
+; pads SDL knows) drives one game controller, "Gamepad (any controller)",
+; with the same layout as XInput below; the pad you touched last drives, and
+; pads can be plugged in or out at any time (default). The Controls screen
+; names the buttons after the driving pad (A, Cross, LB, L1...). Windows'
+; DirectInput copies of these pads are left out of the game's list; wheels
+; and other joysticks stay as they were. 0 = one device per Xbox controller
+; (XInput=1), or none. The XInput* settings below apply to the hub too.
+ControllerHub=1
+
+; ControllerPicker: 1 = the game's startup box asking which controller to
+; use, shown when it sees two or more and doesn't recognise the last one.
+; 0 = no box: the last one used, else the first listed (default).
+ControllerPicker=0
+
+; DisabledControllers: pads the controller hub ignores, comma separated, by
+; USB id (045E:0B12) or part of the name ("Razer"). The log lists each pad's
+; name and id. Default: none.
+DisabledControllers=
+
 ; XInput: 1 = Xbox (XInput) controllers connected when the game starts are
 ; listed under their own names with analog sticks (left stick X/Y, right
 ; stick X/Y Rotation), the right trigger on the Z axis and the left trigger

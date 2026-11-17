@@ -48,8 +48,17 @@ jobs:
       - name: Build FFmpeg (Indeo 5 decoder only)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: tools/build-ffmpeg.sh ffmpeg-work
+      - name: Cache SDL3
+        id: sdl3-cache
+        uses: actions/cache@v4
+        with:
+          path: sdl3-work/install
+          key: sdl3-${{ hashFiles('tools/build-sdl3.sh', 'code/toolchain-mingw32.cmake') }}
+      - name: Build SDL3 (controllers only)
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        run: tools/build-sdl3.sh sdl3-work
       - name: Configure
-        run: cmake -S code -B build -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/code/toolchain-mingw32.cmake -DCMAKE_BUILD_TYPE=Release -DMCM2MaX_FFMPEG=$GITHUB_WORKSPACE/ffmpeg-work/install
+        run: cmake -S code -B build -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/code/toolchain-mingw32.cmake -DCMAKE_BUILD_TYPE=Release -DMCM2MaX_FFMPEG=$GITHUB_WORKSPACE/ffmpeg-work/install -DMCM2MaX_SDL3=$GITHUB_WORKSPACE/sdl3-work/install
       - name: Build
         run: cmake --build build
       - name: Check Windows XP imports

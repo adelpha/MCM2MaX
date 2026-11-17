@@ -56,6 +56,7 @@
 #include <vector>
 
 #include "config.h"
+#include "pad_hub.h"
 #include "patch.h"
 
 namespace {
@@ -105,6 +106,15 @@ std::string GuidText(REFGUID g) {
                 g.Data4[7]);
   return b;
 }
+
+// ControllerHub: one device fed by every gamepad (pad_hub.cpp, SDL3), in
+// place of one device per XInput slot.
+constexpr int kHubSlot = 15;
+bool g_hub = false;
+HANDLE g_hub_ready = nullptr;  // set by the sampling thread once SDL is up (or failed)
+bool g_hub_ok = false;
+int g_passed_joysticks = 0;    // other joysticks the game was shown (wheels etc.)
+bool g_hub_acquired = false;   // the game acquired the hub device: it is the one in use
 
 // ---------------------------------------------------------------- XInput
 using XGetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_STATE*);
@@ -216,7 +226,7 @@ const ObjDesc kObj[kObjects] = {
     {&kGUID_Button, DIDFT_PSHBUTTON, 11, 59, "Button 12 (RT)"},
 };
 
-bool RumbleOn() { return g_set_state && g_rumble_pct > 0; }
+bool RumbleOn() { return (g_hub || g_set_state) && g_rumble_pct > 0; }
 
 bool g_trigger_buttons = true;   // XInputTriggerButtons: LT/RT also as buttons 11/12
 bool ObjPresent(int i) { return g_trigger_buttons || i < kObjButton0 + 10; }
@@ -516,6 +526,7 @@ class Pad final : public IDirectInputDevice7A {
     if (!format_set_) return DIERR_INVALIDPARAM;
     if (acquired_) return S_FALSE;
     acquired_ = true;
+    if (slot_ == kHubSlot) g_hub_acquired = true;
     Sample(false);  // baseline: no events for what is already held
     patch::Log("xinput: pad %d acquired (%s, buffer %lu)", slot_ + 1, Connected() ? "connected" : "not connected",
                buffer_size_);
@@ -526,6 +537,7 @@ class Pad final : public IDirectInputDevice7A {
     Lock lock;
     if (!acquired_) return S_FALSE;
     acquired_ = false;
+    if (slot_ == kHubSlot) g_hub_acquired = false;
     StopAll();
     SetMotors(0, 0);
     if (g_log) patch::Log("xinput: pad %d unacquired", slot_ + 1);
@@ -764,7 +776,10 @@ class Pad final : public IDirectInputDevice7A {
     d->guidInstance = PadInstanceGuid(slot);
     d->guidProduct = kPadProduct;
     d->dwDevType = DevType();
-    if (!g_slot_name[slot].empty()) {
+    if (slot == kHubSlot) {
+      std::snprintf(d->tszInstanceName, sizeof d->tszInstanceName, "Gamepad (any controller)");
+      std::snprintf(d->tszProductName, sizeof d->tszProductName, "MCM2MaX controller hub");
+    } else if (!g_slot_name[slot].empty()) {
       std::snprintf(d->tszInstanceName, sizeof d->tszInstanceName, "%s", g_slot_name[slot].c_str());
       std::snprintf(d->tszProductName, sizeof d->tszProductName, "%s", g_slot_name[slot].c_str());
     } else {
@@ -845,11 +860,31 @@ class Pad final : public IDirectInputDevice7A {
   void Sample(bool events) {
     XINPUT_STATE st;
     std::memset(&st, 0, sizeof st);
-    const DWORD r = g_get_state ? g_get_state(static_cast<DWORD>(slot_), &st) : ERROR_DEVICE_NOT_CONNECTED;
+    DWORD r = ERROR_DEVICE_NOT_CONNECTED;
+    if (slot_ == kHubSlot) {
+      hub::PadState h;
+      DWORD packet = 0;
+      if (hub::Read(&h, &packet)) {
+        r = ERROR_SUCCESS;
+        st.dwPacketNumber = packet;
+        st.Gamepad.sThumbLX = h.lx;
+        st.Gamepad.sThumbLY = h.ly;
+        st.Gamepad.sThumbRX = h.rx;
+        st.Gamepad.sThumbRY = h.ry;
+        st.Gamepad.bLeftTrigger = h.lt;
+        st.Gamepad.bRightTrigger = h.rt;
+        st.Gamepad.wButtons = h.buttons;
+      }
+    } else if (g_get_state) {
+      r = g_get_state(static_cast<DWORD>(slot_), &st);
+    }
     const bool now_connected = r == ERROR_SUCCESS;
     if (now_connected != Connected()) {
       g_connected_mask = now_connected ? (g_connected_mask | (1u << slot_)) : (g_connected_mask & ~(1u << slot_));
-      patch::Log("xinput: controller %d %s", slot_ + 1, now_connected ? "connected" : "disconnected");
+      if (slot_ == kHubSlot)
+        patch::Log("xinput: controller hub %s", now_connected ? "has a driving controller" : "has no controller");
+      else
+        patch::Log("xinput: controller %d %s", slot_ + 1, now_connected ? "connected" : "disconnected");
     }
     if (!now_connected) std::memset(&st, 0, sizeof st);  // neutral while unplugged
     const bool same = now_connected && st.dwPacketNumber == packet_ && have_packet_;
@@ -972,12 +1007,16 @@ class Pad final : public IDirectInputDevice7A {
   }
 
   void SetMotors(WORD low, WORD high) {
-    if (!g_set_state) return;
+    if (slot_ != kHubSlot && !g_set_state) return;
     if (low == motor_low_ && high == motor_high_) return;
     motor_low_ = low;
     motor_high_ = high;
-    XINPUT_VIBRATION v = {low, high};
-    g_set_state(static_cast<DWORD>(slot_), &v);
+    if (slot_ == kHubSlot) {
+      hub::Rumble(low, high);
+    } else {
+      XINPUT_VIBRATION v = {low, high};
+      g_set_state(static_cast<DWORD>(slot_), &v);
+    }
     if (low > stats_peak_low_) stats_peak_low_ = low;
     if (high > stats_peak_high_) stats_peak_high_ = high;
     ++stats_motor_changes_;
@@ -1239,8 +1278,18 @@ void Effect::Strength(double now_us, float* low, float* high) {
 // ---------------------------------------------------------------- sampler thread
 DWORD WINAPI SampleThread(void*) {
   DWORD last_summary = GetTickCount();
+  if (g_hub) {
+    // SDL lives on this thread: started, pumped and read only here.
+    g_hub_ok = hub::Init(g_log, GetConfig().disabled_controllers);
+    SetEvent(g_hub_ready);
+    if (!g_hub_ok) {
+      patch::Log("xinput: controller hub unavailable, sampling thread ends (XInput slots are used instead)");
+      return 0;
+    }
+  }
   for (;;) {
     bool active = false;
+    if (g_hub) hub::Pump();
     {
       Lock lock;
       const double now = NowUs();
@@ -1253,9 +1302,10 @@ DWORD WINAPI SampleThread(void*) {
       if (g_log && GetTickCount() - last_summary >= 10000) {
         last_summary = GetTickCount();
         for (Pad* p : g_pads) p->LogSummary();
+        if (g_hub) hub::LogSummary();
       }
     }
-    Sleep(active ? 4 : 50);
+    Sleep(active || (g_hub && hub::Count() > 0) ? 4 : 50);
   }
 }
 
@@ -1360,6 +1410,14 @@ bool IsXInputCopy(const DIDEVICEINSTANCEA* d, const std::set<VidPid>& hid) {
   return hid.count(vp) != 0;
 }
 
+// Gamepads the hub reads (any kind SDL maps), by VID/PID: the game's own
+// DirectInput copies of them are hidden too.
+std::set<VidPid> HubGamepads() {
+  std::set<VidPid> out;
+  for (const auto& id : hub::GamepadIds()) out.insert(VidPid{id.first, id.second});
+  return out;
+}
+
 // ---------------------------------------------------------------- IDirectInput7A wrapper
 class DirectInputWrap final : public IDirectInput7A {
  public:
@@ -1400,7 +1458,19 @@ class DirectInputWrap final : public IDirectInput7A {
       hid_ = XInputHidDevices();
       hid_scanned_ = true;
     }
-    if (want_joy && (!ff_only || RumbleOn())) {
+    if (g_hub && want_joy && (!ff_only || RumbleOn())) {
+      // One device for every gamepad, listed first (and so picked when the
+      // game chooses for itself), connected or not: pads plugged in later
+      // drive it too.
+      for (const VidPid& vp : HubGamepads()) hid_.insert(vp);
+      DIDEVICEINSTANCEA d;
+      Pad::FillInstance(kHubSlot, &d);
+      ++listed;
+      patch::Log("xinput: EnumDevices: listing \"%s\" %s (%d gamepad(s) now: %s)", d.tszInstanceName,
+                 GuidText(d.guidInstance).c_str(), hub::Count(),
+                 hub::ActiveName().empty() ? "none" : hub::ActiveName().c_str());
+      if (cb(&d, ref) == DIENUM_STOP) return DI_OK;
+    } else if (want_joy && (!ff_only || RumbleOn())) {
       for (int slot = 0; slot < XUSER_MAX_COUNT; ++slot) {
         XINPUT_STATE st;
         if (g_get_state(static_cast<DWORD>(slot), &st) != ERROR_SUCCESS) continue;
@@ -1418,12 +1488,14 @@ class DirectInputWrap final : public IDirectInput7A {
       if (!listed) patch::Log("xinput: EnumDevices: no XInput controller connected (connect it before starting the game)");
     }
     Ctx ctx = {cb, ref, &hid_, false};
+    if (want_joy) g_passed_joysticks = 0;
     return real_->EnumDevices(type, &Filter, &ctx, flags);
   }
 
   STDMETHOD(GetDeviceStatus)(REFGUID guid) override {
     const int slot = OurSlot(guid);
     if (slot < 0) return real_->GetDeviceStatus(guid);
+    if (slot == kHubSlot) return DI_OK;
     XINPUT_STATE st;
     return g_get_state(static_cast<DWORD>(slot), &st) == ERROR_SUCCESS ? DI_OK : DI_NOTATTACHED;
   }
@@ -1447,15 +1519,19 @@ class DirectInputWrap final : public IDirectInput7A {
   static BOOL CALLBACK Filter(LPCDIDEVICEINSTANCEA d, LPVOID p) {
     auto* ctx = static_cast<Ctx*>(p);
     if (d && IsXInputCopy(d, *ctx->hid)) {
-      patch::Log("xinput: EnumDevices: hiding Windows' DirectInput copy \"%s\" (the XInput controller is listed instead)",
-                 d->tszInstanceName);
+      patch::Log("xinput: EnumDevices: hiding Windows' DirectInput copy \"%s\" (%s)", d->tszInstanceName,
+                 g_hub ? "it drives the controller hub instead" : "the XInput controller is listed instead");
       return DIENUM_CONTINUE;
     }
-    if (d) patch::Log("xinput: EnumDevices: passing \"%s\" (type 0x%lx)", d->tszInstanceName, d->dwDevType);
+    if (d) {
+      patch::Log("xinput: EnumDevices: passing \"%s\" (type 0x%lx)", d->tszInstanceName, d->dwDevType);
+      if (GET_DIDEVICE_TYPE(d->dwDevType) == DIDEVTYPE_JOYSTICK) ++g_passed_joysticks;
+    }
     return ctx->cb(d, ctx->ref);
   }
 
   static int OurSlot(REFGUID g) {
+    if (g_hub && Same(g, PadInstanceGuid(kHubSlot))) return kHubSlot;
     for (int s = 0; s < XUSER_MAX_COUNT; ++s)
       if (Same(g, PadInstanceGuid(s))) return s;
     return -1;
@@ -1468,8 +1544,12 @@ class DirectInputWrap final : public IDirectInput7A {
     auto* pad = new Pad(slot);
     HRESULT hr = pad->QueryInterface(iid, out);
     pad->Release();
-    patch::Log("xinput: created Xbox Controller %d (%s) hr=0x%08lx", slot + 1, GuidText(iid).c_str(),
-               static_cast<unsigned long>(hr));
+    if (slot == kHubSlot)
+      patch::Log("xinput: created the controller hub device (%s) hr=0x%08lx", GuidText(iid).c_str(),
+                 static_cast<unsigned long>(hr));
+    else
+      patch::Log("xinput: created Xbox Controller %d (%s) hr=0x%08lx", slot + 1, GuidText(iid).c_str(),
+                 static_cast<unsigned long>(hr));
     if (SUCCEEDED(hr)) StartThread();
     return hr;
   }
@@ -1491,10 +1571,81 @@ HRESULT WINAPI MyDirectInputCreateEx(HINSTANCE inst, DWORD version, REFIID iid, 
     patch::Log("xinput: DirectInputCreateEx asked for %s, not wrapped", GuidText(iid).c_str());
     return hr;
   }
-  if (!LoadXInput()) return hr;
+  if (g_hub) {
+    // Start SDL on the sampling thread and wait for its first look at the
+    // pads, so EnumDevices can hide their DirectInput copies.
+    if (!g_hub_ready) {
+      g_hub_ready = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+      StartThread();
+      if (WaitForSingleObject(g_hub_ready, 10000) != WAIT_OBJECT_0) {
+        patch::Log("xinput: controller hub still starting after 10 s, carrying on");
+      } else if (!g_hub_ok) {
+        // SDL failed; the thread has ended. XInput slots instead (XInput=1).
+        g_hub = false;
+        WaitForSingleObject(g_thread, 1000);
+        CloseHandle(g_thread);
+        g_thread = nullptr;
+        if (!GetConfig().xinput) return hr;
+      }
+    }
+  }
+  if (!g_hub && !LoadXInput()) return hr;
   *out = static_cast<IDirectInput7A*>(new DirectInputWrap(static_cast<IDirectInput7A*>(*out)));
-  patch::Log("xinput: DirectInput wrapped: XInput controllers are listed as joysticks");
+  patch::Log(g_hub ? "xinput: DirectInput wrapped: every gamepad drives one joystick (controller hub)"
+                   : "xinput: DirectInput wrapped: XInput controllers are listed as joysticks");
   return hr;
+}
+
+// ---------------------------------------------------------------- button names
+// The Controls screen labels joystick bindings with 0x44a310(kind, index,
+// out[128]) (stdcall): kind 2 = joystick, index >= 0 = "Joy Button n+1",
+// -3/-5/-7/-9/-11/-13 = "Joy X/Y/Z/RX/RY/RZ Axis". While the hub is the
+// game's joystick, those become the driving pad's own names.
+using LabelFn = int(__stdcall*)(int kind, int index, char* out);
+constexpr uintptr_t kLabel = 0x44a310;
+
+bool HubInUse() { return g_hub && (g_hub_acquired || g_passed_joysticks == 0); }
+
+const char* ButtonName(hub::Family f, int b) {
+  static const char* const kXboxNames[12] = {"A", "B", "X", "Y", "LB", "RB", "Back", "Start",
+                                             "Left Stick Press", "Right Stick Press", "LT", "RT"};
+  static const char* const kPsNames[12] = {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "Share", "Options",
+                                           "L3", "R3", "L2", "R2"};
+  // Switch buttons by position: the bottom one is B.
+  static const char* const kSwitchNames[12] = {"B", "A", "Y", "X", "L", "R", "-", "+",
+                                               "Left Stick Press", "Right Stick Press", "ZL", "ZR"};
+  if (b < 0 || b >= 12) return nullptr;
+  switch (f) {
+    case hub::kPlayStation: return kPsNames[b];
+    case hub::kNintendo: return kSwitchNames[b];
+    default: return kXboxNames[b];
+  }
+}
+
+int __stdcall Label(int kind, int index, char* out) {
+  if (kind == 2 && out && HubInUse()) {
+    const hub::Family f = hub::ActiveFamily();
+    const char* name = nullptr;
+    if (index >= 0) {
+      if (index < ButtonCount()) name = ButtonName(f, index);
+    } else {
+      switch (index) {
+        case -3: name = "Left Stick X"; break;
+        case -5: name = "Left Stick Y"; break;
+        case -7: name = ButtonName(f, 11); break;  // Z = right trigger
+        case -9: name = "Right Stick X"; break;
+        case -11: name = "Right Stick Y"; break;
+        case -13: name = ButtonName(f, 10); break;  // Rz = left trigger
+        default: break;
+      }
+    }
+    if (name) {
+      std::snprintf(out, 128, "%s", name);
+      if (g_log) patch::Log("xinput: label for joystick object %d: \"%s\"", index, out);
+      return 1;
+    }
+  }
+  return reinterpret_cast<LabelFn>(kLabel)(kind, index, out);
 }
 
 }  // namespace
@@ -1511,9 +1662,32 @@ void Apply() {
     const unsigned char orig[] = {0x74, 0x40}, repl[] = {0x90, 0x90};
     patch::Replace("input: keep control preset", 0x5286de, orig, sizeof orig, repl, sizeof repl);
   }
-  if (!c.xinput) {
-    patch::Log("xinput: XInput=0, Xbox controllers stay as Windows' DirectInput devices");
+  if (!c.controller_picker) {
+    // Startup "choose a controller" box (0x4d1d60): shown when the game sees
+    // two or more joysticks and doesn't recognise the remembered one. Take
+    // the path it uses for a single joystick: the remembered one if present,
+    // else the first listed (the controller hub, when on).
+    const unsigned char orig[] = {0x7d, 0x07}, repl[] = {0x90, 0x90};
+    patch::Replace("input: no controller picker", 0x4d23d4, orig, sizeof orig, repl, sizeof repl);
+  }
+  g_hub = c.controller_hub && hub::Available();
+  if (c.controller_hub && !hub::Available())
+    patch::Log("xinput: ControllerHub=1 but this build has no SDL3; using XInput slots");
+  if (!c.xinput && !g_hub) {
+    patch::Log("xinput: XInput=0 and ControllerHub=0, controllers stay as Windows' DirectInput devices");
     return;
+  }
+  if (g_hub) {
+    // Button names on the Controls screen (both callers of the label function).
+    const uintptr_t sites[] = {0x44a303, 0x4b9bc1};
+    for (uintptr_t a : sites) {
+      const unsigned char* b = reinterpret_cast<const unsigned char*>(a);
+      const intptr_t rel = *reinterpret_cast<const int32_t*>(a + 1);
+      if (b[0] == 0xE8 && static_cast<uintptr_t>(a + 5 + rel) == kLabel)
+        patch::Call(a, reinterpret_cast<const void*>(&Label), 5);
+      else
+        patch::Log("xinput: label call at 0x%x not as expected, button names unchanged there", static_cast<unsigned>(a));
+    }
   }
   InitializeCriticalSection(&g_cs);
   QueryPerformanceFrequency(&g_freq);
@@ -1534,9 +1708,11 @@ void Apply() {
   }
   g_create = reinterpret_cast<CreateExFn>(
       patch::HookIat(kDirectInputCreateEx, reinterpret_cast<void*>(&MyDirectInputCreateEx)));
-  patch::Log("xinput: XInput=1 (XInputRumble=%d XInputRumbleForces=%d XInputRumbleThreshold=%d XInputRumbleMinMs=%d XInputDeadzone=%d XInputSteerCurve=%d XInputSteerSmooth=%d KeepControlPreset=%d "
+  patch::Log("xinput: ControllerHub=%d ControllerPicker=%d DisabledControllers=\"%s\"", g_hub ? 1 : 0,
+             c.controller_picker ? 1 : 0, c.disabled_controllers);
+  patch::Log("xinput: XInput=%d (XInputRumble=%d XInputRumbleForces=%d XInputRumbleThreshold=%d XInputRumbleMinMs=%d XInputDeadzone=%d XInputSteerCurve=%d XInputSteerSmooth=%d KeepControlPreset=%d "
              "XInputTriggerButtons=%d XInputLog=%d)",
-             c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_rumble_threshold, c.xinput_rumble_min_ms, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
+             c.xinput ? 1 : 0, c.xinput_rumble, g_rumble_forces ? 1 : 0, c.xinput_rumble_threshold, c.xinput_rumble_min_ms, c.xinput_deadzone, c.xinput_steer_curve, c.xinput_steer_smooth, c.keep_control_preset ? 1 : 0,
              g_trigger_buttons ? 1 : 0, g_log ? 1 : 0);
   const auto& t = c.xinput_rumble_threshold_event;
   patch::Log("xinput: per-event RumbleThreshold (0 = XInputRumbleThreshold): Quarry=%d Baja=%d Nationals=%d Supercross=%d Tag=%d Enduro=%d",

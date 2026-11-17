@@ -92,6 +92,18 @@ else()
   target_sources(MCM2MaX PRIVATE src/video/indeo5_stub.cpp)
 endif()
 
+# Controllers (ControllerHub): a static input-only SDL3 (tools/build-sdl3.sh).
+# Without it ControllerHub is unavailable and XInput pads use xinput_pad.cpp alone.
+set(MCM2MaX_SDL3 "" CACHE PATH "SDL3 install prefix from tools/build-sdl3.sh")
+if(MCM2MaX_SDL3)
+  target_sources(MCM2MaX PRIVATE src/pad_hub.cpp)
+  target_compile_definitions(MCM2MaX PRIVATE MCM2MAX_SDL3=1)
+  target_include_directories(MCM2MaX PRIVATE "${MCM2MaX_SDL3}/include")
+  target_link_libraries(MCM2MaX PRIVATE "${MCM2MaX_SDL3}/lib/libSDL3.a" imm32 oleaut32 version uuid advapi32 setupapi)
+else()
+  target_sources(MCM2MaX PRIVATE src/pad_hub_stub.cpp)
+endif()
+
 set_target_properties(MCM2MaX PROPERTIES PREFIX "" OUTPUT_NAME "MCM2MaX")
 
 # d3d11.dll, dxgi.dll and d3d9.dll are loaded at run time (dd/backend*.cpp),
@@ -134,6 +146,11 @@ if(MCM2MaX_TESTS)
     target_include_directories(dd_smoke PRIVATE "${MCM2MaX_FFMPEG}/include")
     target_link_libraries(dd_smoke PRIVATE "${MCM2MaX_FFMPEG}/lib/libavcodec.a"
                                            "${MCM2MaX_FFMPEG}/lib/libavutil.a")
+  endif()
+  if(MCM2MaX_SDL3)
+    target_compile_definitions(dd_smoke PRIVATE MCM2MAX_SDL3=1)
+    target_include_directories(dd_smoke PRIVATE "${MCM2MaX_SDL3}/include")
+    target_link_libraries(dd_smoke PRIVATE "${MCM2MaX_SDL3}/lib/libSDL3.a" imm32 oleaut32 version uuid advapi32 setupapi)
   endif()
   target_link_libraries(dd_smoke PRIVATE dxguid gdi32 user32 ole32 winmm shell32 shlwapi)
   target_compile_definitions(dd_smoke PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
