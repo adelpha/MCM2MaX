@@ -408,6 +408,12 @@ MotionBlur=1
 ; 0 = the menus as they were. Default 1.
 MenuOptions=1
 
+; MenuHiRes3D: 1 = 3D in the menus (the bike and rider in the garage on the
+; Bike & Rider page) is drawn at the window's resolution instead of 640x480.
+; Needs the Direct3D 11 renderer and GpuText=1. 0 = drawn at 640x480 and
+; scaled up, as before. Default 1.
+MenuHiRes3D=1
+
 ; MenuFlag: 1 = a waving dark blue chequered flag behind the main menu, seen
 ; through the transparent parts of MenuBackground (fills the whole window,
 ; also the sides of a wide screen). Needs the MenuBackground picture and the

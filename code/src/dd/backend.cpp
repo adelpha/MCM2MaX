@@ -2,6 +2,7 @@
 #include "gputext.h"
 #include "menubg.h"
 #include "msaa.h"
+#include "hires3d.h"
 
 #include <d3dcompiler.h>
 #include <dxgi1_6.h>
@@ -128,6 +129,7 @@ void GpuTexture::Reset() {
   if (const void* n = Native()) {
     MsaaForget(n);
     GpuTextForget(n);
+    Hi3dForget(n);
   }
   SafeRelease(srv);
   SafeRelease(rtv);

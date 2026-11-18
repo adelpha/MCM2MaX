@@ -1071,6 +1071,42 @@ void GpuTextComposite(const GpuTexture& src, ID3D11RenderTargetView* dst, IDirec
   ++g_ts.composites;
 }
 
+bool GpuTextOverlaySize(UINT bw, UINT bh, UINT* ow, UINT* oh) {
+  if (!GpuTextActive() || !bw || !bh) return false;
+  FitSize(bw, bh, ow, oh);
+  return true;
+}
+
+bool GpuTextPut(const void* native, UINT bw, UINT bh, const GpuTexture& src, const RECT& r) {
+  if (!native || !src.srv) return false;
+  Overlay* o = EnsureOverlay(native, bw, bh);
+  if (!o) return false;
+  BlitParams p;
+  p.SetDst(o->tex);
+  p.dst_rect = ScaleRect(*o, r);
+  p.dst_rect.left = std::max<LONG>(p.dst_rect.left, 0);
+  p.dst_rect.top = std::max<LONG>(p.dst_rect.top, 0);
+  p.dst_rect.right = std::min<LONG>(p.dst_rect.right, static_cast<LONG>(o->tex.width));
+  p.dst_rect.bottom = std::min<LONG>(p.dst_rect.bottom, static_cast<LONG>(o->tex.height));
+  if (p.dst_rect.left >= p.dst_rect.right || p.dst_rect.top >= p.dst_rect.bottom) return false;
+  p.SetSrc(src);
+  if (src.width == o->tex.width && src.height == o->tex.height) {
+    p.src_rect = p.dst_rect;
+    p.linear = false;
+  } else {
+    // The window changed size since the source was drawn: scale.
+    const float fx = static_cast<float>(src.width) / bw, fy = static_cast<float>(src.height) / bh;
+    p.src_rect = {static_cast<LONG>(std::lround(r.left * fx)), static_cast<LONG>(std::lround(r.top * fy)),
+                  static_cast<LONG>(std::lround(r.right * fx)), static_cast<LONG>(std::lround(r.bottom * fy))};
+    p.linear = true;
+  }
+  p.opaque = true;
+  Blit(p);
+  MarkUsed(*o);
+  TLog("put hi-res 3D %ld,%ld-%ld,%ld", r.left, r.top, r.right, r.bottom);
+  return true;
+}
+
 void GpuTextForget(const void* native) {
   if (!native || g_overlays.empty()) return;
   auto it = g_overlays.find(native);

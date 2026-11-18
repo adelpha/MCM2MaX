@@ -170,6 +170,7 @@ void LoadConfig() {
   g_config.alpha_cut = GetPrivateProfileIntA(sec, "AlphaCut", 128, ini);
   g_config.menu_log = GetPrivateProfileIntA(sec, "MenuLog", 0, ini) != 0;
   g_config.menu_flag = GetPrivateProfileIntA(sec, "MenuFlag", 1, ini) != 0;
+  g_config.menu_hires_3d = GetPrivateProfileIntA(sec, "MenuHiRes3D", 1, ini) != 0;
   {
     auto pct = [&](const char* key, int def, int hi) {
       const int v = static_cast<int>(GetPrivateProfileIntA(sec, key, def, ini));

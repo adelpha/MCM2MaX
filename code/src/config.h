@@ -157,6 +157,7 @@ struct Config {
   bool texture_log = false;         // TextureLog: log the format of each texture the game creates
   bool menu_options = true;   // MenuOptions: MCM2MaX settings added to the game's own Options pages (menus.cpp)
   bool menu_log = false;      // MenuLog: log every event on the pages MCM2MaX adds settings to
+  bool menu_hires_3d = true;  // MenuHiRes3D: 3D in the menus (garage bike) drawn at window resolution (dd/hires3d.cpp)
   bool menu_flag = true;      // MenuFlag: waving flag behind the main menu, under MenuBackground (dd/menubg.cpp)
   int menu_flag_speed = 100;       // MenuFlagSpeed: % of the default movement speed
   int menu_flag_brightness = 68;   // MenuFlagBrightness: % (100 = preview-5 colours)

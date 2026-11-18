@@ -62,6 +62,7 @@ add_library(MCM2MaX SHARED
   src/dd/drawlog.cpp
   src/dd/motionblur.cpp
   src/dd/hudtext.cpp
+  src/dd/hires3d.cpp
   src/dd/racetitle.cpp
   src/dd/oneshot.cpp
   src/dd/hook.cpp
