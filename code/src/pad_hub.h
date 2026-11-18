@@ -42,6 +42,10 @@ void Pump();
 // connected. packet changes whenever the state or the driving pad does.
 bool Read(PadState* out, DWORD* packet);
 
+// Every enabled gamepad's last state (not the keyboard), for menus that
+// read all pads at once (MenuMaX screens). False when the hub is not running.
+bool ReadAll(std::vector<PadState>* out);
+
 // Motor speeds 0..65535 for the driving pad (sent by the next Pump).
 void Rumble(WORD low, WORD high);
 

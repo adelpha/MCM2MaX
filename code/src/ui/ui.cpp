@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../config.h"
+#include "../pad_hub.h"
 #include "../mode_prompt.h"
 #include "../patch.h"
 #include "../dd/backend.h"
@@ -163,7 +164,9 @@ struct State {
   // Held direction (keys, d-pad, stick) repeats.
   Rml::Input::KeyIdentifier held = Rml::Input::KI_UNKNOWN;
   DWORD held_since = 0, held_last = 0;
-  WORD pad_prev[4] = {};
+  WORD pad_prev[8] = {};
+  bool pads_from_hub = false;
+  size_t pad_count = 0;
   int pad_dir_prev = -1;
   // One press seen through two devices at once (a keyboard that is also an
   // XInput pad, the game reading the keyboard two ways) counts once.
@@ -682,18 +685,37 @@ void PadDir(int dir, const char* from) {
 }
 
 void PollPads() {
-  // XInput first; DirectInput joysticks only while no XInput pad is there
-  // (an Xbox pad shows up as both).
+  // Gamepads first. DirectInput joysticks (POV + buttons 1 / 2) only without
+  // the ControllerHub and while no XInput pad is there: an Xbox pad shows up
+  // as both, and the hub's own joystick can be the keyboard (KeyboardPad).
   bool xpad = false;
-  if (XInputGetStateFn get = LoadXInput()) {
+  // Every pad's state in XInput's layout: from the ControllerHub (SDL3: every
+  // make of gamepad) when it runs, otherwise from XInput's four slots.
+  std::vector<hub::PadState> pads;
+  const bool from_hub = hub::ReadAll(&pads);
+  if (!from_hub) {
+    if (XInputGetStateFn get = LoadXInput()) {
+      for (DWORD i = 0; i < 4; ++i) {
+        XPad s{};
+        if (get(i, &s) != ERROR_SUCCESS) continue;
+        pads.push_back(hub::PadState{s.lx, s.ly, s.rx, s.ry, s.lt, s.rt, s.buttons});
+      }
+    }
+  }
+  if (from_hub != g.pads_from_hub || pads.size() != g.pad_count) {
+    g.pads_from_hub = from_hub;
+    g.pad_count = pads.size();
+    patch::Log("MenuMaX: %u controller(s) through %s", static_cast<unsigned>(pads.size()),
+               from_hub ? "the ControllerHub (SDL3)" : "XInput");
+  }
+  if (!pads.empty()) {
     // Every connected pad counts (a keyboard can show up as one too); the
     // first one held in a direction steers.
+    xpad = true;
     int dir = -1;
     const bool settling = GetTickCount() - g.opened_at < 200;  // held when the screen opened
-    for (DWORD i = 0; i < 4; ++i) {
-      XPad s{};
-      if (get(i, &s) != ERROR_SUCCESS) continue;
-      xpad = true;
+    for (size_t i = 0; i < pads.size() && i < 8; ++i) {
+      const hub::PadState& s = pads[i];
       const WORD pressed = settling ? 0 : static_cast<WORD>(s.buttons & ~g.pad_prev[i]);
       g.pad_prev[i] = s.buttons;
       if (settling) continue;
@@ -709,11 +731,11 @@ void PollPads() {
       if (dir < 0) dir = d;
       if (pressed & 0x1000) Press(Rml::Input::KI_RETURN, "controller A");
       if (pressed & 0x2000) Press(Rml::Input::KI_ESCAPE, "controller B");
-      if (pressed && GetConfig().menu_log) patch::Log("MenuMaX: XInput pad %lu buttons %04x", i, s.buttons);
+      if (pressed && GetConfig().menu_log) patch::Log("MenuMaX: controller %u buttons %04x", static_cast<unsigned>(i), s.buttons);
     }
-    if (xpad && !settling) PadDir(dir, "controller");
+    if (!settling) PadDir(dir, "controller");
   }
-  if (!xpad && g.joy_seen) {
+  if (!xpad && !from_hub && g.joy_seen) {
     PadDir(PovDir(g.joy_pov), "joystick");
     static DWORD prev = 0;
     const DWORD pressed = g.joy_buttons & ~prev;

@@ -479,6 +479,15 @@ bool Read(PadState* out, DWORD* packet) {
   return g_active != -1;
 }
 
+bool ReadAll(std::vector<PadState>* out) {
+  out->clear();
+  if (!g_ready) return false;
+  Lock lock;
+  for (const Pad& p : g_pads)
+    if (p.enabled) out->push_back(p.st);
+  return true;
+}
+
 void Rumble(WORD low, WORD high) {
   if (!g_ready) return;
   Lock lock;
