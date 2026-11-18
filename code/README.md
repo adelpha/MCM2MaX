@@ -675,6 +675,48 @@ InputTiming=1
 ; after alt-tab.
 AltTabFix=1
 
+; ControllerHub: 1 = every gamepad (Xbox, PlayStation, Switch Pro and other
+; pads SDL knows) drives one game controller, "Gamepad (any controller)",
+; with the same layout as XInput below; the pad you touched last drives, and
+; pads can be plugged in or out at any time (default). The Controls screen
+; names the buttons after the driving pad (A, Cross, LB, L1...). Windows'
+; DirectInput copies of these pads are left out of the game's list; wheels
+; and other joysticks stay as they were. 0 = one device per Xbox controller
+; (XInput=1), or none. The XInput* settings below apply to the hub too.
+ControllerHub=1
+
+; ControllerPicker: 1 = the game's startup box asking which controller to
+; use, shown when it sees two or more and doesn't recognise the last one.
+; 0 = no box: the last one used, else the first listed (default).
+ControllerPicker=0
+
+; DisabledControllers: pads the controller hub ignores, comma separated, by
+; USB id (045E:0B12) or part of the name ("Razer"). The log lists each pad's
+; name and id. Default: none.
+DisabledControllers=
+
+; KeyboardPad: 1 = with ControllerHub, the keyboard is one more controller:
+; pressing a driving key below hands driving to the keyboard (touching a pad
+; hands it back), so you can carry on with the keyboard if a pad is unplugged
+; mid-race (default). Steering and lean ease in and out like the game's own
+; key steering; while a stunt key is held, the throttle and brake keys also
+; push the stick up and down for the stunt's direction. 0 = off.
+KeyboardPad=1
+
+; KeySteerLeft ... KeyStunt2: the keys KeyboardPad uses. Names: a letter or
+; digit, Left Right Up Down, Space Enter Backspace Tab Shift Ctrl Alt, Insert
+; Delete Home End PageUp PageDown, F1-F12, Numpad0-Numpad9, or None. The
+; defaults are the game's own keyboard driving keys. Stunt 1 and 2 press
+; buttons 3 and 4 (X and Y), the Dual Analog Game Pad preset's stunt buttons.
+KeySteerLeft=Left
+KeySteerRight=Right
+KeyLeanForward=W
+KeyLeanBack=S
+KeyThrottle=Up
+KeyBrake=Down
+KeyStunt1=Z
+KeyStunt2=X
+
 ; XInput: 1 = Xbox (XInput) controllers connected when the game starts are
 ; listed under their own names with analog sticks (left stick X/Y, right
 ; stick X/Y Rotation), the right trigger on the Z axis and the left trigger

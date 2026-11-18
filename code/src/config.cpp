@@ -295,6 +295,25 @@ void LoadConfig() {
   g_config.xinput_steer_smooth = GetPrivateProfileIntA(sec, "XInputSteerSmooth", 60, ini);
   if (g_config.xinput_steer_smooth < 0) g_config.xinput_steer_smooth = 0;
   if (g_config.xinput_steer_smooth > 500) g_config.xinput_steer_smooth = 500;
+  g_config.controller_hub = GetPrivateProfileIntA(sec, "ControllerHub", 1, ini) != 0;
+  g_config.controller_picker = GetPrivateProfileIntA(sec, "ControllerPicker", 0, ini) != 0;
+  GetPrivateProfileStringA(sec, "DisabledControllers", "", g_config.disabled_controllers,
+                           sizeof(g_config.disabled_controllers), ini);
+  g_config.keyboard_pad = GetPrivateProfileIntA(sec, "KeyboardPad", 1, ini) != 0;
+  {
+    // The game's own default keyboard driving keys (MCM2 help: Default
+    // Keyboard Driving Controls; Z/X for stunts).
+    const char* keys[8] = {"KeySteerLeft", "KeySteerRight", "KeyLeanForward", "KeyLeanBack",
+                           "KeyThrottle", "KeyBrake", "KeyStunt1", "KeyStunt2"};
+    const char* defs[8] = {"Left", "Right", "W", "S", "Up", "Down", "Z", "X"};
+    for (int k = 0; k < 8; ++k) {
+      char* v = g_config.keyboard_keys[k];
+      GetPrivateProfileStringA(sec, keys[k], defs[k], v, sizeof(g_config.keyboard_keys[k]), ini);
+      v[std::strcspn(v, "\t;")] = 0;  // drop an inline comment
+      size_t n = std::strlen(v);
+      while (n && v[n - 1] == ' ') v[--n] = 0;
+    }
+  }
   g_config.keep_control_preset = GetPrivateProfileIntA(sec, "KeepControlPreset", 1, ini) != 0;
   g_config.xinput_rumble_min_ms = GetPrivateProfileIntA(sec, "XInputRumbleMinMs", 150, ini);
   if (g_config.xinput_rumble_min_ms < 0) g_config.xinput_rumble_min_ms = 0;

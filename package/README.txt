@@ -107,6 +107,9 @@ Replacement pictures (PNG, TGA, BMP, JPEG) are read with Wuffs
 licence (see licenses\Wuffs-MIT.txt). Texture dumps are written with
 stb_image_write by Sean Barrett (public domain).
 
+Controllers are read with SDL 3 (https://libsdl.org), (c) Sam Lantinga,
+under the zlib licence (see licenses\SDL3-zlib.txt).
+
 The HUD fonts in FONTS are Contrail One (c) 2011 Sorkin Type Co and DSEG7
 Classic (c) 2017 keshikan, both under the SIL Open Font License 1.1 (see
 licenses\ContrailOne-OFL.txt and licenses\DSEG-OFL.txt).
