@@ -5,6 +5,7 @@ namespace hub {
 
 bool Available() { return false; }
 bool Init(bool, const char*) { return false; }
+void SetKeyboard(bool, const char* const[8]) {}
 void Pump() {}
 bool Read(PadState* out, DWORD* packet) {
   *out = PadState{};

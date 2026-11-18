@@ -29,6 +29,11 @@ bool Available();
 // the pads already connected. disabled: DisabledControllers.
 bool Init(bool log, const char* disabled);
 
+// KeyboardPad: driving keys (key names, in the order KeySteerLeft,
+// KeySteerRight, KeyLeanForward, KeyLeanBack, KeyThrottle, KeyBrake,
+// KeyStunt1, KeyStunt2) feed the hub too. Call before Init.
+void SetKeyboard(bool on, const char* const keys[8]);
+
 // Called by the sampling thread every tick: hot-plug, pad states, which pad
 // drives, rumble.
 void Pump();

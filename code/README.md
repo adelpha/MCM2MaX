@@ -695,6 +695,28 @@ ControllerPicker=0
 ; name and id. Default: none.
 DisabledControllers=
 
+; KeyboardPad: 1 = with ControllerHub, the keyboard is one more controller:
+; pressing a driving key below hands driving to the keyboard (touching a pad
+; hands it back), so you can carry on with the keyboard if a pad is unplugged
+; mid-race (default). Steering and lean ease in and out like the game's own
+; key steering; while a stunt key is held, the throttle and brake keys also
+; push the stick up and down for the stunt's direction. 0 = off.
+KeyboardPad=1
+
+; KeySteerLeft ... KeyStunt2: the keys KeyboardPad uses. Names: a letter or
+; digit, Left Right Up Down, Space Enter Backspace Tab Shift Ctrl Alt, Insert
+; Delete Home End PageUp PageDown, F1-F12, Numpad0-Numpad9, or None. The
+; defaults are the game's own keyboard driving keys. Stunt 1 and 2 press
+; buttons 3 and 4 (X and Y), the Dual Analog Game Pad preset's stunt buttons.
+KeySteerLeft=Left
+KeySteerRight=Right
+KeyLeanForward=W
+KeyLeanBack=S
+KeyThrottle=Up
+KeyBrake=Down
+KeyStunt1=Z
+KeyStunt2=X
+
 ; XInput: 1 = Xbox (XInput) controllers connected when the game starts are
 ; listed under their own names with analog sticks (left stick X/Y, right
 ; stick X/Y Rotation), the right trigger on the Z axis and the left trigger

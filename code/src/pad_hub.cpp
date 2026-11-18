@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 
@@ -44,11 +46,23 @@ CRITICAL_SECTION g_cs;
 bool g_ready = false, g_log = false;
 std::vector<Pad> g_pads;  // open gamepads, in the order SDL reported them
 std::vector<std::pair<WORD, WORD>> g_all_ids;  // every gamepad's VID/PID
-int g_active = -1;        // index into g_pads, or -1
+constexpr int kKeyboard = -2;
+int g_active = -1;        // index into g_pads, kKeyboard, or -1 (none)
 DWORD g_packet = 0;
 PadState g_out = {};      // the driving pad's last state, as handed out
 WORD g_want_low = 0, g_want_high = 0;
 std::vector<std::string> g_disabled;  // lower case
+Family g_family = kXbox;  // button names: the last pad that drove
+
+// KeyboardPad: driving keys feed the hub as one more controller, so the
+// keyboard can take over (say, after a pad is unplugged mid-race).
+bool g_kb_on = false;
+enum KbKey { kSteerLeft, kSteerRight, kLeanForward, kLeanBack, kThrottle, kBrake, kStunt1, kStunt2, kKbKeys };
+int g_kb_vk[kKbKeys] = {};
+PadState g_kb = {};       // keyboard as a pad
+float g_kb_x = 0, g_kb_y = 0;  // ramped steering / lean, -1..1
+Uint64 g_kb_ns = 0;
+DWORD g_kb_touches = 0;
 
 struct Lock {
   Lock() { EnterCriticalSection(&g_cs); }
@@ -177,8 +191,11 @@ void SetActive(int i, const char* why) {
   if (g_active >= 0 && g_active < static_cast<int>(g_pads.size())) StopRumble(g_pads[g_active]);
   g_active = i;
   ++g_packet;
+  if (i >= 0) g_family = FamilyOf(g_pads[i].type);
   if (i >= 0)
     patch::Log("hub: %s now drives (%s)", g_pads[i].name.c_str(), why);
+  else if (i == kKeyboard)
+    patch::Log("hub: the keyboard now drives (%s)", why);
   else
     patch::Log("hub: no controller drives (%s)", why);
 }
@@ -191,6 +208,77 @@ int Best() {
     if (best < 0 || g_pads[i].last_used > g_pads[best].last_used) best = i;
   }
   return best;
+}
+
+bool GameFocused() {
+  HWND w = GetForegroundWindow();
+  DWORD pid = 0;
+  if (w) GetWindowThreadProcessId(w, &pid);
+  return pid == GetCurrentProcessId();
+}
+
+// The keyboard as a pad: steering and lean ease in and out like the game's
+// own key steering; while a stunt key is held, Up/Down also tilt the stick
+// (the game's keyboard stunts use the arrows for direction).
+PadState ReadKeyboard(Uint64 now) {
+  PadState s = {};
+  bool down[kKbKeys] = {};
+  if (GameFocused())
+    for (int k = 0; k < kKbKeys; ++k) down[k] = g_kb_vk[k] && (GetAsyncKeyState(g_kb_vk[k]) & 0x8000) != 0;
+  const bool stunt = down[kStunt1] || down[kStunt2];
+  const float want_x = (down[kSteerRight] ? 1.0f : 0.0f) - (down[kSteerLeft] ? 1.0f : 0.0f);
+  float want_y = (down[kLeanForward] ? 1.0f : 0.0f) - (down[kLeanBack] ? 1.0f : 0.0f);
+  if (stunt) want_y += (down[kThrottle] ? 1.0f : 0.0f) - (down[kBrake] ? 1.0f : 0.0f);
+  want_y = std::max(-1.0f, std::min(1.0f, want_y));
+  const float dt = g_kb_ns ? std::min(0.1f, static_cast<float>(now - g_kb_ns) / 1e9f) : 0.0f;
+  g_kb_ns = now;
+  auto ease = [&](float cur, float want) {
+    // Full deflection in 0.15 s, back to centre in 0.1 s.
+    const float rate = (want == 0.0f || (want > 0) != (cur > 0)) && cur != 0.0f ? 10.0f : 6.7f;
+    const float step = rate * dt;
+    if (std::fabs(want - cur) <= step) return want;
+    return cur + (want > cur ? step : -step);
+  };
+  g_kb_x = ease(g_kb_x, want_x);
+  g_kb_y = ease(g_kb_y, want_y);
+  s.lx = static_cast<SHORT>(g_kb_x * 32767.0f);
+  s.ly = static_cast<SHORT>(g_kb_y * 32767.0f);
+  s.rt = down[kThrottle] ? 255 : 0;
+  s.lt = down[kBrake] ? 255 : 0;
+  if (down[kStunt1]) s.buttons |= XINPUT_GAMEPAD_X;  // button 3
+  if (down[kStunt2]) s.buttons |= XINPUT_GAMEPAD_Y;  // button 4
+  return s;
+}
+
+// A key that drives was pressed (not just held from before).
+bool KeyboardTouched(const PadState& was, const PadState& now) {
+  return (now.buttons & ~was.buttons) || (now.rt && !was.rt) || (now.lt && !was.lt) ||
+         (now.lx && std::abs(now.lx) > std::abs(was.lx) && was.lx == 0) ||
+         (now.ly && std::abs(now.ly) > std::abs(was.ly) && was.ly == 0);
+}
+
+int Vk(const char* name) {
+  static const struct {
+    const char* n;
+    int vk;
+  } kNames[] = {{"left", VK_LEFT}, {"right", VK_RIGHT}, {"up", VK_UP}, {"down", VK_DOWN}, {"space", VK_SPACE},
+                {"enter", VK_RETURN}, {"backspace", VK_BACK}, {"tab", VK_TAB}, {"shift", VK_SHIFT},
+                {"ctrl", VK_CONTROL}, {"control", VK_CONTROL}, {"alt", VK_MENU}, {"insert", VK_INSERT},
+                {"delete", VK_DELETE}, {"home", VK_HOME}, {"end", VK_END}, {"pageup", VK_PRIOR},
+                {"pagedown", VK_NEXT}, {"none", 0}};
+  std::string n = Lower(name);
+  n.erase(std::remove_if(n.begin(), n.end(), [](char c) { return c == ' ' || c == '\t'; }), n.end());
+  if (n.size() == 1 && std::isalnum(static_cast<unsigned char>(n[0])))
+    return std::toupper(static_cast<unsigned char>(n[0]));
+  if (n.size() >= 2 && n[0] == 'f' && std::isdigit(static_cast<unsigned char>(n[1]))) {
+    const int f = std::atoi(n.c_str() + 1);
+    if (f >= 1 && f <= 12) return VK_F1 + f - 1;
+  }
+  if (n.size() == 7 && n.compare(0, 6, "numpad") == 0 && std::isdigit(static_cast<unsigned char>(n[6])))
+    return VK_NUMPAD0 + (n[6] - '0');
+  for (const auto& k : kNames)
+    if (n == k.n) return k.vk;
+  return -1;
 }
 
 void RefreshIds() {
@@ -233,7 +321,7 @@ void Add(SDL_JoystickID id) {
              SDL_GetGamepadConnectionState(g) == SDL_JOYSTICK_CONNECTION_WIRELESS ? ", wireless" : "",
              p.enabled ? "" : " DISABLED by DisabledControllers", path ? path : "?");
   g_pads.push_back(p);
-  if (g_active < 0 && p.enabled) SetActive(static_cast<int>(g_pads.size()) - 1, "connected");
+  if (g_active == -1 && p.enabled) SetActive(static_cast<int>(g_pads.size()) - 1, "connected");
 }
 
 void Remove(SDL_JoystickID id) {
@@ -247,7 +335,7 @@ void Remove(SDL_JoystickID id) {
     if (was_active) {
       g_active = -1;
       SetActive(Best(), "the driving controller was unplugged");
-      if (g_active < 0) {
+      if (g_active == -1) {
         g_out = PadState{};
         ++g_packet;
       }
@@ -259,6 +347,25 @@ void Remove(SDL_JoystickID id) {
 }  // namespace
 
 bool Available() { return true; }
+
+void SetKeyboard(bool on, const char* const keys[8]) {
+  g_kb_on = on;
+  static const char* const kWhat[kKbKeys] = {"KeySteerLeft", "KeySteerRight", "KeyLeanForward", "KeyLeanBack",
+                                             "KeyThrottle",  "KeyBrake",      "KeyStunt1",      "KeyStunt2"};
+  std::string list;
+  for (int k = 0; k < kKbKeys; ++k) {
+    int vk = Vk(keys[k]);
+    if (vk < 0) {
+      patch::Log("hub: %s=%s is not a key name I know; that key is off", kWhat[k], keys[k]);
+      vk = 0;
+    }
+    g_kb_vk[k] = vk;
+    char b[64];
+    std::snprintf(b, sizeof b, "%s%s=%s", list.empty() ? "" : " ", kWhat[k], keys[k]);
+    list += b;
+  }
+  patch::Log("hub: KeyboardPad=%d (%s)", on ? 1 : 0, list.c_str());
+}
 
 bool Init(bool log, const char* disabled) {
   InitializeCriticalSection(&g_cs);
@@ -320,6 +427,14 @@ void Pump() {
   }
   if (changed_list) RefreshIds();
   const Uint64 now = SDL_GetTicksNS();
+  if (g_kb_on) {
+    const PadState k = ReadKeyboard(now);
+    if (KeyboardTouched(g_kb, k)) {
+      ++g_kb_touches;
+      if (g_active != kKeyboard) SetActive(kKeyboard, "a driving key was pressed");
+    }
+    g_kb = k;
+  }
   for (int i = 0; i < static_cast<int>(g_pads.size()); ++i) {
     Pad& p = g_pads[i];
     const PadState s = ReadPad(p.g);
@@ -329,6 +444,10 @@ void Pump() {
       if (p.enabled && i != g_active) SetActive(i, "it was used");
     }
     p.st = s;
+  }
+  if (g_active == kKeyboard && !Same(g_kb, g_out)) {
+    g_out = g_kb;
+    ++g_packet;
   }
   if (g_active >= 0) {
     Pad& a = g_pads[g_active];
@@ -355,9 +474,9 @@ bool Read(PadState* out, DWORD* packet) {
     return false;
   }
   Lock lock;
-  *out = g_active >= 0 ? g_out : PadState{};
+  *out = g_active != -1 ? g_out : PadState{};
   *packet = g_packet;
-  return g_active >= 0;
+  return g_active != -1;
 }
 
 void Rumble(WORD low, WORD high) {
@@ -376,13 +495,13 @@ std::vector<std::pair<WORD, WORD>> GamepadIds() {
 Family ActiveFamily() {
   if (!g_ready) return kXbox;
   Lock lock;
-  return g_active >= 0 ? FamilyOf(g_pads[g_active].type) : kXbox;
+  return g_family;
 }
 
 std::string ActiveName() {
   if (!g_ready) return "";
   Lock lock;
-  return g_active >= 0 ? g_pads[g_active].name : "";
+  return g_active >= 0 ? g_pads[g_active].name : g_active == kKeyboard ? "Keyboard" : "";
 }
 
 int Count() {
@@ -396,6 +515,9 @@ int Count() {
 void LogSummary() {
   if (!g_ready) return;
   Lock lock;
+  if (g_kb_on)
+    patch::Log("hub: %s\"Keyboard\": lx %d ly %d lt %u rt %u buttons 0x%04x, %lu touches",
+               g_active == kKeyboard ? "* " : "  ", g_kb.lx, g_kb.ly, g_kb.lt, g_kb.rt, g_kb.buttons, g_kb_touches);
   for (int i = 0; i < static_cast<int>(g_pads.size()); ++i) {
     const Pad& p = g_pads[i];
     patch::Log("hub: %s\"%s\" %s: lx %d ly %d rx %d ry %d lt %u rt %u buttons 0x%04x, %lu touches, rumble %u/%u",

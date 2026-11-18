@@ -106,6 +106,8 @@ struct Config {
   bool controller_hub = true;     // ControllerHub: all gamepads (SDL3) as one game controller, last touched wins (pad_hub.cpp)
   bool controller_picker = false; // ControllerPicker: show the game's startup "choose a controller" box
   char disabled_controllers[512] = {};  // DisabledControllers: VID:PID or name parts, comma separated, the hub ignores
+  bool keyboard_pad = true;       // KeyboardPad: driving keys drive the controller hub too
+  char keyboard_keys[8][24] = {};  // KeySteerLeft..KeyStunt2 (pad_hub.cpp)
   bool keep_control_preset = true;  // KeepControlPreset: keep the chosen control preset between runs
   int xinput_rumble_min_ms = 150;   // XInputRumbleMinMs: shortest rumble, held at full strength before fading
   int xinput_rumble_threshold = 10;  // XInputRumbleThreshold: % jump in the game's stick force that rumbles

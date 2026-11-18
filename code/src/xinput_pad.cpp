@@ -1678,6 +1678,9 @@ void Apply() {
     return;
   }
   if (g_hub) {
+    const char* keys[8];
+    for (int k = 0; k < 8; ++k) keys[k] = c.keyboard_keys[k];
+    hub::SetKeyboard(c.keyboard_pad, keys);
     // Button names on the Controls screen (both callers of the label function).
     const uintptr_t sites[] = {0x44a303, 0x4b9bc1};
     for (uintptr_t a : sites) {
