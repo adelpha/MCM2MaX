@@ -24,6 +24,7 @@
 #include "../display.h"
 #include "../patch.h"
 #include "../prof.h"
+#include "../ui/ui.h"
 #include "gdihook.h"
 #include "gputext.h"
 #include "motionblur.h"
@@ -554,6 +555,7 @@ void SwitchToExclusive9(HWND hwnd) {
   SafeRelease(g_white);
   const D3DPRESENT_PARAMETERS windowed = g_pp;
   const DWORD vp = g_behavior & (D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_SOFTWARE_VERTEXPROCESSING);
+  ui::DeviceGone9();  // MenuMaX textures belong to this device
   ULONG left = b.dev9->Release();
   b.dev9 = nullptr;
   if (left) Log("exclusive: old device still has %lu references", left);
@@ -1510,6 +1512,7 @@ void Present9(const GpuTexture& src, UINT src_w, UINT src_h, UINT interval) {
     p.linear = true;
     Blit9(p);
     GpuTextComposite(src, nullptr, back, g_sc.w, g_sc.h, p.dst_rect);
+    ui::Present9(back, g_sc.w, g_sc.h, p.dst_rect);  // MenuMaX screens
   }
   DrawRendererLabel(nullptr, back, g_sc.w, g_sc.h);
   back->Release();

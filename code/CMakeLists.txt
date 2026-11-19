@@ -109,7 +109,7 @@ endif()
 # them the DLL has stubs and the new screens are off.
 set(MCM2MaX_RMLUI "" CACHE PATH "RmlUi + FreeType install prefix from tools/build-rmlui.sh")
 if(MCM2MaX_RMLUI)
-  target_sources(MCM2MaX PRIVATE src/ui/ui.cpp src/ui/render_d3d11.cpp)
+  target_sources(MCM2MaX PRIVATE src/ui/ui.cpp src/ui/render.cpp src/ui/render_d3d11.cpp src/ui/render_d3d9.cpp)
   target_include_directories(MCM2MaX PRIVATE "${MCM2MaX_RMLUI}/include")
   target_compile_definitions(MCM2MaX PRIVATE RMLUI_STATIC_LIB)
   target_link_libraries(MCM2MaX PRIVATE "${MCM2MaX_RMLUI}/lib/librmlui.a" "${MCM2MaX_RMLUI}/lib/libfreetype.a")

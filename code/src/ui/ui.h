@@ -19,11 +19,14 @@
 //   screen does not react) and the screen draws its own pointer
 //   (UI\MaX\images\pointer.png).
 //
-// Direct3D 11 only for now. Without -DMCM2MaX_RMLUI the DLL has stubs.
+// Drawn with Direct3D 11 (render_d3d11.cpp) or, with Renderer=D3D9 (and on
+// Windows XP), Direct3D 9 (render_d3d9.cpp). Without -DMCM2MaX_RMLUI the DLL
+// has stubs.
 #pragma once
 #include <windows.h>
 
 struct ID3D11RenderTargetView;
+struct IDirect3DSurface9;
 
 namespace ui {
 
@@ -38,6 +41,10 @@ void Close(const char* why);
 // Present (Direct3D 11, under the renderer lock): draws the open screen over
 // the frame; game_rect is where the 640x480 picture went in the window.
 void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect);
+// The same for Direct3D 9: drawn into the back buffer `back` (w x h).
+void Present9(IDirect3DSurface9* back, UINT w, UINT h, const RECT& game_rect);
+// The Direct3D 9 device is about to be released (a new one follows).
+void DeviceGone9();
 
 // Input taken from the game while a screen is open (any thread).
 // DirectInput key codes (DIK_*), mouse buttons 0-7, wheel in DirectInput

@@ -1,30 +1,22 @@
 // MenuMaX: RmlUi drawn with Direct3D 11 straight into the swap chain, at
 // the window's resolution (see ui.h).
 #pragma once
-#include <RmlUi/Core/RenderInterface.h>
 #include <d3d11.h>
 
-#include <string>
+#include "render.h"
 
 namespace ui {
 
-class RenderD3D11 : public Rml::RenderInterface {
+class RenderD3D11 : public Renderer {
  public:
-  // Statistics for the log (reset by the caller).
-  struct Stats {
-    unsigned geometry = 0, draws = 0, textures = 0, texture_failures = 0, scissors = 0;
-  };
-
   bool Init(ID3D11Device* device);
   void Shutdown();
-  bool Ready() const { return vs_ && ps_tex_ && ps_color_; }
+  bool Ready() const override { return vs_ && ps_tex_ && ps_color_; }
+  const char* Name() const override { return "Direct3D 11"; }
   // Start of a frame into rtv (w x h); End restores nothing (the caller
   // marks the context as changed).
   void Begin(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, UINT w, UINT h);
-  void End();
-  Stats& GetStats() { return stats_; }
-  // Folder that relative picture paths are read from (with trailing slash).
-  void SetBaseDir(const std::wstring& dir) { base_dir_ = dir; }
+  void End() override;
 
   Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices, Rml::Span<const int> indices) override;
   void RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::Vector2f translation, Rml::TextureHandle texture) override;
@@ -56,8 +48,6 @@ class RenderD3D11 : public Rml::RenderInterface {
   bool has_transform_ = false;
   Rml::Matrix4f projection_;
   Rml::Matrix4f transform_;
-  std::wstring base_dir_;
-  Stats stats_;
 };
 
 }  // namespace ui

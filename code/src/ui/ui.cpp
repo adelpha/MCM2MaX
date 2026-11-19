@@ -17,6 +17,7 @@
 #include "../patch.h"
 #include "../dd/backend.h"
 #include "render_d3d11.h"
+#include "render_d3d9.h"
 
 // menus.cpp: the game's own controls on the open Options > Graphics page.
 bool MenusGameGet(const char* name, int* value);
@@ -136,7 +137,9 @@ struct State {
   bool inited = false;
   System* system = nullptr;
   Files* files = nullptr;
-  RenderD3D11* render = nullptr;
+  Renderer* render = nullptr;  // r11 or r9, by the renderer running
+  RenderD3D11* r11 = nullptr;
+  RenderD3D9* r9 = nullptr;
   Rml::Context* context = nullptr;
   Rml::ElementDocument* doc = nullptr;
   std::string want_open;  // set by Open, done at the next present
@@ -454,10 +457,17 @@ bool InitRml() {
   const DWORD t0 = GetTickCount();
   g.system = new System;
   g.files = new Files;
-  g.render = new RenderD3D11;
-  if (!g.render->Init(dd::B().device)) {
-    g.failed = true;
-    return false;
+  if (dd::IsD3D9()) {
+    g.r9 = new RenderD3D9;
+    g.render = g.r9;
+    patch::Log("MenuMaX: drawing with Direct3D 9 (fixed function)");
+  } else {
+    g.r11 = new RenderD3D11;
+    g.render = g.r11;
+    if (!g.r11->Init(dd::B().device)) {
+      g.failed = true;
+      return false;
+    }
   }
   g.render->SetBaseDir(UiDir());
   Rml::SetSystemInterface(g.system);
@@ -847,7 +857,29 @@ void DoInput(const RECT& game_rect) {
 
 // The screen's pointer: UI\MaX\images\pointer.png, its top left corner
 // at the pointer, 22dp tall.
-void DrawPointer(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, UINT w, UINT h, float dp) {
+// Where a frame is drawn: the Direct3D 11 swap chain or the Direct3D 9
+// back buffer.
+struct Target {
+  ID3D11RenderTargetView* rtv = nullptr;
+  IDirect3DSurface9* surf9 = nullptr;
+  UINT w = 0, h = 0;
+};
+
+void BeginDraw(const Target& t) {
+  if (g.r9) {
+    g.r9->Begin(t.surf9, t.w, t.h);
+  } else {
+    dd::ContextTouched();
+    g.r11->Begin(dd::B().ctx, t.rtv, t.w, t.h);
+  }
+}
+
+void EndDraw() {
+  g.render->End();
+  if (g.r11) dd::ContextTouched();
+}
+
+void DrawPointer(const Target& t, float dp) {
   if (!g.pointer_set) return;
   if (!g.pointer_tried) {
     g.pointer_tried = true;
@@ -861,9 +893,9 @@ void DrawPointer(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, UINT w, 
   const int idx[6] = {0, 1, 2, 0, 2, 3};
   Rml::CompiledGeometryHandle geo = g.render->CompileGeometry(Rml::Span<const Rml::Vertex>(v, 4), Rml::Span<const int>(idx, 6));
   if (!geo) return;
-  g.render->Begin(ctx, rtv, w, h);
+  BeginDraw(t);
   g.render->RenderGeometry(geo, Rml::Vector2f(std::floor(g.px), std::floor(g.py)), g.pointer_tex);
-  g.render->End();
+  EndDraw();
   g.render->ReleaseGeometry(geo);
 }
 
@@ -871,12 +903,12 @@ void Report(bool force) {
   const DWORD now = GetTickCount();
   if (!force && now - g.last_report < 5000) return;
   g.last_report = now;
-  RenderD3D11::Stats& s = g.render->GetStats();
+  Renderer::Stats& s = g.render->GetStats();
   patch::Log("MenuMaX: %s: %u frames, %u draws, %u new geometry, %u textures (%u failed), %u keys, %u clicks, %u saves, "
              "%u reloads, %u mouse moves, pointer %d,%d, %u doubled key presses ignored",
              g.open_name.c_str(), g.frames, s.draws, s.geometry, s.textures, s.texture_failures, g.key_events, g.clicks,
              g.saves, g.reloads, g.moves, g.mouse_x, g.mouse_y, g.dup_keys);
-  s = RenderD3D11::Stats{};
+  s = Renderer::Stats{};
   g.frames = g.key_events = g.clicks = g.saves = g.reloads = g.moves = g.dup_keys = 0;
 }
 
@@ -904,10 +936,6 @@ bool Open(const char* name, const char* why) {
     patch::Log("MenuMaX: %s not opened (%s): RmlUi could not start earlier", name, why);
     return false;
   }
-  if (dd::IsD3D9()) {
-    dd::LogOnce("MenuMaX: screens need the Direct3D 11 renderer for now (Renderer=D3D9 is running)");
-    return false;
-  }
   std::lock_guard<std::recursive_mutex> l(g.mu);
   g.want_open = name;
   g.want_close = false;
@@ -932,7 +960,10 @@ void Close(const char* why) {
   patch::Log("MenuMaX: close %s (%s)", g.open_name.c_str(), why);
 }
 
-void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect) {
+namespace {
+
+void PresentFrame(const Target& t, const RECT& game_rect) {
+  const UINT w = t.w, h = t.h;
   if (!g.installed || g.failed) return;
   std::string open;
   bool close;
@@ -980,15 +1011,36 @@ void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rec
   if (!g.doc) return;
   if (!g.pending.empty() && GetTickCount() - g.last_change > 300) FlushPending("settled");
   g.context->Update();
-  ID3D11DeviceContext* ctx = dd::B().ctx;
-  dd::ContextTouched();
-  g.render->Begin(ctx, rtv, w, h);
+  BeginDraw(t);
   g.context->Render();
-  g.render->End();
-  DrawPointer(ctx, rtv, w, h, dp);
-  dd::ContextTouched();
+  EndDraw();
+  DrawPointer(t, dp);
   ++g.frames;
   Report(false);
+}
+
+}  // namespace
+
+void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect) {
+  if (!g.installed || g.failed || dd::IsD3D9()) return;
+  Target t;
+  t.rtv = rtv;
+  t.w = w;
+  t.h = h;
+  PresentFrame(t, game_rect);
+}
+
+void Present9(IDirect3DSurface9* back, UINT w, UINT h, const RECT& game_rect) {
+  if (!g.installed || g.failed || !dd::IsD3D9() || !back) return;
+  Target t;
+  t.surf9 = back;
+  t.w = w;
+  t.h = h;
+  PresentFrame(t, game_rect);
+}
+
+void DeviceGone9() {
+  if (g.r9) g.r9->DeviceGone();
 }
 
 void KeyEvent(unsigned dik, bool down) {
