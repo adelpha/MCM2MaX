@@ -76,7 +76,7 @@ struct Kind {
 };
 const Kind kKinds[] = {
     {0x557D98, "button"},   {0x5582C8, "checkbox"}, {0x5585E0, "radio"},  {0x558B10, "dropdown"},
-    {0x557EA0, "edit box"}, {0x5581B8, "list"},     {0x5580B0, "slider"},
+    {0x557EA0, "edit box"}, {0x5581B8, "list"},     {0x5580B0, "slider"},   {0x557FA8, "scroll arrow"},
 };
 const char* KindOf(uintptr_t vt) {
   for (const Kind& k : kKinds)
@@ -139,7 +139,8 @@ struct State {
   std::vector<int> bound_keys;  // KeyBind of every shown control
   unsigned long long signature = 0;
   uintptr_t focus = 0;
-  std::vector<uintptr_t> known, appeared;  // places on the screen; new ones at the last change
+  std::vector<uintptr_t> known, appeared;
+  std::vector<uintptr_t> overflow_dialogs;  // dialogs with a list longer than it shows  // places on the screen; new ones at the last change
   DWORD last_click = 0;
   // Cursor moves and clicks.
   bool move_wanted = false;
@@ -215,6 +216,7 @@ bool AddRows(const Control& list) {
   const int count = I32(c + 0x1EC), first = I32(c + 0x1F0), shown = I32(c + 0x200);
   const uintptr_t items = Ptr(c + 0x214);
   if (count <= 0 || count > 4096 || first < 0 || shown <= 0 || !Readable(items, static_cast<size_t>(count) * 0x38)) return false;
+  if (count > shown) g.overflow_dialogs.push_back(list.dialog);  // its scroll arrows are worth a stop
   bool any = false;
   int y = list.r.top;
   for (int i = first; i < count && i < first + shown; ++i) {
@@ -243,6 +245,7 @@ bool AddRows(const Control& list) {
 void Collect() {
   g.controls.clear();
   g.bound_keys.clear();
+  g.overflow_dialogs.clear();
   const uintptr_t mgr = Manager();
   if (!mgr) return;
   std::vector<uintptr_t> dialogs;
@@ -277,6 +280,15 @@ void Collect() {
       g.controls.push_back(k);
     });
   }
+  // Scroll arrows (UIScrollCtl) only where a list has more rows than it
+  // shows: otherwise they do nothing.
+  g.controls.erase(std::remove_if(g.controls.begin(), g.controls.end(),
+                                  [](const Control& k) {
+                                    return !std::strcmp(k.kind, "scroll arrow") &&
+                                           std::find(g.overflow_dialogs.begin(), g.overflow_dialogs.end(), k.dialog) ==
+                                               g.overflow_dialogs.end();
+                                  }),
+                   g.controls.end());
   unsigned long long sig = 1469598103934665603ull;
   for (const Control& k : g.controls) sig = (sig ^ k.id ^ (static_cast<unsigned long long>(k.r.left) << 32) ^ k.r.top) * 1099511628211ull;
   if (sig != g.signature) {
@@ -382,7 +394,7 @@ void MoveTo(const Control& k, const char* why) {
 
 bool Clickable(const char* kind) {
   return !std::strcmp(kind, "button") || !std::strcmp(kind, "checkbox") || !std::strcmp(kind, "radio") ||
-         !std::strcmp(kind, "dropdown") || !std::strcmp(kind, "list row");
+         !std::strcmp(kind, "dropdown") || !std::strcmp(kind, "list row") || !std::strcmp(kind, "scroll arrow");
 }
 
 void Click(const Control& k, const char* why) {
