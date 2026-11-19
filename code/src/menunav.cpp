@@ -15,6 +15,9 @@
 //     the cursor to the nearest control in that direction.
 //   - Enter / A (joystick button 1) clicks the control under the cursor.
 //   - Esc / B (joystick button 2) clicks the screen's Back / Cancel button.
+//   - A list box's rows are places of their own (A / Enter picks the row).
+//   - When a click of ours opens a pull-down panel, the cursor goes to the
+//     panel's first control.
 //   - The mouse still works as before; it carries on from where the cursor is.
 // Keys the screen itself uses (its controls' KeyBind: Enter / Esc on message
 // boxes, the replay player's arrows) are left to the game.
@@ -95,8 +98,11 @@ constexpr unsigned kDikUp = 0xC8, kDikDown = 0xD0, kDikLeft = 0xCB, kDikRight = 
 enum Action { kNone = -1, kUp = 0, kRight, kDown, kLeft, kSelect, kBack };
 const char* const kActionNames[] = {"up", "right", "down", "left", "select", "back"};
 
+// A place the cursor can go: a control, or one row of a list box.
 struct Control {
-  uintptr_t p = 0;
+  uintptr_t p = 0;   // the game's control
+  uintptr_t id = 0;  // p, or p + 1 + row for a list row (controls are far apart)
+  int row = -1;
   uintptr_t dialog = 0;
   const char* kind = "";
   std::string name;
@@ -104,6 +110,12 @@ struct Control {
   int key = 0;  // KeyBind
   float cx() const { return (r.left + r.right) * 0.5f; }
   float cy() const { return (r.top + r.bottom) * 0.5f; }
+  // Where the cursor goes: the middle, but for a line of text (an event
+  // name, a list row; the game right-aligns them) just inside its right
+  // end, so the pointer sits after the text rather than over it.
+  bool text_line() const { return row >= 0 || (r.right - r.left >= 3 * (r.bottom - r.top) && r.bottom - r.top <= 24); }
+  float aim_x() const { return text_line() ? static_cast<float>(r.right - 3) : cx(); }
+  float aim_y() const { return cy(); }
 };
 
 struct State {
@@ -127,6 +139,8 @@ struct State {
   std::vector<int> bound_keys;  // KeyBind of every shown control
   unsigned long long signature = 0;
   uintptr_t focus = 0;
+  std::vector<uintptr_t> known, appeared;  // places on the screen; new ones at the last change
+  DWORD last_click = 0;
   // Cursor moves and clicks.
   bool move_wanted = false;
   float want_x = 0, want_y = 0;
@@ -191,6 +205,39 @@ void Each(uintptr_t root, const char* cls, F f) {
   reinterpret_cast<IterEndFn>(kIterEnd)(it, nullptr);
 }
 
+// A list box's visible rows, one place each (0x478e20 hit-tests them the
+// same way): list +0x1ec item count, +0x214 items (0x38 bytes each: +4 bit 0
+// not selectable, +0xc row height), +0x1f0 first row shown, +0x200 rows
+// shown, +0x224 rows selectable. False: no rows (the list is one place).
+bool AddRows(const Control& list) {
+  const uintptr_t c = list.p;
+  if (!Readable(c, 0x228) || !I32(c + 0x224)) return false;
+  const int count = I32(c + 0x1EC), first = I32(c + 0x1F0), shown = I32(c + 0x200);
+  const uintptr_t items = Ptr(c + 0x214);
+  if (count <= 0 || count > 4096 || first < 0 || shown <= 0 || !Readable(items, static_cast<size_t>(count) * 0x38)) return false;
+  bool any = false;
+  int y = list.r.top;
+  for (int i = first; i < count && i < first + shown; ++i) {
+    const uintptr_t it = items + i * 0x38;
+    const int h = I32(it + 0xC);
+    if (h <= 0 || y + h > list.r.bottom + 2) break;
+    if (!(U8(it + 4) & 1)) {
+      Control k = list;
+      k.row = i;
+      k.id = c + 1 + i;
+      k.kind = "list row";
+      k.r = {list.r.left, y, list.r.right, y + h};
+      char n[24];
+      std::snprintf(n, sizeof n, "[%d]", i);
+      k.name += n;
+      g.controls.push_back(k);
+      any = true;
+    }
+    y += h;
+  }
+  return any;
+}
+
 // Every control that takes clicks on the screens shown now (only the
 // topmost modal dialog's, when there is one).
 void Collect() {
@@ -225,11 +272,13 @@ void Collect() {
         return;
       k.name.assign(reinterpret_cast<const char*>(c + 0xF4), strnlen(reinterpret_cast<const char*>(c + 0xF4), 64));
       k.key = key;
+      k.id = c;
+      if (!std::strcmp(kind, "list") && AddRows(k)) return;
       g.controls.push_back(k);
     });
   }
   unsigned long long sig = 1469598103934665603ull;
-  for (const Control& k : g.controls) sig = (sig ^ k.p ^ (static_cast<unsigned long long>(k.r.left) << 32) ^ k.r.top) * 1099511628211ull;
+  for (const Control& k : g.controls) sig = (sig ^ k.id ^ (static_cast<unsigned long long>(k.r.left) << 32) ^ k.r.top) * 1099511628211ull;
   if (sig != g.signature) {
     g.signature = sig;
     std::string list;
@@ -245,14 +294,20 @@ void Collect() {
     }
     patch::Log("menunav: screen now has %u controls in %u dialog(s)%s: %s", static_cast<unsigned>(g.controls.size()),
                static_cast<unsigned>(dialogs.size()), modal ? " (modal)" : "", list.c_str());
-    if (g.focus && std::none_of(g.controls.begin(), g.controls.end(), [](const Control& k) { return k.p == g.focus; }))
+    if (g.focus && std::none_of(g.controls.begin(), g.controls.end(), [](const Control& k) { return k.id == g.focus; }))
       g.focus = 0;
+    // Places that weren't there before (a pull-down panel finished opening).
+    g.appeared.clear();
+    for (const Control& k : g.controls)
+      if (std::find(g.known.begin(), g.known.end(), k.id) == g.known.end()) g.appeared.push_back(k.id);
+    g.known.clear();
+    for (const Control& k : g.controls) g.known.push_back(k.id);
   }
 }
 
-const Control* Find(uintptr_t p) {
+const Control* Find(uintptr_t id) {
   for (const Control& k : g.controls)
-    if (k.p == p) return &k;
+    if (k.id == id) return &k;
   return nullptr;
 }
 
@@ -273,7 +328,7 @@ const Control* Nearest(const RECT* from, float ox, float oy, int dir, uintptr_t 
   const Control* best = nullptr;
   float best_score = 1e9f;
   for (const Control& k : g.controls) {
-    if (k.p == skip) continue;
+    if (k.id == skip) continue;
     const float dx = k.cx() - ox, dy = k.cy() - oy;
     float along, side;
     bool overlap;
@@ -309,10 +364,10 @@ const Control* BackControl() {
 }
 
 void MoveTo(const Control& k, const char* why) {
-  g.focus = k.p;
+  g.focus = k.id;
   g.move_wanted = true;
-  g.want_x = std::floor(k.cx());
-  g.want_y = std::floor(k.cy());
+  g.want_x = std::floor(k.aim_x());
+  g.want_y = std::floor(k.aim_y());
   patch::Log("menunav: %s -> %s (%s %ld,%ld %ldx%ld), cursor to %.0f,%.0f", why, k.name.c_str(), k.kind, k.r.left, k.r.top,
              k.r.right - k.r.left, k.r.bottom - k.r.top, g.want_x, g.want_y);
   // Light it up as the game does when the mouse goes over it (it may not
@@ -327,7 +382,7 @@ void MoveTo(const Control& k, const char* why) {
 
 bool Clickable(const char* kind) {
   return !std::strcmp(kind, "button") || !std::strcmp(kind, "checkbox") || !std::strcmp(kind, "radio") ||
-         !std::strcmp(kind, "dropdown");
+         !std::strcmp(kind, "dropdown") || !std::strcmp(kind, "list row");
 }
 
 void Click(const Control& k, const char* why) {
@@ -339,17 +394,20 @@ void Click(const Control& k, const char* why) {
   }
   g.click_wait = 0;  // frames since the cursor was sent there
   g.click_name = k.name;
-  g.click_p = k.p;
+  g.click_p = k.id;
 }
 
 // Clicks a control with the calls the game's KeyBind code makes (0x472f00).
-void ClickNow(uintptr_t p, const char* where) {
+// A list row: the list's own mouse press and release (0x478e20) at the
+// row's middle, as a click there does.
+void ClickNow(uintptr_t id, const char* where) {
   Collect();
-  const Control* k = Find(p);
+  const Control* k = Find(id);
   if (!k) {
     patch::Log("menunav: %s is no longer on the screen; no click", g.click_name.c_str());
     return;
   }
+  const uintptr_t p = k->p;
   const uintptr_t owner = Ptr(p + 0xB8);
   const uintptr_t ui = Readable(owner, 0x38) ? Ptr(owner + 0x34) : 0;
   if (!Readable(ui, 0x1E0) || !I32(p + 0x6C) || !I32(p + 0x70)) {
@@ -358,12 +416,16 @@ void ClickNow(uintptr_t p, const char* where) {
     return;
   }
   const std::string name = k->name;  // the click may change the screen (and the list)
+  POINT at{static_cast<LONG>(k->cx()), static_cast<LONG>(k->cy())};
+  const int arg = k->row >= 0 ? static_cast<int>(reinterpret_cast<uintptr_t>(&at)) : 0;
   ++g.clicks;
+  g.last_click = GetTickCount();
+  g.appeared.clear();
   patch::Log("menunav: click %s (%s)", name.c_str(), where);
   const uintptr_t vt = Ptr(p);
   reinterpret_cast<SetCaptureFn>(kSetCapture)(ui, nullptr, p, nullptr, 1);
-  reinterpret_cast<PressFn>(Ptr(vt + 0xDC))(p, nullptr, 0, 0);
-  reinterpret_cast<PressFn>(Ptr(vt + 0xE0))(p, nullptr, 0, 0);
+  reinterpret_cast<PressFn>(Ptr(vt + 0xDC))(p, nullptr, 0, arg);
+  reinterpret_cast<PressFn>(Ptr(vt + 0xE0))(p, nullptr, 0, arg);
   patch::Log("menunav: click %s done", name.c_str());
 }
 
@@ -404,7 +466,7 @@ void Do(int action, const char* from, uintptr_t cursor) {
   }
   const Control* to;
   if (f) {
-    to = Nearest(&f->r, f->cx(), f->cy(), action, f->p);
+    to = Nearest(&f->r, f->cx(), f->cy(), action, f->id);
   } else {
     // Nothing chosen yet: the control under the cursor, else the nearest one
     // from the cursor in that direction, else the first.
@@ -633,6 +695,26 @@ void MenuNavFrame(uintptr_t cursor) {
         ClickNow(g.click_p, "no tick hook: from the menu cursor update");
       }
     }
+  }
+  // A click of ours opened a pull-down panel (Single Player, Multiplayer,
+  // User Profiles): once its controls take input (its animation is over),
+  // the cursor goes to the first of them (reading order).
+  if (g.last_click && now - g.last_click < 4000 && g.frames % 4 == 0 && !g.click_ready && g.click_wait < 0) {
+    Collect();
+    const Control* first = nullptr;
+    auto band = [](const Control& k) { return static_cast<int>(k.cy()) / 24; };
+    for (uintptr_t id : g.appeared) {
+      const Control* k = Find(id);
+      if (!k || !Ptr(k->p + 0x18C)) continue;  // only controls anchored to a panel
+      if (!first || band(*k) < band(*first) || (band(*k) == band(*first) && k->cx() < first->cx())) first = k;
+    }
+    g.appeared.clear();
+    if (first) {
+      g.last_click = 0;
+      MoveTo(*first, "panel opened");
+    }
+  } else if (g.last_click && now - g.last_click >= 4000) {
+    g.last_click = 0;
   }
   // After an action, where the cursor really went (for the log).
   if (g.last_action && now - g.last_action > 100 && now - g.last_action < 100 + 40) {

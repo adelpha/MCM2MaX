@@ -431,6 +431,11 @@ MenuMaX=1
 ; InputTiming=1. 0 = mouse only, as the game was. Default 1.
 MenuNav=1
 
+; ZoneFix: 1 = the Multiplayer panel's MSN Gaming Zone button (the Zone closed
+; long ago; clicking it crashed or closed the game) is greyed out and does
+; nothing. 0 = as the game was. Default 1.
+ZoneFix=1
+
 ; MenuFlag: 1 = a waving dark blue chequered flag behind the main menu, seen
 ; through the transparent parts of MenuBackground (fills the whole window,
 ; also the sides of a wide screen). Needs the MenuBackground picture and the

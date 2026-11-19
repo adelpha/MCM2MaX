@@ -159,6 +159,7 @@ struct Config {
   bool menu_options = true;   // MenuOptions: MCM2MaX settings added to the game's own Options pages (menus.cpp)
   bool menu_log = false;      // MenuLog: log every event on the pages MCM2MaX adds settings to
   bool menu_max = true;       // MenuMaX: new menu screens drawn with RmlUi from UI/MaX/ (ui/ui.cpp)
+  bool zone_fix = true;       // ZoneFix: Multiplayer's MSN Gaming Zone button greyed out and does nothing (it crashed / quit the game)
   bool menu_nav = true;       // MenuNav: keyboard / controllers drive the game's own menus (menunav.cpp)
   bool menu_hires_3d = true;  // MenuHiRes3D: 3D in the menus (garage bike) drawn at window resolution (dd/hires3d.cpp)
   bool menu_flag = true;      // MenuFlag: waving flag behind the main menu, under MenuBackground (dd/menubg.cpp)

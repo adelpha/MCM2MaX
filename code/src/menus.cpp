@@ -995,6 +995,29 @@ void MenusRefreshFromIni() {
   patch::Log("menus: Enhancements box brought up to date after a MenuMaX screen (%d controls changed)", changed);
 }
 
+// ZoneFix: the main menu's Multiplayer panel has an "MSN Gaming Zone" button
+// (ButZone) whose click launches the long-gone Zone and crashes or quits the
+// game. The panel's set-up enables it with push 1 at 0x44c619 (the other
+// connection buttons get the game's own test): push 0 greys it out like
+// them; and its click branch (0x44d093, after the name compare) jumps
+// straight to the handler's end, so nothing can start it.
+void ApplyZoneFix() {
+  if (!GetConfig().zone_fix) {
+    patch::Log("menus: ZoneFix=0, the MSN Gaming Zone button as it was");
+    return;
+  }
+  const uint8_t enable[] = {0x6A, 0x01, 0x8B, 0xC8, 0xFF, 0x92, 0xC4, 0x00, 0x00, 0x00};  // push 1 / mov ecx,eax / call [edx+0C4h]
+  const uint8_t click[] = {0x8B, 0x0D, 0xAC, 0x43, 0x57, 0x00};                          // mov ecx,[5743ACh]
+  if (!patch::Matches(0x44C619, enable, sizeof(enable)) || !patch::Matches(0x44D093, click, sizeof(click))) {
+    patch::Log("menus: ZoneFix: main menu code differs, not applied");
+    return;
+  }
+  const uint8_t off = 0x00;
+  patch::Write(0x44C61A, &off, 1);
+  patch::Jump(0x44D093, 0x44D6B0, sizeof(click));
+  patch::Log("menus: ZoneFix: the MSN Gaming Zone button is greyed out and does nothing");
+}
+
 void ApplyMenuOptions() {
   const Config& c = GetConfig();
   g_archives[0].on = c.menu_options && *reinterpret_cast<const uintptr_t*>(kOptGraphEventSlot) == kOptGraphEvent;
