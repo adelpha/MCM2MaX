@@ -22,4 +22,9 @@ void OnActivate(bool active);
 // After a frame's steps: input read outside steps (menus) sees everything.
 void EndSteps();
 
+// MenuNav (menunav.h): a left click for the game's menus, given to the game
+// at its next mouse reads (button 0 down, up 60 ms later). Needs InputTiming.
+void NavClick();
+bool NavClickPending();
+
 }  // namespace input

@@ -196,6 +196,7 @@ void LoadConfig() {
   g_config.menu_flag = GetPrivateProfileIntA(sec, "MenuFlag", 1, ini) != 0;
   g_config.menu_hires_3d = GetPrivateProfileIntA(sec, "MenuHiRes3D", 1, ini) != 0;
   g_config.menu_max = GetPrivateProfileIntA(sec, "MenuMaX", 1, ini) != 0;
+  g_config.menu_nav = GetPrivateProfileIntA(sec, "MenuNav", 1, ini) != 0;
   {
     auto pct = [&](const char* key, int def, int hi) {
       const int v = static_cast<int>(GetPrivateProfileIntA(sec, key, def, ini));

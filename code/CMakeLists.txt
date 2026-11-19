@@ -79,6 +79,7 @@ add_library(MCM2MaX SHARED
   src/video/player.cpp
   src/music.cpp
   src/menus.cpp
+  src/menunav.cpp
   src/music_decoders.cpp
   MCM2MaX.def)
 # Indeo 5 video decoding needs a static FFmpeg (tools/build-ffmpeg.sh). Without

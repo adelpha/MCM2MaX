@@ -418,8 +418,18 @@ MenuHiRes3D=1
 ; HTML/CSS-style; see UI\MaX\README.txt), drawn at the window's resolution
 ; and usable with the mouse, keyboard and controllers. For now: "More
 ; Settings" on Options > Graphics. Edit the files while a screen is open and it
-; reloads. Needs the Direct3D 11 renderer. 0 = no new screens. Default 1.
+; reloads. Works with both renderers. 0 = no new screens. Default 1.
 MenuMaX=1
+
+; MenuNav: 1 = the game's own menu screens also work with the keyboard and
+; controllers, and look as they always have: arrows / d-pad / left stick (a
+; wheel's or joystick's hat or stick) move the menu cursor to the nearest
+; button in that direction (it lights up as under the mouse), Enter / A
+; (joystick button 1) clicks it, Esc / B (button 2) clicks the screen's Back
+; or Cancel. Keys a screen uses itself (Enter / Esc on message boxes, the
+; replay player's arrows) stay the game's. The mouse works as before. Needs
+; InputTiming=1. 0 = mouse only, as the game was. Default 1.
+MenuNav=1
 
 ; MenuFlag: 1 = a waving dark blue chequered flag behind the main menu, seen
 ; through the transparent parts of MenuBackground (fills the whole window,

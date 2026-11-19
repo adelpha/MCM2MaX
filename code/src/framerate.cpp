@@ -750,6 +750,22 @@ void RaceGone(uintptr_t race) {
   }
 }
 
+// A race is running (as MenuFpsCap decides, below): bikes or the player
+// simulated in the last half second, or a race between its countdown being
+// set and its start, or its podium. The pause menu is not racing.
+bool RaceRunning() {
+  if (!g_freq.QuadPart) return false;
+  const LONGLONG half = g_freq.QuadPart / 2;
+  const LONGLONG t = Now();
+  const bool bikes = g_bike_seen && t - g_bike_seen < half;
+  const bool player = g_player_seen && t - g_player_seen < half;
+  const uintptr_t race = g_live_race;
+  const bool started = race && *reinterpret_cast<const uint8_t*>(race + 0x18A) != 0;
+  const uintptr_t game = *reinterpret_cast<const uintptr_t*>(0x5743AC);
+  const bool podium = race && game && *reinterpret_cast<const int*>(game + 0x3430) != 0;
+  return bikes || player || (race && (!started || podium));
+}
+
 void WaitForFrameSlot() {
   const Config& c = GetConfig();
   if (!g_freq.QuadPart) return;
