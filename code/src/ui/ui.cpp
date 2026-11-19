@@ -166,7 +166,8 @@ struct State {
   DWORD held_since = 0, held_last = 0;
   WORD pad_prev[8] = {};
   bool pads_from_hub = false;
-  size_t pad_count = 0;
+  size_t pad_count = 0, stick_count = 0;
+  DWORD stick_prev[8] = {};
   int pad_dir_prev = -1;
   // One press seen through two devices at once (a keyboard that is also an
   // XInput pad, the game reading the keyboard two ways) counts once.
@@ -708,12 +709,13 @@ void PollPads() {
     patch::Log("MenuMaX: %u controller(s) through %s", static_cast<unsigned>(pads.size()),
                from_hub ? "the ControllerHub (SDL3)" : "XInput");
   }
+  // Every connected pad and joystick counts (a keyboard can show up as a pad
+  // too); the first one held in a direction steers.
+  int dir = -1;
+  const char* dir_from = "controller";
+  const bool settling = GetTickCount() - g.opened_at < 200;  // held when the screen opened
   if (!pads.empty()) {
-    // Every connected pad counts (a keyboard can show up as one too); the
-    // first one held in a direction steers.
     xpad = true;
-    int dir = -1;
-    const bool settling = GetTickCount() - g.opened_at < 200;  // held when the screen opened
     for (size_t i = 0; i < pads.size() && i < 8; ++i) {
       const hub::PadState& s = pads[i];
       const WORD pressed = settling ? 0 : static_cast<WORD>(s.buttons & ~g.pad_prev[i]);
@@ -733,16 +735,33 @@ void PollPads() {
       if (pressed & 0x2000) Press(Rml::Input::KI_ESCAPE, "controller B");
       if (pressed && GetConfig().menu_log) patch::Log("MenuMaX: controller %u buttons %04x", static_cast<unsigned>(i), s.buttons);
     }
-    if (!settling) PadDir(dir, "controller");
   }
-  if (!xpad && !from_hub && g.joy_seen) {
-    PadDir(PovDir(g.joy_pov), "joystick");
-    static DWORD prev = 0;
-    const DWORD pressed = g.joy_buttons & ~prev;
+  // Wheels and other joysticks: through SDL with the hub (hat or centred
+  // stick, button 1 = select, button 2 = back), else through the game's own
+  // DirectInput reads (only while no XInput pad is there: an Xbox pad shows
+  // up as both, and the hub's joystick can be the keyboard).
+  std::vector<hub::StickState> sticks;
+  if (from_hub) {
+    hub::ReadSticks(&sticks);
+    if (sticks.size() != g.stick_count) {
+      g.stick_count = sticks.size();
+      patch::Log("MenuMaX: %u other joystick(s) through SDL", static_cast<unsigned>(sticks.size()));
+    }
+  } else if (!xpad && g.joy_seen) {
+    sticks.push_back(hub::StickState{PovDir(g.joy_pov), g.joy_buttons});
+  }
+  for (size_t i = 0; i < sticks.size() && i < 8; ++i) {
+    const DWORD pressed = settling ? 0 : sticks[i].buttons & ~g.stick_prev[i];
+    g.stick_prev[i] = sticks[i].buttons;
+    if (settling) continue;
+    if (dir < 0 && sticks[i].dir >= 0) {
+      dir = sticks[i].dir;
+      dir_from = "joystick";
+    }
     if (pressed & 1) Press(Rml::Input::KI_RETURN, "joystick button 1");
     if (pressed & 2) Press(Rml::Input::KI_ESCAPE, "joystick button 2");
-    prev = g.joy_buttons;
   }
+  if (!settling && (!pads.empty() || !sticks.empty())) PadDir(dir, dir_from);
 }
 
 void DoInput(const RECT& game_rect) {
