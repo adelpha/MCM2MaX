@@ -2,10 +2,12 @@
 // screens, ...) work with the keyboard and controllers as well as the mouse,
 // and look exactly as they do.
 //
-// It drives the game's own mouse cursor, so everything the game does for the
-// mouse happens as it always has: the button under the cursor lights up
-// (its own focus picture), plays its sound, shows its tool tip, and a click
-// goes through the game's own code.
+// It moves the game's own mouse cursor onto the chosen control and makes it
+// the control under the cursor the way the game does (its own focus
+// picture, sound and tool tip), and clicks it the way the game's own
+// hotkeys (KeyBind) do: for the moment of the click, the control's KeyBind
+// is a key no keyboard has (F15), and that key is pressed through the
+// game's keyboard reads, so the click goes through the game's own code.
 //   - Arrows / d-pad / left stick (wheels and joysticks: hat or stick) move
 //     the cursor to the nearest control in that direction.
 //   - Enter / A (joystick button 1) clicks the control under the cursor.
@@ -21,6 +23,17 @@
 //     class "UIControl".
 //   - Tree node: +0x8 previous, +0xc next, +0x10 first child, +0x14 parent;
 //     +0x25 bit 0 shown, bit 3 off (not drawn / no input).
+//   - Control +0x70: shown (0x471590 shows / hides, with its animation);
+//     +0x68 animation (0 none, 1 coming in, 2 going out); +0x18c the control
+//     it is anchored to (RelAnchor; the main menu's pull-down panels). The
+//     game takes input on a control only while it and every control it is
+//     anchored to are shown and not animating (0x471d30, 0x472070).
+//   - KeyBind click (UIButton etc. key handler 0x472f00): enabled (+0x6c)
+//     and shown, then 0x4886c0(ui, control, 0, 1) (makes it the control
+//     under the cursor), then the control's vtable +0xdc (press) and +0xe0
+//     (release = click) with (0, 0). ui = [[control + 0xb8] + 0x34].
+//   - 0x488790(ui, control, 0): the control under the cursor (+0x1d8);
+//     the old one gets vtable +0x80 (leave), the new one +0x7c (enter).
 //   - Control: vtable = its class; rect +0x2c..+0x38 (left, top, right,
 //     bottom) in 640x480 menu pixels; +0x6c enabled; +0xf4 name; +0x1d8 the
 //     key that clicks it (KeyBind, a DirectInput key code, 0 = none).
@@ -66,6 +79,11 @@ const char* KindOf(uintptr_t vt) {
   return nullptr;
 }
 
+// Hover: ui's control under the cursor (0x488790).
+constexpr uintptr_t kSetHover = 0x488790;
+using SetHoverFn = int(__fastcall*)(uintptr_t ui, void* edx, uintptr_t control, uintptr_t* old);
+
+constexpr unsigned kDikClick = 0x66;  // DIK_F15: the click's stand-in KeyBind
 constexpr unsigned kDikEsc = 0x01, kDikEnter = 0x1C, kDikPadEnter = 0x9C;
 constexpr unsigned kDikUp = 0xC8, kDikDown = 0xD0, kDikLeft = 0xCB, kDikRight = 0xCD;
 
@@ -109,6 +127,11 @@ struct State {
   float want_x = 0, want_y = 0;
   int click_wait = -1;  // frames since a click's cursor move (-1 = no click)
   std::string click_name;
+  uintptr_t click_p = 0;
+  // A click given as a KeyBind press: the control and its own KeyBind.
+  uintptr_t bind_p = 0;
+  int bind_prev = 0;
+  DWORD bind_at = 0;
   DWORD last_action = 0;
   bool axes_logged = false;
   unsigned frames = 0, actions = 0, clicks = 0;
@@ -131,6 +154,19 @@ bool Shown(uintptr_t node, uintptr_t top) {
     if (!(f & 1) || (f & 8)) return false;
     if (node == top) return true;
     node = Ptr(node + 0x14);
+  }
+  return true;
+}
+
+// Shown and taking input: the game's own test (0x471d30): shown (+0x70),
+// and every control it is anchored to shown and not animating.
+bool Live(uintptr_t c) {
+  if (!I32(c + 0x70)) return false;
+  uintptr_t a = Ptr(c + 0x18C);
+  for (int depth = 0; a && depth < 8; ++depth) {
+    if (!Readable(a, 0x190)) return false;
+    if (!I32(a + 0x70) || I32(a + 0x68) != 0) return false;
+    a = Ptr(a + 0x18C);
   }
   return true;
 }
@@ -171,7 +207,7 @@ void Collect() {
     const uintptr_t list = Ptr(d + 0x7F3C);
     if (!Readable(list, 0x28)) continue;
     Each(list, "UIControl", [&](uintptr_t c) {
-      if (!Readable(c, 0x1E0) || !Shown(c, d)) return;
+      if (!Readable(c, 0x1E0) || !Shown(c, d) || !Live(c)) return;
       const int key = I32(c + 0x1D8);
       if (key > 0 && key < 256) g.bound_keys.push_back(key);
       const char* kind = KindOf(Ptr(c));
@@ -276,12 +312,47 @@ void MoveTo(const Control& k, const char* why) {
   g.want_y = std::floor(k.cy());
   patch::Log("menunav: %s -> %s (%s %ld,%ld %ldx%ld), cursor to %.0f,%.0f", why, k.name.c_str(), k.kind, k.r.left, k.r.top,
              k.r.right - k.r.left, k.r.bottom - k.r.top, g.want_x, g.want_y);
+  // Light it up as the game does when the mouse goes over it (it may not
+  // notice the cursor moving under it until the mouse itself moves).
+  const uintptr_t owner = Ptr(k.p + 0xB8);
+  const uintptr_t ui = Readable(owner, 0x38) ? Ptr(owner + 0x34) : 0;
+  if (Readable(ui, 0x1E0) && Ptr(ui + 0x1D8) != k.p && !Ptr(ui + 0x1CC)) {
+    const int ok = reinterpret_cast<SetHoverFn>(kSetHover)(ui, nullptr, k.p, nullptr);
+    if (GetConfig().menu_log || !ok) patch::Log("menunav: %s under the cursor%s", k.name.c_str(), ok ? "" : ": the game said no");
+  }
+}
+
+bool Clickable(const char* kind) {
+  return !std::strcmp(kind, "button") || !std::strcmp(kind, "checkbox") || !std::strcmp(kind, "radio") ||
+         !std::strcmp(kind, "dropdown");
 }
 
 void Click(const Control& k, const char* why) {
   MoveTo(k, why);
+  if (!Clickable(k.kind)) {
+    patch::Log("menunav: %s is a %s; it can't be clicked from the keyboard or a controller yet (the mouse still can)",
+               k.name.c_str(), k.kind);
+    return;
+  }
   g.click_wait = 0;  // frames since the cursor was sent there
   g.click_name = k.name;
+  g.click_p = k.p;
+}
+
+// Puts the control's own KeyBind back once the click's key press is over.
+void EndBind(bool timeout) {
+  if (!g.bind_p) return;
+  Collect();
+  if (Find(g.bind_p)) {
+    if (I32(g.bind_p + 0x1D8) == static_cast<int>(kDikClick)) *reinterpret_cast<int*>(g.bind_p + 0x1D8) = g.bind_prev;
+  } else {
+    patch::Log("menunav: %s has gone (the click changed the screen)", g.click_name.c_str());
+  }
+  if (timeout) {
+    patch::Log("menunav: the game did not read the keyboard for 1 s; click on %s dropped", g.click_name.c_str());
+    input::NavKeyCancel();
+  }
+  g.bind_p = 0;
 }
 
 void Do(int action, const char* from, uintptr_t cursor) {
@@ -446,7 +517,7 @@ void MenuNavKey(unsigned dik, bool down) {
 }
 
 void MenuNavClickDone(unsigned data_reads, unsigned state_reads) {
-  patch::Log("menunav: click on %s given (%u buffered and %u immediate mouse reads saw it)", g.click_name.c_str(), data_reads,
+  patch::Log("menunav: click on %s given (%u buffered and %u immediate keyboard reads saw it)", g.click_name.c_str(), data_reads,
              state_reads);
 }
 
@@ -529,20 +600,32 @@ void MenuNavFrame(uintptr_t cursor) {
     g.move_wanted = false;
     SetCursor(cursor, g.want_x, g.want_y);
   }
-  if (g.click_wait >= 0) {
+  if (g.bind_p && (!input::NavKeyPending() || now - g.bind_at > 1000)) EndBind(input::NavKeyPending());
+  if (g.click_wait >= 0 && !g.bind_p) {
     // Click once the cursor has been on the control for a frame (it lights
     // up first), or after 10 frames whatever happened.
     const POINT p = CursorPos(cursor);
     const bool there = std::fabs(p.x - g.want_x) < 1.5f && std::fabs(p.y - g.want_y) < 1.5f;
     ++g.click_wait;
     if ((there && g.click_wait >= 3) || g.click_wait >= 10) {
-      if (input::NavClickPending()) return;
+      if (input::NavKeyPending()) return;
+      g.click_wait = -1;
       if (!there)
         patch::Log("menunav: cursor at %ld,%ld, not at %.0f,%.0f as asked; clicking anyway", p.x, p.y, g.want_x, g.want_y);
-      input::NavClick();
-      ++g.clicks;
-      g.click_wait = -1;
-      patch::Log("menunav: click %s at %ld,%ld", g.click_name.c_str(), p.x, p.y);
+      Collect();
+      const Control* k = Find(g.click_p);
+      if (!k) {
+        patch::Log("menunav: %s is no longer on the screen; no click", g.click_name.c_str());
+      } else {
+        g.bind_p = k->p;
+        g.bind_prev = I32(k->p + 0x1D8);
+        g.bind_at = now;
+        *reinterpret_cast<int*>(k->p + 0x1D8) = kDikClick;
+        input::NavKeyPress(kDikClick);
+        ++g.clicks;
+        patch::Log("menunav: click %s at %ld,%ld (its KeyBind %02x for the moment)", g.click_name.c_str(), p.x, p.y,
+                   static_cast<unsigned>(g.bind_prev));
+      }
     }
   }
   // After an action, where the cursor really went (for the log).

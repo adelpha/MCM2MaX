@@ -750,15 +750,17 @@ HRESULT UiFilterState(void* self, DWORD cb, void* out, HRESULT hr) {
 }
 
 // MenuNav (menunav.h): keyboard presses are passed on (the game still gets
-// them), and its left clicks go to the game as mouse button 0, in both of
-// the ways the game may read the mouse (a real click shows up in both too).
-struct NavClick {
+// them), and its clicks go to the game as a key press (a key no keyboard
+// has, which MenuNav makes the control's KeyBind for the moment), in both of
+// the ways the game may read the keyboard (a real key shows up in both too).
+struct NavPress {
   int phase = 0;  // 0 none, 1 press wanted, 2 down (since `at`)
+  unsigned dik = 0;
   DWORD at = 0;
   bool data_down = false, data_up = false;  // buffered events given
   unsigned data_reads = 0, state_reads = 0;
-} g_nav_click;
-constexpr DWORD kNavClickMs = 60;  // how long the button stays down
+} g_nav_press;
+constexpr DWORD kNavPressMs = 60;  // how long the key stays down
 
 void NavKeysFromData(const DiData* data, DWORD n) {
   for (DWORD i = 0; i < n; ++i) MenuNavKey(data[i].ofs, (data[i].data & 0x80) != 0);
@@ -772,10 +774,10 @@ void NavKeysFromState(const uint8_t* keys) {
   }
 }
 
-// Advances the click: the press starts at the first read after it was
-// asked for and ends kNavClickMs later.
-void NavClickTick() {
-  NavClick& c = g_nav_click;
+// Advances the press: it starts at the first read after it was asked for
+// and ends kNavPressMs later.
+void NavPressTick() {
+  NavPress& c = g_nav_press;
   if (c.phase == 1) {
     c.phase = 2;
     c.at = GetTickCount();
@@ -784,37 +786,37 @@ void NavClickTick() {
   }
 }
 
-void NavClickData(DiData* data, DWORD* inout, DWORD cap) {
-  NavClick& c = g_nav_click;
+void NavPressData(DiData* data, DWORD* inout, DWORD cap) {
+  NavPress& c = g_nav_press;
   if (c.phase == 0) return;
-  NavClickTick();
+  NavPressTick();
   ++c.data_reads;
   const DWORD now = GetTickCount();
   auto add = [&](bool down) {
     if (*inout >= cap) return false;
     DiData& e = data[(*inout)++];
-    e.ofs = 12;  // DIMOFS_BUTTON0
+    e.ofs = c.dik;
     e.data = down ? 0x80 : 0;
     e.time = now;
     e.seq = 0x7FFF0000u + (now & 0xFFFF);
     return true;
   };
   if (!c.data_down && add(true)) c.data_down = true;
-  if (c.data_down && !c.data_up && now - c.at >= kNavClickMs && add(false)) c.data_up = true;
-  if (c.data_up && now - c.at >= kNavClickMs) {
+  if (c.data_down && !c.data_up && now - c.at >= kNavPressMs && add(false)) c.data_up = true;
+  if (c.data_up && now - c.at >= kNavPressMs) {
     MenuNavClickDone(c.data_reads, c.state_reads);
     c.phase = 0;
   }
 }
 
-void NavClickState(uint8_t* b, DWORD cb) {
-  NavClick& c = g_nav_click;
-  if (c.phase == 0 || cb < 16) return;
-  NavClickTick();
+void NavPressState(uint8_t* b, DWORD cb) {
+  NavPress& c = g_nav_press;
+  if (c.phase == 0 || cb <= c.dik) return;
+  NavPressTick();
   ++c.state_reads;
   const DWORD now = GetTickCount();
-  if (now - c.at < kNavClickMs) {
-    b[12] |= 0x80;
+  if (now - c.at < kNavPressMs) {
+    b[c.dik] |= 0x80;
   } else if (!c.data_down || c.data_up) {
     // Up in the state; buffered reads (if any) have had their release.
     MenuNavClickDone(c.data_reads, c.state_reads);
@@ -832,8 +834,10 @@ HRESULT WINAPI MyGetData(void* self, DWORD cb, DiData* data, DWORD* inout, DWORD
       Lock lock;
       if (Device* d = Find(self)) kind = d->kind;
     }
-    if (kind == kKeyboard) NavKeysFromData(data, *inout);
-    if (kind == kMouse) NavClickData(data, inout, cap);
+    if (kind == kKeyboard) {
+      NavKeysFromData(data, *inout);
+      NavPressData(data, inout, cap);
+    }
   }
   if (FAILED(hr) || !data || !inout || cb != sizeof(DiData) || !ModePromptActive()) return hr;
   int kind = -1;
@@ -869,8 +873,10 @@ HRESULT WINAPI MyGetState(void* self, DWORD cb, void* out) {
       Lock lock;
       if (Device* d = Find(self)) kind = d->kind;
     }
-    if (kind == kKeyboard && cb >= 256) NavKeysFromState(static_cast<const uint8_t*>(out));
-    if (kind == kMouse) NavClickState(static_cast<uint8_t*>(out), cb);
+    if (kind == kKeyboard && cb >= 256) {
+      NavKeysFromState(static_cast<const uint8_t*>(out));
+      NavPressState(static_cast<uint8_t*>(out), cb);
+    }
   }
   if (FAILED(hr) || !out || !ModePromptActive()) return hr;
   int kind = -1;
@@ -1004,11 +1010,16 @@ void OnActivate(bool active) {
   }
 }
 
-void NavClick() {
-  if (g_nav_click.phase == 0) g_nav_click.phase = 1;
+void NavKeyPress(unsigned dik) {
+  if (g_nav_press.phase == 0 && dik < 256) {
+    g_nav_press.dik = dik;
+    g_nav_press.phase = 1;
+  }
 }
 
-bool NavClickPending() { return g_nav_click.phase != 0; }
+bool NavKeyPending() { return g_nav_press.phase != 0; }
+
+void NavKeyCancel() { g_nav_press.phase = 0; }
 
 void EndSteps() {
   if (!g_enabled) return;
