@@ -15,6 +15,6 @@ void MenuNavKey(unsigned dik, bool down);
 // The game's menu cursor is about to update (GUICursor, game thread, every
 // menu frame; fixes_resolution.cpp's cursor hook). cursor = the GUICursor.
 void MenuNavFrame(uintptr_t cursor);
-// A click given to the game has finished (input_timing.cpp): how many of the
-// game's buffered and immediate mouse reads saw it.
-void MenuNavClickDone(unsigned data_reads, unsigned state_reads);
+// The start of the game's tick (framerate.cpp, game thread, outside the menu
+// code): clicks are made here.
+void MenuNavTick();

@@ -14,6 +14,7 @@
 #include "framerate.h"
 #include "freecam.h"
 #include "input_timing.h"
+#include "menunav.h"
 #include "prof.h"
 #include "smooth.h"
 
@@ -323,6 +324,7 @@ const MsTimerFn kGameMs = reinterpret_cast<MsTimerFn>(0x4C41D0);
 // zero after a reset); we keep them up to date for anything else reading
 // them and return the step in seconds on the FPU stack, like the original.
 float __stdcall GameFrameTime(uintptr_t game) {
+  MenuNavTick();  // menu clicks from the keyboard / controllers
   auto& now_ms = *reinterpret_cast<DWORD*>(game + 0x2d8);
   auto& last_ms = *reinterpret_cast<DWORD*>(game + 0x2dc);
   LONGLONG now = Now();
@@ -465,6 +467,7 @@ int __stdcall FixedTick(uintptr_t g) {
 
 void FixedTickBody(uintptr_t g) {
   SoundPausePoll(g);
+  MenuNavTick();  // menu clicks from the keyboard / controllers
   auto& now_ms = *reinterpret_cast<DWORD*>(g + 0x2d8);
   auto& last_ms = *reinterpret_cast<DWORD*>(g + 0x2dc);
   const LONGLONG now = Now();

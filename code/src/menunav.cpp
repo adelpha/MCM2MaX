@@ -4,10 +4,13 @@
 //
 // It moves the game's own mouse cursor onto the chosen control and makes it
 // the control under the cursor the way the game does (its own focus
-// picture, sound and tool tip), and clicks it the way the game's own
-// hotkeys (KeyBind) do: for the moment of the click, the control's KeyBind
-// is a key no keyboard has (F15), and that key is pressed through the
-// game's keyboard reads, so the click goes through the game's own code.
+// picture, sound and tool tip), and clicks it with the calls the game's own
+// hotkeys (KeyBind) make, at the start of the game's next tick (outside the
+// menu code, where a click may close the screen). Neither an injected mouse
+// button nor an injected KeyBind key works: the game passes an input
+// device's events to the menus only while that device's own cursor is the
+// active one (0x4890f0), and touching a controller makes the game's own
+// joystick cursor the active one.
 //   - Arrows / d-pad / left stick (wheels and joysticks: hat or stick) move
 //     the cursor to the nearest control in that direction.
 //   - Enter / A (joystick button 1) clicks the control under the cursor.
@@ -51,7 +54,6 @@
 
 #include "config.h"
 #include "framerate.h"
-#include "input_timing.h"
 #include "pad_hub.h"
 #include "patch.h"
 #include "ui/ui.h"
@@ -83,7 +85,10 @@ const char* KindOf(uintptr_t vt) {
 constexpr uintptr_t kSetHover = 0x488790;
 using SetHoverFn = int(__fastcall*)(uintptr_t ui, void* edx, uintptr_t control, uintptr_t* old);
 
-constexpr unsigned kDikClick = 0x66;  // DIK_F15: the click's stand-in KeyBind
+// KeyBind click calls (0x472f00).
+constexpr uintptr_t kSetCapture = 0x4886C0;
+using SetCaptureFn = int(__fastcall*)(uintptr_t ui, void* edx, uintptr_t control, uintptr_t* old, int now);
+using PressFn = int(__fastcall*)(uintptr_t control, void* edx, int a, int b);
 constexpr unsigned kDikEsc = 0x01, kDikEnter = 0x1C, kDikPadEnter = 0x9C;
 constexpr unsigned kDikUp = 0xC8, kDikDown = 0xD0, kDikLeft = 0xCB, kDikRight = 0xCD;
 
@@ -128,10 +133,8 @@ struct State {
   int click_wait = -1;  // frames since a click's cursor move (-1 = no click)
   std::string click_name;
   uintptr_t click_p = 0;
-  // A click given as a KeyBind press: the control and its own KeyBind.
-  uintptr_t bind_p = 0;
-  int bind_prev = 0;
-  DWORD bind_at = 0;
+  uintptr_t click_ready = 0;  // to click at the next tick
+  DWORD tick_at = 0;          // last MenuNavTick
   DWORD last_action = 0;
   bool axes_logged = false;
   unsigned frames = 0, actions = 0, clicks = 0;
@@ -339,20 +342,29 @@ void Click(const Control& k, const char* why) {
   g.click_p = k.p;
 }
 
-// Puts the control's own KeyBind back once the click's key press is over.
-void EndBind(bool timeout) {
-  if (!g.bind_p) return;
+// Clicks a control with the calls the game's KeyBind code makes (0x472f00).
+void ClickNow(uintptr_t p, const char* where) {
   Collect();
-  if (Find(g.bind_p)) {
-    if (I32(g.bind_p + 0x1D8) == static_cast<int>(kDikClick)) *reinterpret_cast<int*>(g.bind_p + 0x1D8) = g.bind_prev;
-  } else {
-    patch::Log("menunav: %s has gone (the click changed the screen)", g.click_name.c_str());
+  const Control* k = Find(p);
+  if (!k) {
+    patch::Log("menunav: %s is no longer on the screen; no click", g.click_name.c_str());
+    return;
   }
-  if (timeout) {
-    patch::Log("menunav: the game did not read the keyboard for 1 s; click on %s dropped", g.click_name.c_str());
-    input::NavKeyCancel();
+  const uintptr_t owner = Ptr(p + 0xB8);
+  const uintptr_t ui = Readable(owner, 0x38) ? Ptr(owner + 0x34) : 0;
+  if (!Readable(ui, 0x1E0) || !I32(p + 0x6C) || !I32(p + 0x70)) {
+    patch::Log("menunav: %s can't take a click now (ui %08x, enabled %d, shown %d)", k->name.c_str(),
+               static_cast<unsigned>(ui), I32(p + 0x6C), I32(p + 0x70));
+    return;
   }
-  g.bind_p = 0;
+  const std::string name = k->name;  // the click may change the screen (and the list)
+  ++g.clicks;
+  patch::Log("menunav: click %s (%s)", name.c_str(), where);
+  const uintptr_t vt = Ptr(p);
+  reinterpret_cast<SetCaptureFn>(kSetCapture)(ui, nullptr, p, nullptr, 1);
+  reinterpret_cast<PressFn>(Ptr(vt + 0xDC))(p, nullptr, 0, 0);
+  reinterpret_cast<PressFn>(Ptr(vt + 0xE0))(p, nullptr, 0, 0);
+  patch::Log("menunav: click %s done", name.c_str());
 }
 
 void Do(int action, const char* from, uintptr_t cursor) {
@@ -516,9 +528,13 @@ void MenuNavKey(unsigned dik, bool down) {
   Unlock();
 }
 
-void MenuNavClickDone(unsigned data_reads, unsigned state_reads) {
-  patch::Log("menunav: click on %s given (%u buffered and %u immediate keyboard reads saw it)", g.click_name.c_str(), data_reads,
-             state_reads);
+void MenuNavTick() {
+  if (!g.on) return;
+  g.tick_at = GetTickCount();
+  if (const uintptr_t p = g.click_ready) {
+    g.click_ready = 0;
+    ClickNow(p, "at the start of the game's tick");
+  }
 }
 
 void MenuNavFrame(uintptr_t cursor) {
@@ -537,6 +553,7 @@ void MenuNavFrame(uintptr_t cursor) {
     g.was_ui = screen;
     g.dir_prev = -1;
     g.click_wait = -1;
+    g.click_ready = 0;
     g.move_wanted = false;
   }
   if (racing || screen) {
@@ -600,31 +617,20 @@ void MenuNavFrame(uintptr_t cursor) {
     g.move_wanted = false;
     SetCursor(cursor, g.want_x, g.want_y);
   }
-  if (g.bind_p && (!input::NavKeyPending() || now - g.bind_at > 1000)) EndBind(input::NavKeyPending());
-  if (g.click_wait >= 0 && !g.bind_p) {
+  if (g.click_wait >= 0 && !g.click_ready) {
     // Click once the cursor has been on the control for a frame (it lights
     // up first), or after 10 frames whatever happened.
     const POINT p = CursorPos(cursor);
     const bool there = std::fabs(p.x - g.want_x) < 1.5f && std::fabs(p.y - g.want_y) < 1.5f;
     ++g.click_wait;
     if ((there && g.click_wait >= 3) || g.click_wait >= 10) {
-      if (input::NavKeyPending()) return;
       g.click_wait = -1;
       if (!there)
         patch::Log("menunav: cursor at %ld,%ld, not at %.0f,%.0f as asked; clicking anyway", p.x, p.y, g.want_x, g.want_y);
-      Collect();
-      const Control* k = Find(g.click_p);
-      if (!k) {
-        patch::Log("menunav: %s is no longer on the screen; no click", g.click_name.c_str());
+      if (now - g.tick_at < 500) {
+        g.click_ready = g.click_p;  // at the start of the next tick
       } else {
-        g.bind_p = k->p;
-        g.bind_prev = I32(k->p + 0x1D8);
-        g.bind_at = now;
-        *reinterpret_cast<int*>(k->p + 0x1D8) = kDikClick;
-        input::NavKeyPress(kDikClick);
-        ++g.clicks;
-        patch::Log("menunav: click %s at %ld,%ld (its KeyBind %02x for the moment)", g.click_name.c_str(), p.x, p.y,
-                   static_cast<unsigned>(g.bind_prev));
+        ClickNow(g.click_p, "no tick hook: from the menu cursor update");
       }
     }
   }
