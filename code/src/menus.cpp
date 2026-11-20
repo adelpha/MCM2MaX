@@ -792,7 +792,7 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   if (type == 6 || type == 4) {  // page closing (6) or being built again (4)
     if (g_graph_page) patch::Log("menus: Options > Graphics closed (event %d)", type);
     g_graph_page = 0;
-    ui::Close("Options > Graphics closed");
+    ui::CloseScreen("settings", "Options > Graphics closed");
   }
   if ((type == 1 || type == 3) && std::strcmp(SafeName(event), kMaxButton) == 0) {
     patch::Log("menus: %s clicked (event %d)", kMaxButton, type);
@@ -844,7 +844,9 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
       }
     }
   }
-  if (type == 3) {
+  // A checkbox click: type 3 from the game's own mouse handling here, type 1
+  // when its click is made the way a KeyBind makes it (MenuNav, MenuMaX).
+  if (type == 3 || type == 1) {
     const char* clicked = SafeName(event);
     // Borderless / Exclusive (the radio group keeps one selected): switch now.
     // (Borderless / Exclusive: see MenusFrame; radio buttons send no event.)
@@ -917,51 +919,6 @@ void MenusFrame() {
   if (want == excl) return;
   patch::Log("menus: %s picked", kFsNames[want ? 1 : 0]);
   ResolutionSetExclusive(want, FindAny(page, "DisplayResolutionDropDown"));
-}
-
-// MenuMaX: the game's own checkboxes on the open Options > Graphics page,
-// read and set by name (ui/ui.cpp, game="SkyCheckBox"). Setting one puts
-// its state in, redraws it and tells the page as if it had been clicked.
-bool MenusGameGet(const char* name, int* value) {
-  const uintptr_t page = g_graph_page;
-  if (!page) return false;
-  const uintptr_t box = FindCheckbox(page, name);
-  if (!box) return false;
-  *value = *reinterpret_cast<const int*>(box + kStateOffset);
-  return true;
-}
-
-bool MenusGameSet(const char* name, int value) {
-  const uintptr_t page = g_graph_page;
-  if (!page) return false;
-  const uintptr_t box = FindCheckbox(page, name);
-  if (!box) return false;
-  int* state = reinterpret_cast<int*>(box + kStateOffset);
-  const int before = *state;
-  *state = value ? 1 : 0;
-  const uintptr_t redraw = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + kRedrawSlot);
-  reinterpret_cast<RedrawFn>(redraw)(box, nullptr);
-  // The checkbox's own click sound (SoundPush): vtable +0xE8 plays the sound
-  // of a state (3 = pushed, as the box's mouse-down 0x473180 does; 2 if the
-  // box has none for 3). Event type 3 is a slider / list change on this page
-  // (its handler plays "Ratchet03" for it), so the click goes as type 1, the
-  // type the box's mouse-up 0x479d10 sends.
-  {
-    const uintptr_t* snd = reinterpret_cast<const uintptr_t*>(box + 0x194);
-    const int idx = snd[3] ? 3 : (snd[2] ? 2 : -1);
-    if (idx >= 0) {
-      using PlayFn = void(__fastcall*)(uintptr_t self, void* edx, int state, int unused);
-      reinterpret_cast<PlayFn>(*reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(box) + 0xE8))(box, nullptr, idx, 0);
-    }
-    patch::Log("menus: game control %s click sound %d", name, idx);
-  }
-  // The event the page gets for a click: +0 id, +4 name, +8 type, +0xc sender.
-  uintptr_t ev[4] = {0, reinterpret_cast<uintptr_t>(name), 1, box};
-  const uintptr_t handler = *reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(page) + 29 * 4);
-  reinterpret_cast<EventFn>(handler)(page, nullptr, reinterpret_cast<uintptr_t>(ev));
-  patch::Log("menus: game control %s set %d -> %d (now %d after the page's click handling)", name, before, value ? 1 : 0,
-             *state);
-  return true;
 }
 
 // MenuMaX: a screen over Options > Graphics closed; it may have saved

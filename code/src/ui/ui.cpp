@@ -16,12 +16,11 @@
 #include "../mode_prompt.h"
 #include "../patch.h"
 #include "../dd/backend.h"
+#include "../menugame.h"
 #include "render_d3d11.h"
 #include "render_d3d9.h"
 
-// menus.cpp: the game's own controls on the open Options > Graphics page.
-bool MenusGameGet(const char* name, int* value);
-bool MenusGameSet(const char* name, int value);
+// menus.cpp: the Enhancements box brought up to date after a screen.
 void MenusRefreshFromIni();
 
 namespace ui {
@@ -130,6 +129,22 @@ struct Setting {
   std::string value;     // as shown now
 };
 
+// An element tied to a control of the game's (game="Name", menugame.h): it
+// shows the control's state, text, greying and visibility, and passes the
+// player's changes on to it. game-if="Name": shown only while that control is.
+struct GameBind {
+  Rml::Element* el = nullptr;
+  std::string name;
+  bool only_if = false;  // game-if
+  enum Ui { kDiv, kCheckInput, kRange, kSelect, kTextInput } ui = kDiv;
+  Rml::Element* text_el = nullptr;  // where the control's text goes (none: kept)
+  bool seen = false;
+  mg::Info last;
+  std::vector<std::string> rows;
+  bool dragging = false;  // a slider being moved: its release is still to send
+  DWORD changed_at = 0;   // the player's last change (the game's value is not shown for a moment)
+};
+
 struct State {
   std::recursive_mutex mu;  // input queue and open/close requests
   bool installed = false;
@@ -151,6 +166,14 @@ struct State {
   DWORD last_watch = 0;
   // Settings on the open screen.
   std::vector<Setting> settings;
+  std::vector<GameBind> game;
+  bool updating = false;     // the game's values being put into elements: not changes
+  std::string back_control;  // game-back="Back": Esc / B clicks it (the game closes the page)
+  std::vector<std::string> cover;  // game-cover="A B": shown only while one of these is
+  bool suspended = false;    // hidden: the game's own screen is in front (a message box, a page not copied)
+  DWORD auto_check = 0;      // last look for a game screen to open a copy over
+  std::string auto_screen;   // the screen opened for a game screen (closed when it goes)
+  std::string auto_trigger;
   std::map<std::string, std::string> pending;  // key -> value not yet saved
   DWORD last_change = 0;
   bool binding = false;  // values being put into controls: not changes
@@ -231,7 +254,8 @@ XInputGetStateFn LoadXInput() {
 // ---------------------------------------------------------------- settings
 
 void Collect(Rml::Element* e, std::vector<Rml::Element*>& out) {
-  if (e->HasAttribute("ini") || e->HasAttribute("game") || e->HasAttribute("ini-text") || e->HasAttribute("enable-if"))
+  if (e->HasAttribute("ini") || e->HasAttribute("game") || e->HasAttribute("game-if") || e->HasAttribute("ini-text") ||
+      e->HasAttribute("enable-if"))
     out.push_back(e);
   for (int i = 0; i < e->GetNumChildren(); ++i) Collect(e->GetChild(i), out);
 }
@@ -283,39 +307,233 @@ void UpdateTexts() {
   }
 }
 
+// ---------------------------------------------------------------- the game's controls
+
+const char* KindName(mg::Kind k) {
+  switch (k) {
+    case mg::kButton: return "button";
+    case mg::kCheck: return "checkbox";
+    case mg::kRadio: return "radio button";
+    case mg::kDropdown: return "dropdown";
+    case mg::kEdit: return "edit box";
+    case mg::kList: return "list";
+    case mg::kSlider: return "slider";
+    case mg::kScrollArrow: return "scroll arrow";
+    case mg::kStatic: return "picture / text";
+    default: return "?";
+  }
+}
+
+void BindGame(Rml::Element* e) {
+  GameBind b;
+  b.el = e;
+  b.only_if = !e->HasAttribute("game");
+  b.name = e->GetAttribute<Rml::String>(b.only_if ? "game-if" : "game", "");
+  const Rml::String tag = e->GetTagName(), type = e->GetAttribute<Rml::String>("type", "");
+  if (tag == "input") {
+    b.ui = type == "checkbox" ? GameBind::kCheckInput : type == "range" ? GameBind::kRange : GameBind::kTextInput;
+  } else if (tag == "select") {
+    b.ui = GameBind::kSelect;
+  } else if (!b.only_if && e->GetAttribute<Rml::String>("game-text", "on") != "off") {
+    // The control's text goes into a child of class "t", else into the
+    // element itself when it holds only text.
+    bool only_text = true;
+    for (int i = 0; i < e->GetNumChildren(); ++i) {
+      Rml::Element* c = e->GetChild(i);
+      if (c->IsClassSet("t")) {
+        b.text_el = c;
+        break;
+      }
+      if (c->GetTagName() != "#text") only_text = false;
+    }
+    if (!b.text_el && only_text) b.text_el = e;
+  }
+  e->SetClass("game-hidden", true);  // until the control is seen
+  g.game.push_back(b);
+}
+
+bool BoundToGame(const std::string& name) {
+  for (const GameBind& b : g.game)
+    if (b.name == name) return true;
+  return false;
+}
+
+void SyncOne(GameBind& b, DWORD now) {
+  mg::Info i;
+  const bool found = mg::Get(b.name.c_str(), &i);
+  b.el->SetClass("game-hidden", !(found && i.shown));
+  if (!found) {
+    if (b.seen) patch::Log("MenuMaX: game control %s gone", b.name.c_str());
+    b.seen = false;
+    return;
+  }
+  const bool first = !b.seen;
+  if (first)
+    patch::Log("MenuMaX: game control %s: %s, %s%s, value %d of %d, text \"%s\" (%ld,%ld %ldx%ld)", b.name.c_str(),
+               KindName(i.kind), i.shown ? "shown" : "hidden", i.enabled ? "" : ", greyed", i.value, i.range, i.text.c_str(),
+               i.rect.left, i.rect.top, i.rect.right - i.rect.left, i.rect.bottom - i.rect.top);
+  b.seen = true;
+  if (b.only_if) {
+    b.last = i;
+    return;
+  }
+  b.el->SetClass("disabled", !i.enabled);
+  if (b.ui != GameBind::kDiv) {
+    if (i.enabled) b.el->RemoveAttribute("disabled");
+    else if (!b.el->HasAttribute("disabled")) b.el->SetAttribute("disabled", "");
+  }
+  const bool settled = now - b.changed_at > 400 && !b.dragging;
+  switch (b.ui) {
+    case GameBind::kDiv:
+      b.el->SetClass("on", (i.kind == mg::kCheck || i.kind == mg::kRadio) && i.value != 0);
+      break;
+    case GameBind::kCheckInput:
+      if (!settled) break;
+      if (i.value && !b.el->HasAttribute("checked")) b.el->SetAttribute("checked", "");
+      else if (!i.value && b.el->HasAttribute("checked")) b.el->RemoveAttribute("checked");
+      break;
+    case GameBind::kRange: {
+      auto* fc = dynamic_cast<Rml::ElementFormControl*>(b.el);
+      if (!fc || !settled) break;
+      if (i.range > 0 && b.el->GetAttribute<int>("max", -1) != i.range) {
+        b.el->SetAttribute("min", 0);
+        b.el->SetAttribute("max", i.range);
+        b.el->SetAttribute("step", 1);
+      }
+      if (std::atoi(fc->GetValue().c_str()) != i.value) fc->SetValue(std::to_string(i.value));
+      break;
+    }
+    case GameBind::kSelect: {
+      auto* sel = dynamic_cast<Rml::ElementFormControlSelect*>(b.el);
+      if (!sel) break;
+      std::vector<std::string> rows;
+      mg::Rows(b.name.c_str(), &rows);
+      if (rows != b.rows) {
+        b.rows = rows;
+        sel->RemoveAll();
+        for (size_t r = 0; r < rows.size(); ++r) sel->Add(Rml::StringUtilities::EncodeRml(rows[r]), std::to_string(r));
+        patch::Log("MenuMaX: game list %s: %u rows", b.name.c_str(), static_cast<unsigned>(rows.size()));
+      }
+      if (settled && !sel->IsSelectBoxVisible() && sel->GetSelection() != i.value) sel->SetSelection(i.value);
+      break;
+    }
+    case GameBind::kTextInput: {
+      auto* fc = dynamic_cast<Rml::ElementFormControl*>(b.el);
+      if (fc && settled && g.context->GetFocusElement() != b.el && fc->GetValue() != i.text) fc->SetValue(i.text);
+      break;
+    }
+  }
+  if (b.text_el && !i.text.empty() && (first || i.text != b.last.text)) b.text_el->SetInnerRML(Rml::StringUtilities::EncodeRml(i.text));
+  b.last = i;
+}
+
+// Every frame a screen tied to the game's controls is open: shows their
+// state; hides the screen while the game's own is in front.
+void SyncGame() {
+  if (g.game.empty() && g.cover.empty() && g.back_control.empty()) return;
+  const DWORD now = GetTickCount();
+  mg::Refresh();
+  bool covered = g.cover.empty();
+  for (const std::string& n : g.cover) {
+    mg::Info i;
+    if (mg::Get(n.c_str(), &i) && i.shown) covered = true;
+  }
+  std::vector<std::string> modal;
+  bool other_modal = false;
+  if (mg::Modal(&modal)) {
+    other_modal = true;
+    for (const std::string& n : modal)
+      if (BoundToGame(n)) other_modal = false;
+  }
+  const bool suspend = !covered || other_modal;
+  if (suspend != g.suspended) {
+    g.suspended = suspend;
+    patch::Log("MenuMaX: %s %s (%s)", g.open_name.c_str(), suspend ? "hidden: the game's own screen is in front" : "shown again",
+               !covered ? "a page this screen does not copy" : other_modal ? "a message box of the game's" : "back to a copied page");
+    if (suspend) {
+      g.doc->Hide();
+    } else {
+      g.doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
+      std::lock_guard<std::recursive_mutex> l(g.mu);
+      g.keys.clear();
+      g.buttons.clear();
+      g.opened_at = now;  // keys held from the game's screen are not presses here
+    }
+  }
+  if (g.suspended) return;
+  g.updating = true;
+  for (GameBind& b : g.game) {
+    SyncOne(b, now);
+    // A slider let go: the release the game gets at the end of a drag.
+    if (b.dragging && now - b.changed_at > 300) {
+      b.dragging = false;
+      if (auto* fc = dynamic_cast<Rml::ElementFormControl*>(b.el)) mg::SetSlider(b.name.c_str(), std::atoi(fc->GetValue().c_str()), 16);
+    }
+  }
+  g.updating = false;
+}
+
+// A click on an element tied to a button, checkbox, radio button or tab.
+void OnGameClick(Rml::Element* target) {
+  for (Rml::Element* e = target; e; e = e->GetParentNode()) {
+    for (GameBind& b : g.game) {
+      if (b.el != e || b.only_if || b.ui != GameBind::kDiv) continue;
+      if (!b.seen || !b.last.enabled || !b.last.shown) {
+        patch::Log("MenuMaX: %s clicked, but the game's control is %s", b.name.c_str(),
+                   !b.seen ? "not there" : !b.last.enabled ? "greyed out" : "hidden");
+        return;
+      }
+      const mg::Kind k = b.last.kind;
+      if (k == mg::kButton || k == mg::kCheck || k == mg::kRadio || k == mg::kScrollArrow) {
+        ++g.clicks;
+        mg::Click(b.name.c_str());
+      }
+      return;
+    }
+  }
+}
+
 void Bind() {
   g.settings.clear();
+  g.game.clear();
   std::vector<Rml::Element*> els;
   Collect(g.doc, els);
   g.binding = true;
   for (Rml::Element* e : els) {
-    const bool game = e->HasAttribute("game");
-    if (!game && !e->HasAttribute("ini")) continue;
+    if (e->HasAttribute("game") || e->HasAttribute("game-if")) {
+      BindGame(e);
+      continue;
+    }
+    if (!e->HasAttribute("ini")) continue;
     Setting s;
     s.el = e;
-    s.game = game;
-    s.key = e->GetAttribute<Rml::String>(game ? "game" : "ini", "");
+    s.key = e->GetAttribute<Rml::String>("ini", "");
     s.checkbox = e->GetTagName() == "input" && e->GetAttribute<Rml::String>("type", "") == "checkbox";
-    std::string v;
-    if (game) {
-      int iv = 0;
-      if (!MenusGameGet(s.key.c_str(), &iv)) {
-        patch::Log("MenuMaX: game control %s not found on the page under the screen; greyed", s.key.c_str());
-        e->SetAttribute("disabled", "");
-      }
-      v = std::to_string(iv);
-    } else {
-      v = CurrentValue(s.key, e->GetAttribute<Rml::String>("default", "0"));
-    }
+    const std::string v = CurrentValue(s.key, e->GetAttribute<Rml::String>("default", "0"));
     s.on_value = !IsZero(v) && s.checkbox ? v : e->GetAttribute<Rml::String>("ini-on", "1");
     SetControl(s, v);
-    patch::Log("MenuMaX: %s %s = %s (%s%s)", game ? "game control" : "setting", s.key.c_str(), v.c_str(),
-               e->GetTagName().c_str(), s.checkbox ? " checkbox" : "");
+    patch::Log("MenuMaX: setting %s = %s (%s%s)", s.key.c_str(), v.c_str(), e->GetTagName().c_str(), s.checkbox ? " checkbox" : "");
     g.settings.push_back(s);
   }
   g.binding = false;
+  // The screen as a whole: game-back="Back" (Esc / B clicks it),
+  // game-cover="A B" (shown only while one of these controls is).
+  g.back_control = g.doc->GetAttribute<Rml::String>("game-back", "");
+  g.cover.clear();
+  {
+    const std::string c = g.doc->GetAttribute<Rml::String>("game-cover", "");
+    for (size_t a = 0; a < c.size();) {
+      size_t z = c.find(' ', a);
+      if (z == std::string::npos) z = c.size();
+      if (z > a) g.cover.push_back(c.substr(a, z - a));
+      a = z + 1;
+    }
+  }
+  g.suspended = false;
   UpdateTexts();
-  patch::Log("MenuMaX: %u controls bound on %s", static_cast<unsigned>(g.settings.size()), g.open_name.c_str());
+  patch::Log("MenuMaX: %u settings and %u game controls bound on %s%s%s", static_cast<unsigned>(g.settings.size()),
+             static_cast<unsigned>(g.game.size()), g.open_name.c_str(), g.back_control.empty() ? "" : "; back = ",
+             g.back_control.c_str());
 }
 
 void Save(const std::string& key, const std::string& v) {
@@ -338,26 +556,47 @@ void FlushPending(const char* why) {
 }
 
 void OnChange(Rml::Element* target) {
-  if (g.binding) return;
+  if (g.binding || g.updating) return;
+  for (GameBind& b : g.game) {
+    if (b.el != target || b.only_if) continue;
+    const DWORD now = GetTickCount();
+    auto* fc = dynamic_cast<Rml::ElementFormControl*>(target);
+    switch (b.ui) {
+      case GameBind::kCheckInput:
+        mg::Click(b.name.c_str());
+        break;
+      case GameBind::kRange: {
+        const int v = fc ? std::atoi(fc->GetValue().c_str()) : 0;
+        if (!b.dragging) mg::SetSlider(b.name.c_str(), v, 15);  // grab
+        mg::SetSlider(b.name.c_str(), v, 3);                   // change
+        b.dragging = true;
+        break;
+      }
+      case GameBind::kSelect:
+        if (fc && !fc->GetValue().empty()) mg::Choose(b.name.c_str(), std::atoi(fc->GetValue().c_str()));
+        break;
+      case GameBind::kTextInput:
+        if (fc) mg::SetText(b.name.c_str(), fc->GetValue());
+        break;
+      default:
+        break;
+    }
+    b.changed_at = now;
+    if (target->HasAttribute("restart") && g.doc) g.doc->SetClass("restart-needed", true);
+    return;
+  }
   for (Setting& s : g.settings) {
     if (s.el != target) continue;
     std::string v;
     if (s.checkbox) v = target->HasAttribute("checked") ? s.on_value : "0";
     else if (auto* fc = dynamic_cast<Rml::ElementFormControl*>(target)) v = Tidy(fc->GetValue());
     if (v == s.value) return;
-    patch::Log("MenuMaX: %s %s: %s -> %s", s.game ? "game control" : "setting", s.key.c_str(), s.value.c_str(), v.c_str());
+    patch::Log("MenuMaX: setting %s: %s -> %s", s.key.c_str(), s.value.c_str(), v.c_str());
     s.value = v;
     if (s.checkbox && !IsZero(v)) s.on_value = v;
-    if (s.game) {
-      if (!MenusGameSet(s.key.c_str(), IsZero(v) ? 0 : std::atoi(v.c_str())))
-        patch::Log("MenuMaX: game control %s could not be set", s.key.c_str());
-    } else {
-      g.pending[s.key] = v;  // saved once it stops changing (sliders send many)
-      g.last_change = GetTickCount();
-    }
-    if (target->HasAttribute("restart") && g.doc) {
-      if (Rml::Element* body = g.doc) body->SetClass("restart-needed", true);
-    }
+    g.pending[s.key] = v;  // saved once it stops changing (sliders send many)
+    g.last_change = GetTickCount();
+    if (target->HasAttribute("restart") && g.doc) g.doc->SetClass("restart-needed", true);
     UpdateTexts();
     return;
   }
@@ -370,6 +609,12 @@ class ChangeListener : public Rml::EventListener {
   void ProcessEvent(Rml::Event& e) override { OnChange(e.GetTargetElement()); }
 };
 ChangeListener g_change;
+
+class ClickListener : public Rml::EventListener {
+ public:
+  void ProcessEvent(Rml::Event& e) override { OnGameClick(e.GetTargetElement()); }
+};
+ClickListener g_click;
 
 // onclick="close" / "open <screen>" / "reload": what a button does.
 class Command : public Rml::EventListener {
@@ -496,10 +741,15 @@ void CloseDoc() {
   if (!g.doc) return;
   FlushPending("screen closed");
   g.doc->RemoveEventListener(Rml::EventId::Change, &g_change);
+  g.doc->RemoveEventListener(Rml::EventId::Click, &g_click);
   g.doc->Close();
   g.doc = nullptr;
   g.last_focus = nullptr;
   g.settings.clear();
+  g.game.clear();
+  g.cover.clear();
+  g.back_control.clear();
+  g.suspended = false;
   g.context->Update();  // documents go away at the next update
 }
 
@@ -513,6 +763,7 @@ bool LoadDoc(const std::string& name, const std::string& focus_id) {
     return false;
   }
   g.doc->AddEventListener(Rml::EventId::Change, &g_change);
+  g.doc->AddEventListener(Rml::EventId::Click, &g_click);
   g.open_name = name;
   Bind();
   g.doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::Auto);
@@ -587,7 +838,25 @@ bool Repeats(Rml::Input::KeyIdentifier k) {
 bool IsControl(Rml::Element* e) {
   if (!e) return false;
   const Rml::String& t = e->GetTagName();
-  return t == "input" || t == "select" || t == "button";
+  return t == "input" || t == "select" || t == "button" || e->GetComputedValues().tab_index() == Rml::Style::TabIndex::Auto;
+}
+
+// Keyboard / controller moves: the pointer goes onto the control picked
+// (a checkbox's or radio button's box, else the middle), so it lights up as
+// under the mouse, as MenuNav does on the game's own screens.
+void PointAt(Rml::Element* e) {
+  if (!e || !g.context) return;
+  const Rml::Vector2f at = e->GetAbsoluteOffset(Rml::BoxArea::Border);
+  const Rml::Vector2f size = e->GetBox().GetSize(Rml::BoxArea::Border);
+  const float dp = g.context->GetDensityIndependentPixelRatio();
+  float x = at.x + size.x * 0.5f, y = at.y + size.y * 0.5f;
+  if (e->IsClassSet("check") || e->IsClassSet("radio")) x = at.x + 7.0f * dp;
+  g.px = x;
+  g.py = y;
+  g.pointer_set = true;
+  g.mouse_x = static_cast<int>(x);
+  g.mouse_y = static_cast<int>(y);
+  g.context->ProcessMouseMove(g.mouse_x, g.mouse_y, 0);
 }
 
 // After any input: remember the focused control, or give focus back to the
@@ -645,6 +914,11 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
     return;
   }
   if (k == KI_ESCAPE) {
+    if (!g.back_control.empty()) {
+      patch::Log("MenuMaX: back (%s): the game's %s", from, g.back_control.c_str());
+      mg::Click(g.back_control.c_str());
+      return;
+    }
     patch::Log("MenuMaX: back (%s)", from);
     Close(from);
     return;
@@ -656,11 +930,31 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
     return;
   }
   if (!g.context) return;
-  if (!IsControl(g.context->GetFocusElement()) && g.last_focus) g.last_focus->Focus(true);
+  if (!IsControl(g.context->GetFocusElement())) {
+    if (g.last_focus) {
+      g.last_focus->Focus(true);
+    } else if (Repeats(k) && g.doc) {
+      // Nothing picked yet: the first move picks the lit tab (.tab.on), else
+      // the first control shown.
+      Rml::ElementList list;
+      g.doc->QuerySelectorAll(list, ".tab.on");
+      if (list.empty()) g.doc->QuerySelectorAll(list, "input, select, button, .tab, .button, .check, .radio, .cycle");
+      for (Rml::Element* e : list) {
+        if (!e->IsVisible(true) || !IsControl(e) || !e->Focus(true)) continue;
+        g.last_focus = e;
+        PointAt(e);
+        patch::Log("MenuMaX: first move (%s): %s#%s picked", from, e->GetTagName().c_str(), e->GetId().c_str());
+        return;
+      }
+    }
+  }
   const int mods = g.shift ? KM_SHIFT : 0;
+  Rml::Element* before = g.context->GetFocusElement();
   g.context->ProcessKeyDown(k, mods);
   g.context->ProcessKeyUp(k, mods);
   if (g.doc) KeepFocus("key");
+  if (g.doc && Repeats(k) && g.context->GetFocusElement() != before && IsControl(g.context->GetFocusElement()))
+    PointAt(g.context->GetFocusElement());
   if (GetConfig().menu_log) {
     Rml::Element* f = g.context->GetFocusElement();
     patch::Log("MenuMaX: key %d (%s) -> focus %s#%s", static_cast<int>(k), from, f ? f->GetTagName().c_str() : "-",
@@ -928,7 +1222,7 @@ void Install() {
              attr == INVALID_FILE_ATTRIBUTES ? "MISSING" : "found");
 }
 
-bool Active() { return g.active; }
+bool Active() { return g.active && !g.suspended; }
 
 bool Open(const char* name, const char* why) {
   if (!g.installed) return false;
@@ -949,6 +1243,12 @@ bool Open(const char* name, const char* why) {
   return true;
 }
 
+void CloseScreen(const char* name, const char* why) {
+  std::lock_guard<std::recursive_mutex> l(g.mu);
+  const std::string open = g.want_open.empty() ? g.open_name : g.want_open;
+  if (g.active && open == name) Close(why);
+}
+
 void Close(const char* why) {
   std::lock_guard<std::recursive_mutex> l(g.mu);
   if (!g.active) return;
@@ -962,9 +1262,42 @@ void Close(const char* why) {
 
 namespace {
 
+// MaXOptions: the copy of the game's Options screen opens over it when the
+// game shows it, and closes when the game's goes.
+void AutoScreens() {
+  if (!GetConfig().max_options) return;
+  const DWORD now = GetTickCount();
+  if (now - g.auto_check < 100) return;
+  g.auto_check = now;
+  struct Auto {
+    const char* screen;
+    const char* trigger;  // a control only that game screen has
+  };
+  static const Auto kAuto[] = {{"options", "GameSettings"}};
+  if (g.doc && g.auto_screen.empty()) return;  // another screen is open
+  mg::Refresh();
+  for (const Auto& a : kAuto) {
+    mg::Info i;
+    const bool there = mg::Get(a.trigger, &i) && i.shown;
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    if (there && !g.active && g.want_open.empty()) {
+      if (g.auto_screen != a.screen) patch::Log("MenuMaX: the game's %s screen is shown", a.screen);
+      g.auto_screen = a.screen;
+      Open(a.screen, "the game's own screen is shown");
+      return;
+    }
+    if (!there && g.auto_screen == a.screen) {
+      patch::Log("MenuMaX: the game's %s screen is gone", a.screen);
+      g.auto_screen.clear();
+      if (g.active) Close("the game's own screen is gone");
+    }
+  }
+}
+
 void PresentFrame(const Target& t, const RECT& game_rect) {
   const UINT w = t.w, h = t.h;
   if (!g.installed || g.failed) return;
+  AutoScreens();
   std::string open;
   bool close;
   {
@@ -993,6 +1326,8 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
     }
   }
   if (!g.doc || !g.context) return;
+  SyncGame();
+  if (g.suspended) return;  // the game's own screen is in front
   // Sizes: the window in pixels, 1dp = one 640x480 menu pixel.
   const Rml::Vector2i dims(static_cast<int>(w), static_cast<int>(h));
   if (g.context->GetDimensions() != dims) {

@@ -5,6 +5,8 @@ The screens in this folder are drawn by RmlUi (https://mikke89.github.io/RmlUiDo
 a library that lays out HTML/CSS-style text files. Open them in any text editor.
 
   settings.rml   the "More Settings" screen (Options > Graphics > More Settings)
+  options.rml    the Options screen (MaXOptions=1), a copy of the game's own
+  options.rcss   its look (each control's pictures are the game's own)
   max.rcss       the look shared by every screen (colours, sizes, fonts)
   images\        pictures (PNG; pointer.png is the mouse pointer)
   fonts\         fonts (TTF/OTF, all loaded at start)
@@ -30,9 +32,8 @@ Any control can read and save an mcm2max.ini setting:
   ini-on="v"          the value saved when a checkbox is ticked (default 1)
   restart             the change applies the next time the game starts
                       (shows the "* after restarting the game" note)
-  game="Name"         a checkbox on the game's own page under the screen
-                      (Options > Graphics: SkyCheckBox, ParticlesCheckBox,
-                      ShadowsCheckBox)
+  game="Name"         a control on the game's own screen under this one (see
+                      "Copies of the game's screens" below)
   <span ini-text="Key" suffix="x" zero="Off"/>   shows a setting's value
   enable-if="Key!=0"  (or "Key=1") greys the control unless it holds
   autofocus           where the keyboard / controller starts
@@ -53,3 +54,33 @@ Every screen can be used with all three, with no extra work:
 Everything that can be picked needs "nav: auto" and "tab-index: auto" (set for
 input, select and button in max.rcss); nav-up / nav-down / nav-left / nav-right
 set a different order where the automatic one is wrong.
+
+Copies of the game's screens
+----------------------------
+options.rml is drawn over the game's own Options screen, which keeps running
+underneath and does all the saving and applying. Each element is tied to the
+game's control of the same name (the names come from the game's layouts,
+UI\<NAME>.DAT; tools/mcm2rml.py in the MCM2MaX source writes a first copy):
+
+  game="Name"     shows that control: its text (the game's own, so translated
+                  versions show theirs), greyed out (class "disabled"), ticked
+                  or picked (class "on"), hidden when the game hides it (class
+                  "game-hidden"); a click on the element clicks the control.
+                  <input type="range">, <select> and <input type="text"> take
+                  the game's slider position, list rows and text, and pass
+                  changes back. The text goes into a child of class "t" if
+                  there is one; game-text="off" keeps the element's own text.
+  game-if="Name"  shown only while the game shows that control (a page)
+  On <body>:
+  game-back="Back"   Esc / B / the right mouse button click this game control
+  game-cover="A B"   the screen hides and the game's own shows unless one of
+                     these controls is shown (pages not copied yet, message
+                     boxes; a message box of the game's always shows)
+
+Pictures can be the game's own, read from its UI\<ARCHIVE>.DAT files:
+  decorator: image(/dat/OPTBASE/Options/OptTab01.tga);
+After a '?': black (black is see-through too), opaque (nothing is), frame=N
+(only the outer N pixels: a border-only box plate), bar (a slider track without
+its tick marks). Magenta, the game's see-through colour, always is. A PNG of the
+same name in UI\MaX\dat\<ARCHIVE>\... (e.g. dat\OPTBASE\Options\OptTab01.png)
+is used instead, for sharper art.

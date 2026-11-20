@@ -1,0 +1,124 @@
+<rml>
+<head>
+  <title>Options</title>
+  <link type="text/rcss" href="options.rcss"/>
+</head>
+<!--
+  The Options screen (MaXOptions=1): a copy of the game's own Options pages,
+  drawn over them. Made by tools/mcm2rml.py from the game's layouts, then
+  edited by hand. 1dp = one pixel of the game's 640x480 menus.
+
+  game="Name"     tied to the game's control of that name: shows its state,
+                  text, greying and visibility; clicks and changes go to it
+  game-if="Name"  shown only while the game's control of that name is (a page)
+  game-back       the game's control Esc / B / the right mouse button clicks
+  game-cover      the screen hides (the game's own shows) unless one of these
+                  is shown: pages not copied yet, the Advanced screen
+  Pictures: /dat/<ARCHIVE>/<file> is read from the game's UI\<ARCHIVE>.DAT;
+  a PNG of the same name under UI\MaX\dat\ replaces it.
+-->
+<body game-back="Back" game-cover="OverlaysBox DisplayResolutionBox SoundSettingsBox">
+<div id="screen">
+
+  <!-- The frame: tabs, Back, Help, Advanced, Restore -->
+  <div id="GameSettings" class="tab" game="GameSettings" style="left: 12dp; top: 0dp; width: 108dp; height: 33dp; padding-top: 14dp; text-align: center;">GameSettings</div>
+  <div id="Graphics" class="tab" game="Graphics" style="left: 120dp; top: 0dp; width: 100dp; height: 33dp; padding-top: 14dp; text-align: center;">Graphics</div>
+  <div id="Sound" class="tab" game="Sound" style="left: 220dp; top: 0dp; width: 101dp; height: 33dp; padding-top: 14dp; text-align: center;">Sound</div>
+  <div id="Controls" class="tab" game="Controls" style="left: 321dp; top: 0dp; width: 99dp; height: 33dp; padding-top: 14dp; text-align: center;">Controls</div>
+  <div id="Messages" class="tab" game="Messages" style="left: 420dp; top: 0dp; width: 100dp; height: 33dp; padding-top: 14dp; text-align: center;">Messages</div>
+  <div id="Garage" class="tab" game="Garage" style="left: 520dp; top: 0dp; width: 108dp; height: 33dp; padding-top: 14dp; text-align: center;">Garage</div>
+  <div id="Back" class="button" game="Back" style="left: 17dp; top: 404dp; width: 79dp; height: 76dp;"></div>
+  <div id="Help" class="button" game="Help" style="left: 147dp; top: 404dp; width: 56dp; height: 76dp;"></div>
+  <div id="Advanced" class="button" game="Advanced" style="left: 328dp; top: 416dp; width: 117dp; height: 33dp; color: #7ab9fe; padding-top: 9dp; text-align: center;">Advanced...</div>
+  <div id="Restore" class="button" game="Restore" style="left: 472dp; top: 416dp; width: 117dp; height: 33dp; color: #7ab9fe; padding-top: 9dp; text-align: center;">Restore...</div>
+
+  <!-- Game Settings (OPTGAME.DAT) -->
+  <!-- not copied: MultiPlayerText (the game draws a box over it) -->
+  <div id="page-optgame" class="page" game-if="OverlaysBox">
+    <div id="OverlaysBox" class="plate" style="left: 73dp; top: 71dp; width: 226dp; height: 170dp;">
+      <div id="OverlaysText" class="text" game="OverlaysText" style="left: 6dp; top: 4dp; width: 211dp; height: 19dp; font-size: 14dp;">Overlays</div>
+      <div id="RaceStatsCheckBox" class="check" game="RaceStatsCheckBox" style="left: 6dp; top: 27dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Race Statistics</span></div>
+      <div id="rbwLabel2" class="text" game="rbwLabel2" style="left: 7dp; top: 49dp; width: 106dp; height: 21dp; padding-top: 3dp;">Chat Box Mode</div>
+      <div id="rbwFrame1" class="plate" style="left: 118dp; top: 50dp; width: 99dp; height: 21dp;"/>
+      <div id="MultChatMode" class="cycle" game="MultChatMode" style="left: 121dp; top: 52dp; width: 92dp; height: 16dp; color: #7ab9fe; text-align: center;"></div>
+      <div id="GuagesCheckBox" class="check" game="GuagesCheckBox" style="left: 6dp; top: 74dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Gauges</span></div>
+      <div id="OverviewCheckBox" class="check" game="OverviewCheckBox" style="left: 6dp; top: 98dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Overview Map/Radar</span></div>
+      <div id="RiderNamesCheckBox" class="check" game="RiderNamesCheckBox" style="left: 6dp; top: 122dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Rider Names</span></div>
+      <div id="RiderPositionCheckBox" class="check" game="RiderPositionCheckBox" style="left: 6dp; top: 146dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Rider Position</span></div>
+    </div>
+    <div id="MiscSettingsBox" class="plate" style="left: 304dp; top: 71dp; width: 226dp; height: 170dp;">
+      <div id="MiscText" class="text" game="MiscText" style="left: 6dp; top: 5dp; width: 211dp; height: 18dp; font-size: 14dp;">Miscellaneous Settings</div>
+      <div id="ChkPodiums" class="check" game="ChkPodiums" style="left: 6dp; top: 26dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">End of Race Animations</span></div>
+      <div id="ChkUIAnims" class="check" game="ChkUIAnims" style="left: 6dp; top: 50dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">UI Animations</span></div>
+      <div id="ChkIntroMovie" class="check" game="ChkIntroMovie" style="left: 6dp; top: 74dp; width: 209dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Show Intro Movie</span></div>
+      <div id="ChkPlayerIndicator" class="check" game="ChkPlayerIndicator" style="left: 6dp; top: 98dp; width: 209dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Player Indicator</span></div>
+      <div id="ChkToolTips" class="check" game="ChkToolTips" style="left: 6dp; top: 122dp; width: 209dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Show Tool Tips</span></div>
+      <div id="ChkWreckResetOnTrack" class="check" game="ChkWreckResetOnTrack" style="left: 6dp; top: 146dp; width: 209dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Practice: Reset on Track</span></div>
+    </div>
+    <div id="TxtPID" class="text" game="TxtPID" style="left: 73dp; top: 248dp; width: 457dp; height: 20dp; padding-top: 2dp;"></div>
+  </div>
+
+  <!-- Graphics (OPTGRAPH.DAT) -->
+  <div id="page-optgraph" class="page" game-if="DisplayResolutionBox">
+    <div id="DisplayResolutionBox" class="plate" style="left: 8dp; top: 7dp; width: 228dp; height: 76dp;">
+      <div id="DisplayResolutionText" class="text" game="DisplayResolutionText" style="left: 9dp; top: 7dp; width: 211dp; height: 18dp;">Display Resolution</div>
+      <div id="Mcm2fixBorderless" class="radio" game="Mcm2fixBorderless" style="left: 8dp; top: 28dp; width: 105dp; height: 17dp; padding-top: 1dp; padding-left: 17dp;"><div class="box"/><span class="t">Borderless</span></div>
+      <div id="Mcm2fixExclusive" class="radio" game="Mcm2fixExclusive" style="left: 118dp; top: 28dp; width: 101dp; height: 17dp; padding-top: 1dp; padding-left: 17dp;"><div class="box"/><span class="t">Exclusive</span></div>
+      <select id="DisplayResolutionDropDown" class="dropdown" game="DisplayResolutionDropDown" style="left: 25dp; top: 50dp; width: 178dp; height: 21dp; color: #7ab9fe;"></select>
+    </div>
+    <div id="TerrainQualityBox" class="plate" style="left: 245dp; top: 7dp; width: 228dp; height: 76dp;">
+      <div id="TerrainQualityText" class="text" game="TerrainQualityText" style="left: 7dp; top: 6dp; width: 211dp; height: 18dp;">Overall Graphics Quality</div>
+      <input type="range" id="TerrainQualitySliderBar" class="slider" game="TerrainQualitySliderBar" style="left: 11dp; top: 28dp; width: 204dp; height: 16dp;"/>
+      <div id="rbwLabel6" class="text" game="rbwLabel6" style="left: 11dp; top: 45dp; width: 15dp; height: 17dp;">-</div>
+      <div id="rbwLabel7" class="text" game="rbwLabel7" style="left: 197dp; top: 45dp; width: 18dp; height: 17dp; text-align: right;">+</div>
+    </div>
+    <div id="GraphicFeaturesBox" class="plate" style="left: 8dp; top: 92dp; width: 228dp; height: 98dp;">
+      <div id="GraphicFeaturesText" class="text" game="GraphicFeaturesText" style="left: 8dp; top: 6dp; width: 211dp; height: 18dp;">Graphic Features</div>
+      <div id="ShadowsCheckBox" class="check" game="ShadowsCheckBox" style="left: 8dp; top: 27dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Shadows</span></div>
+      <div id="ParticlesCheckBox" class="check" game="ParticlesCheckBox" style="left: 8dp; top: 49dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Particle Systems</span></div>
+      <div id="SkyCheckBox" class="check" game="SkyCheckBox" style="left: 8dp; top: 71dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Sky</span></div>
+    </div>
+    <div id="Mcm2fixBox" class="plate" style="left: 245dp; top: 92dp; width: 228dp; height: 269dp;">
+      <div id="Mcm2fixBoxText" class="text" game="Mcm2fixBoxText" style="left: 8dp; top: 6dp; width: 211dp; height: 18dp;">Enhancements</div>
+      <div id="Mcm2fixAnisoText" class="text" game="Mcm2fixAnisoText" style="left: 8dp; top: 27dp; width: 140dp; height: 18dp;">Anisotropy</div>
+      <input type="range" id="Mcm2fixAniso" class="slider" game="Mcm2fixAniso" style="left: 148dp; top: 29dp; width: 70dp; height: 16dp;"/>
+      <div id="Mcm2fixMsaaText" class="text" game="Mcm2fixMsaaText" style="left: 8dp; top: 49dp; width: 140dp; height: 18dp;">Antialiasing</div>
+      <input type="range" id="Mcm2fixMsaa" class="slider" game="Mcm2fixMsaa" style="left: 148dp; top: 51dp; width: 70dp; height: 16dp;"/>
+      <div id="Mcm2fixViewText" class="text" game="Mcm2fixViewText" style="left: 8dp; top: 71dp; width: 140dp; height: 18dp;">View Distance</div>
+      <input type="range" id="Mcm2fixView" class="slider" game="Mcm2fixView" style="left: 148dp; top: 73dp; width: 70dp; height: 16dp;"/>
+      <div id="Mcm2fixVSync" class="check" game="Mcm2fixVSync" style="left: 8dp; top: 93dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">VSync</span></div>
+      <div id="Mcm2fixWideView" class="check" game="Mcm2fixWideView" style="left: 8dp; top: 115dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Widescreen View *</span></div>
+      <div id="Mcm2fixMotionBlur" class="check" game="Mcm2fixMotionBlur" style="left: 8dp; top: 137dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Motion Blur</span></div>
+      <div id="Mcm2fixSmoothEdges" class="check" game="Mcm2fixSmoothEdges" style="left: 8dp; top: 159dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Smooth Tree Edges</span></div>
+      <div id="Mcm2fixShadows" class="check" game="Mcm2fixShadows" style="left: 8dp; top: 181dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Soft Rider Shadows *</span></div>
+      <div id="Mcm2fixReflections" class="check" game="Mcm2fixReflections" style="left: 8dp; top: 203dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Bike Reflections *</span></div>
+      <div id="Mcm2fixTextures" class="check" game="Mcm2fixTextures" style="left: 8dp; top: 225dp; width: 211dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Replacement Textures *</span></div>
+      <div id="Mcm2fixFootnote" class="text" game="Mcm2fixFootnote" style="left: 8dp; top: 247dp; width: 211dp; height: 16dp;">* after restarting the game</div>
+    </div>
+    <div id="Mcm2fixMaX" class="button" game="Mcm2fixMaX" style="left: 63dp; top: 211dp; width: 117dp; height: 33dp; padding-top: 9dp; text-align: center;">More Settings</div>
+  </div>
+
+  <!-- Sound (OPTSOUND.DAT) -->
+  <div id="page-optsound" class="page" game-if="SoundSettingsBox">
+    <div id="SoundSettingsBox" class="plate" style="left: 35dp; top: 69dp; width: 256dp; height: 185dp;">
+      <div id="SoundSettingsText" class="text" game="SoundSettingsText" style="left: 8dp; top: 13dp; width: 240dp; height: 20dp; font-size: 14dp;">Sound Options</div>
+      <div id="UserInterfaceSoundsCheckBox" class="check" game="UserInterfaceSoundsCheckBox" style="left: 8dp; top: 38dp; width: 240dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">User Interface sounds</span></div>
+      <div id="InGameSoundEffectsCheck" class="check" game="InGameSoundEffectsCheck" style="left: 8dp; top: 64dp; width: 240dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">In-game Sound Effects</span></div>
+      <div id="SoundHardwareCheckBox" class="check" game="SoundHardwareCheckBox" style="left: 8dp; top: 88dp; width: 239dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Use 3-D Sound Hardware</span></div>
+      <div id="ChkEax" class="check" game="ChkEax" style="left: 8dp; top: 112dp; width: 239dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Use EAX Extensions</span></div>
+      <div id="ChkWaypointChime" class="check" game="ChkWaypointChime" style="left: 8dp; top: 136dp; width: 239dp; height: 20dp; padding-left: 17dp;"><div class="box"/><span class="t">Waypoint Confirmation</span></div>
+    </div>
+    <div id="VolumeSettingsBox" class="plate" style="left: 310dp; top: 69dp; width: 256dp; height: 185dp;">
+      <div id="VolumeSettingsText" class="text" game="VolumeSettingsText" style="left: 9dp; top: 13dp; width: 233dp; height: 20dp; font-size: 14dp;">Sound Settings</div>
+      <div id="UserInterfaceVolumeText" class="text" game="UserInterfaceVolumeText" style="left: 12dp; top: 36dp; width: 231dp; height: 17dp; text-align: center;">User Interface Volume</div>
+      <input type="range" id="UserInterfaceVolumeSlider" class="slider" game="UserInterfaceVolumeSlider" style="left: 24dp; top: 53dp; width: 204dp; height: 16dp;"/>
+      <div id="InGameVolumeText" class="text" game="InGameVolumeText" style="left: 12dp; top: 71dp; width: 231dp; height: 17dp; text-align: center;">In-game Volume</div>
+      <input type="range" id="InGameVolumeSlider" class="slider" game="InGameVolumeSlider" style="left: 24dp; top: 88dp; width: 204dp; height: 16dp;"/>
+      <div id="rbwLabel1" class="text" game="rbwLabel1" style="left: 8dp; top: 116dp; width: 89dp; height: 17dp; text-align: center;">Quality</div>
+      <div id="Rad8Bit" class="radio" game="Rad8Bit" style="left: 32dp; top: 136dp; width: 193dp; height: 17dp; padding-top: 1dp; padding-left: 17dp;"><div class="box"/><span class="t">8-bit</span></div>
+      <div id="Rad16Bit" class="radio" game="Rad16Bit" style="left: 32dp; top: 152dp; width: 193dp; height: 17dp; padding-top: 1dp; padding-left: 17dp;"><div class="box"/><span class="t">16-bit</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</rml>
