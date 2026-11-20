@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -16,6 +17,7 @@
 #include "../mode_prompt.h"
 #include "../patch.h"
 #include "../dd/backend.h"
+#include "../framerate.h"
 #include "../menugame.h"
 #include "render_d3d11.h"
 #include "render_d3d9.h"
@@ -136,13 +138,39 @@ struct GameBind {
   Rml::Element* el = nullptr;
   std::string name;
   bool only_if = false;  // game-if
-  enum Ui { kDiv, kCheckInput, kRange, kSelect, kTextInput } ui = kDiv;
+  enum Ui { kDiv, kCheckInput, kRange, kSelect, kTextInput, kList } ui = kDiv;
   Rml::Element* text_el = nullptr;  // where the control's text goes (none: kept)
   bool seen = false;
   mg::Info last;
   std::vector<std::string> rows;
   bool dragging = false;  // a slider being moved: its release is still to send
   DWORD changed_at = 0;   // the player's last change (the game's value is not shown for a moment)
+  // The game dialog the control is looked for on: game-dialog="optgame" on
+  // the element or one around it, else the screen's first (game-dialogs=).
+  // Empty: any shown dialog.
+  std::string scope_dtm;
+  uintptr_t scope = 0;  // that dialog now (0: not shown)
+  int list_top = -1, list_value = -2;  // a list's rows as last drawn
+};
+
+// <div game-dialog="optgame">: the part of a screen that copies one game
+// dialog. Shown while the game shows that dialog, at the place the game put
+// it.
+struct DialogBox {
+  Rml::Element* el = nullptr;
+  std::string dtm;
+  long left = -100000, top = -100000;
+};
+
+// MaXMenus: a screen in UI\MaX\menus\ copies one or more of the game's
+// dialogs (<body game-dialogs="optbase optgame ...">). The screens shown
+// follow the game's own dialogs, in the game's order.
+struct Layer {
+  std::string file;  // e.g. "options" (menus\options.rml)
+  Rml::ElementDocument* doc = nullptr;
+  std::vector<std::string> dialogs;  // game-dialogs
+  bool opaque = false;               // covers the whole menu: nothing under it is shown
+  std::string back;                  // game-back
 };
 
 struct State {
@@ -169,13 +197,19 @@ struct State {
   std::vector<GameBind> game;
   bool updating = false;     // the game's values being put into elements: not changes
   std::string back_control;  // game-back="Back": Esc / B clicks it (the game closes the page)
-  std::vector<uintptr_t> under;    // game dialogs already shown when the screen opened (behind it)
-  bool under_set = false;
-  std::vector<std::string> cover;  // game-cover="A B": shown only while one of these is
-  bool suspended = false;    // hidden: the game's own screen is in front (a message box, a page not copied)
-  DWORD auto_check = 0;      // last look for a game screen to open a copy over
-  std::string auto_screen;   // the screen opened for a game screen (closed when it goes)
-  std::string auto_trigger;
+  std::string back_dtm;      // the dialog game-back's control is on
+  std::vector<DialogBox> boxes;
+  // MaXMenus.
+  bool mirror = false;       // g.doc is the top of `layers` (not a screen opened by name)
+  std::vector<Layer> layers;  // bottom first
+  std::map<std::string, std::string> index;  // game dialog -> screen file
+  std::map<std::string, std::pair<bool, std::vector<std::string>>> index_info;  // file -> opaque, dialogs
+  bool index_read = false;
+  std::vector<mg::Dialog> dialogs;  // the game's, this frame
+  std::string missing;       // the game dialog shown that no screen copies (logged once)
+  // The game waits for a key / button of its own (Options > Controls
+  // remapping: OptCont +0x7f70): input goes to the game meanwhile.
+  bool capture = false;
   std::map<std::string, std::string> pending;  // key -> value not yet saved
   DWORD last_change = 0;
   bool binding = false;  // values being put into controls: not changes
@@ -185,6 +219,7 @@ struct State {
     bool down;
   };
   std::vector<Key> keys;
+  std::vector<Rml::Character> chars;  // typed text (for edit boxes)
   std::vector<std::pair<int, bool>> buttons;
   int wheel = 0;
   DWORD joy_pov = 0xFFFFFFFF, joy_buttons = 0;
@@ -326,16 +361,25 @@ const char* KindName(mg::Kind k) {
   }
 }
 
-void BindGame(Rml::Element* e) {
+std::string DialogScope(Rml::Element* e, const std::string& base) {
+  for (Rml::Element* a = e; a; a = a->GetParentNode())
+    if (a->HasAttribute("game-dialog")) return a->GetAttribute<Rml::String>("game-dialog", "");
+  return base;
+}
+
+void BindGame(Rml::Element* e, const std::string& base_dtm) {
   GameBind b;
   b.el = e;
   b.only_if = !e->HasAttribute("game");
   b.name = e->GetAttribute<Rml::String>(b.only_if ? "game-if" : "game", "");
+  b.scope_dtm = DialogScope(e, base_dtm);
   const Rml::String tag = e->GetTagName(), type = e->GetAttribute<Rml::String>("type", "");
   if (tag == "input") {
     b.ui = type == "checkbox" ? GameBind::kCheckInput : type == "range" ? GameBind::kRange : GameBind::kTextInput;
   } else if (tag == "select") {
     b.ui = GameBind::kSelect;
+  } else if (e->IsClassSet("list")) {
+    b.ui = GameBind::kList;
   } else if (!b.only_if && e->GetAttribute<Rml::String>("game-text", "on") != "off") {
     // The control's text goes into a child of class "t", else into the
     // element itself when it holds only text.
@@ -354,15 +398,28 @@ void BindGame(Rml::Element* e) {
   g.game.push_back(b);
 }
 
-bool BoundToGame(const std::string& name) {
-  for (const GameBind& b : g.game)
-    if (b.name == name) return true;
-  return false;
+// A list's rows: <div class="row" row="N"> for the rows the game shows now
+// (from its first row shown), .on the chosen one.
+void SyncList(GameBind& b, const mg::Info& i) {
+  std::vector<std::string> rows;
+  mg::Rows(b.name.c_str(), &rows, b.scope);
+  const int shown = i.visible > 0 ? i.visible : static_cast<int>(rows.size());
+  if (rows == b.rows && i.top == b.list_top && i.value == b.list_value) return;
+  if (rows != b.rows) patch::Log("MenuMaX: game list %s: %u rows, %d shown from %d", b.name.c_str(),
+                                 static_cast<unsigned>(rows.size()), shown, i.top);
+  b.rows = rows;
+  b.list_top = i.top;
+  b.list_value = i.value;
+  std::string rml;
+  for (int r = i.top < 0 ? 0 : i.top, n = 0; r < static_cast<int>(rows.size()) && n < shown; ++r, ++n)
+    rml += "<div class=\"row" + std::string(r == i.value ? " on" : "") + "\" row=\"" + std::to_string(r) + "\">" +
+           Rml::StringUtilities::EncodeRml(rows[r]) + "</div>";
+  b.el->SetInnerRML(rml);
 }
 
 void SyncOne(GameBind& b, DWORD now) {
   mg::Info i;
-  const bool found = mg::Get(b.name.c_str(), &i);
+  const bool found = (b.scope || b.scope_dtm.empty()) && mg::Get(b.name.c_str(), &i, b.scope);
   b.el->SetClass("game-hidden", !(found && i.shown));
   if (!found) {
     if (b.seen) patch::Log("MenuMaX: game control %s gone", b.name.c_str());
@@ -409,7 +466,7 @@ void SyncOne(GameBind& b, DWORD now) {
       auto* sel = dynamic_cast<Rml::ElementFormControlSelect*>(b.el);
       if (!sel) break;
       std::vector<std::string> rows;
-      mg::Rows(b.name.c_str(), &rows);
+      mg::Rows(b.name.c_str(), &rows, b.scope);
       if (rows != b.rows) {
         b.rows = rows;
         sel->RemoveAll();
@@ -424,87 +481,55 @@ void SyncOne(GameBind& b, DWORD now) {
       if (fc && settled && g.context->GetFocusElement() != b.el && fc->GetValue() != i.text) fc->SetValue(i.text);
       break;
     }
+    case GameBind::kList:
+      SyncList(b, i);
+      break;
   }
   if (b.text_el && !i.text.empty() && (first || i.text != b.last.text)) b.text_el->SetInnerRML(Rml::StringUtilities::EncodeRml(i.text));
   b.last = i;
 }
 
+uintptr_t DialogNamed(const std::string& dtm) {
+  if (dtm.empty()) return 0;
+  // The newest one shown with that layout.
+  for (auto it = g.dialogs.rbegin(); it != g.dialogs.rend(); ++it)
+    if (it->dtm == dtm) return it->p;
+  return 0;
+}
+
 // Every frame a screen tied to the game's controls is open: shows their
-// state; hides the screen while the game's own is in front.
+// state.
 void SyncGame() {
-  if (g.game.empty() && g.cover.empty() && g.back_control.empty()) return;
+  if (g.game.empty() && g.boxes.empty()) return;
   const DWORD now = GetTickCount();
-  mg::Refresh();
-  bool covered = g.cover.empty();
-  for (const std::string& n : g.cover) {
-    mg::Info i;
-    if (mg::Get(n.c_str(), &i) && i.shown) covered = true;
+  if (!g.mirror) {  // (MaXMenus does this itself)
+    mg::Refresh();
+    mg::Dialogs(&g.dialogs);
   }
-  // Any shown game dialog none of whose controls this screen copies (the
-  // Advanced page, a message box, the menu Back leads to) is in front.
-  std::vector<mg::Dialog> dialogs;
-  mg::Dialogs(&dialogs);
-  // Dialogs already shown when the screen opened (e.g. the menu behind the
-  // game's Options) stay behind it until they go.
-  if (!g.under_set) {
-    g.under_set = true;
-    g.under.clear();
-    for (const mg::Dialog& d : dialogs) {
-      bool bound = false;
-      for (const std::string& n : d.names)
-        if (BoundToGame(n)) bound = true;
-      if (!bound && !d.names.empty()) {
-        g.under.push_back(d.p);
-        patch::Log("MenuMaX: game dialog %08X (first control %s) was shown before %s opened; it stays behind",
-                   static_cast<unsigned>(d.p), d.names[0].c_str(), g.open_name.c_str());
-      }
+  for (DialogBox& d : g.boxes) {
+    const mg::Dialog* dlg = nullptr;
+    for (auto it = g.dialogs.rbegin(); it != g.dialogs.rend() && !dlg; ++it)
+      if (it->dtm == d.dtm) dlg = &*it;
+    d.el->SetClass("game-hidden", !dlg);
+    if (!dlg) continue;
+    const long x = dlg->rect.left, y = dlg->rect.top;
+    if ((x != d.left || y != d.top) && x > -640 && x < 640 && y > -480 && y < 480) {
+      d.left = x;
+      d.top = y;
+      d.el->SetProperty("left", std::to_string(x) + "dp");
+      d.el->SetProperty("top", std::to_string(y) + "dp");
+      patch::Log("MenuMaX: %s placed at %ld,%ld as the game's", d.dtm.c_str(), x, y);
     }
   }
-  for (size_t k = 0; k < g.under.size();) {
-    bool still = false;
-    for (const mg::Dialog& d : dialogs) still |= d.p == g.under[k];
-    if (still) {
-      ++k;
-    } else {
-      patch::Log("MenuMaX: game dialog %08X from behind %s is gone", static_cast<unsigned>(g.under[k]), g.open_name.c_str());
-      g.under.erase(g.under.begin() + static_cast<long>(k));
-    }
-  }
-  const mg::Dialog* other = nullptr;
-  for (const mg::Dialog& d : dialogs) {
-    if (d.names.empty()) continue;
-    bool behind = false;
-    for (uintptr_t u : g.under) behind |= u == d.p;
-    if (behind) continue;
-    bool bound = false;
-    for (const std::string& n : d.names)
-      if (BoundToGame(n)) bound = true;
-    if (!bound) other = &d;
-  }
-  const bool suspend = !covered || other;
-  if (suspend != g.suspended) {
-    g.suspended = suspend;
-    patch::Log("MenuMaX: %s %s (%s%s)", g.open_name.c_str(), suspend ? "hidden: the game's own screen is in front" : "shown again",
-               !covered ? "a page this screen does not copy" : other ? "a game dialog it does not copy, first control " : "back to a copied page",
-               other && covered ? other->names[0].c_str() : "");
-    if (suspend) {
-      g.doc->Hide();
-    } else {
-      g.doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
-      std::lock_guard<std::recursive_mutex> l(g.mu);
-      g.keys.clear();
-      g.buttons.clear();
-      g.opened_at = now;  // keys held from the game's screen are not presses here
-    }
-  }
-  if (g.suspended) return;
   g.updating = true;
   for (GameBind& b : g.game) {
+    b.scope = DialogNamed(b.scope_dtm);
     SyncOne(b, now);
     // A slider let go: the release the game gets at the end of a drag.
     if (b.dragging && now - b.changed_at > 300) {
       b.dragging = false;
-      if (auto* fc = dynamic_cast<Rml::ElementFormControl*>(b.el)) mg::SetSlider(b.name.c_str(), std::atoi(fc->GetValue().c_str()), 16);
+      if (auto* fc = dynamic_cast<Rml::ElementFormControl*>(b.el))
+        mg::SetSlider(b.name.c_str(), std::atoi(fc->GetValue().c_str()), 16, b.scope);
     }
   }
   g.updating = false;
@@ -512,9 +537,19 @@ void SyncGame() {
 
 // A click on an element tied to a button, checkbox, radio button or tab.
 void OnGameClick(Rml::Element* target) {
+  int row = -1;
   for (Rml::Element* e = target; e; e = e->GetParentNode()) {
+    if (row < 0 && e->HasAttribute("row")) row = e->GetAttribute<int>("row", -1);
     for (GameBind& b : g.game) {
-      if (b.el != e || b.only_if || b.ui != GameBind::kDiv) continue;
+      if (b.el != e || b.only_if) continue;
+      if (b.ui == GameBind::kList) {
+        if (row >= 0 && b.seen && b.last.enabled) {
+          ++g.clicks;
+          mg::Choose(b.name.c_str(), row, b.scope);
+        }
+        return;
+      }
+      if (b.ui != GameBind::kDiv) continue;
       if (!b.seen || !b.last.enabled || !b.last.shown) {
         patch::Log("MenuMaX: %s clicked, but the game's control is %s", b.name.c_str(),
                    !b.seen ? "not there" : !b.last.enabled ? "greyed out" : "hidden");
@@ -523,56 +558,83 @@ void OnGameClick(Rml::Element* target) {
       const mg::Kind k = b.last.kind;
       if (k == mg::kButton || k == mg::kCheck || k == mg::kRadio || k == mg::kScrollArrow) {
         ++g.clicks;
-        mg::Click(b.name.c_str());
+        mg::Click(b.name.c_str(), b.scope);
       }
       return;
     }
   }
 }
 
+std::vector<Rml::ElementDocument*> Docs() {
+  std::vector<Rml::ElementDocument*> d;
+  if (g.mirror) {
+    for (const Layer& l : g.layers)
+      if (l.doc) d.push_back(l.doc);
+  } else if (g.doc) {
+    d.push_back(g.doc);
+  }
+  return d;
+}
+
+std::vector<std::string> Words(const std::string& c) {
+  std::vector<std::string> out;
+  for (size_t a = 0; a < c.size();) {
+    size_t z = c.find(' ', a);
+    if (z == std::string::npos) z = c.size();
+    if (z > a) out.push_back(c.substr(a, z - a));
+    a = z + 1;
+  }
+  return out;
+}
+
 void Bind() {
   g.settings.clear();
   g.game.clear();
-  std::vector<Rml::Element*> els;
-  Collect(g.doc, els);
+  g.boxes.clear();
   g.binding = true;
-  for (Rml::Element* e : els) {
-    if (e->HasAttribute("game") || e->HasAttribute("game-if")) {
-      BindGame(e);
-      continue;
+  for (Rml::ElementDocument* doc : Docs()) {
+    const std::vector<std::string> dialogs = Words(doc->GetAttribute<Rml::String>("game-dialogs", ""));
+    const std::string base = dialogs.empty() ? std::string() : dialogs[0];
+    std::vector<Rml::Element*> els;
+    Collect(doc, els);
+    for (Rml::Element* e : els) {
+      if (e->HasAttribute("game-dialog")) {
+        DialogBox d;
+        d.el = e;
+        d.dtm = e->GetAttribute<Rml::String>("game-dialog", "");
+        e->SetClass("game-hidden", true);
+        g.boxes.push_back(d);
+      }
+      if (e->HasAttribute("game") || e->HasAttribute("game-if")) {
+        BindGame(e, base);
+        continue;
+      }
+      if (!e->HasAttribute("ini")) continue;
+      Setting s;
+      s.el = e;
+      s.key = e->GetAttribute<Rml::String>("ini", "");
+      s.checkbox = e->GetTagName() == "input" && e->GetAttribute<Rml::String>("type", "") == "checkbox";
+      const std::string v = CurrentValue(s.key, e->GetAttribute<Rml::String>("default", "0"));
+      s.on_value = !IsZero(v) && s.checkbox ? v : e->GetAttribute<Rml::String>("ini-on", "1");
+      SetControl(s, v);
+      patch::Log("MenuMaX: setting %s = %s (%s%s)", s.key.c_str(), v.c_str(), e->GetTagName().c_str(), s.checkbox ? " checkbox" : "");
+      g.settings.push_back(s);
     }
-    if (!e->HasAttribute("ini")) continue;
-    Setting s;
-    s.el = e;
-    s.key = e->GetAttribute<Rml::String>("ini", "");
-    s.checkbox = e->GetTagName() == "input" && e->GetAttribute<Rml::String>("type", "") == "checkbox";
-    const std::string v = CurrentValue(s.key, e->GetAttribute<Rml::String>("default", "0"));
-    s.on_value = !IsZero(v) && s.checkbox ? v : e->GetAttribute<Rml::String>("ini-on", "1");
-    SetControl(s, v);
-    patch::Log("MenuMaX: setting %s = %s (%s%s)", s.key.c_str(), v.c_str(), e->GetTagName().c_str(), s.checkbox ? " checkbox" : "");
-    g.settings.push_back(s);
   }
   g.binding = false;
-  // The screen as a whole: game-back="Back" (Esc / B clicks it),
-  // game-cover="A B" (shown only while one of these controls is).
-  g.back_control = g.doc->GetAttribute<Rml::String>("game-back", "");
-  g.cover.clear();
-  {
-    const std::string c = g.doc->GetAttribute<Rml::String>("game-cover", "");
-    for (size_t a = 0; a < c.size();) {
-      size_t z = c.find(' ', a);
-      if (z == std::string::npos) z = c.size();
-      if (z > a) g.cover.push_back(c.substr(a, z - a));
-      a = z + 1;
-    }
+  // The top screen: game-back="Back" (Esc / B / the right mouse button
+  // clicks it, on the screen's first game dialog).
+  g.back_control.clear();
+  g.back_dtm.clear();
+  if (g.doc) {
+    g.back_control = g.doc->GetAttribute<Rml::String>("game-back", "");
+    const std::vector<std::string> dialogs = Words(g.doc->GetAttribute<Rml::String>("game-dialogs", ""));
+    if (!dialogs.empty()) g.back_dtm = dialogs[0];
   }
-  g.suspended = false;
-  g.under_set = false;
-  g.under.clear();
   UpdateTexts();
-  patch::Log("MenuMaX: %u settings and %u game controls bound on %s%s%s", static_cast<unsigned>(g.settings.size()),
-             static_cast<unsigned>(g.game.size()), g.open_name.c_str(), g.back_control.empty() ? "" : "; back = ",
-             g.back_control.c_str());
+  patch::Log("MenuMaX: %u settings, %u game controls and %u game dialogs bound on %s%s%s", static_cast<unsigned>(g.settings.size()),
+             static_cast<unsigned>(g.game.size()), static_cast<unsigned>(g.boxes.size()), g.open_name.c_str(),
+             g.back_control.empty() ? "" : "; back = ", g.back_control.c_str());
 }
 
 void Save(const std::string& key, const std::string& v) {
@@ -602,20 +664,20 @@ void OnChange(Rml::Element* target) {
     auto* fc = dynamic_cast<Rml::ElementFormControl*>(target);
     switch (b.ui) {
       case GameBind::kCheckInput:
-        mg::Click(b.name.c_str());
+        mg::Click(b.name.c_str(), b.scope);
         break;
       case GameBind::kRange: {
         const int v = fc ? std::atoi(fc->GetValue().c_str()) : 0;
-        if (!b.dragging) mg::SetSlider(b.name.c_str(), v, 15);  // grab
-        mg::SetSlider(b.name.c_str(), v, 3);                   // change
+        if (!b.dragging) mg::SetSlider(b.name.c_str(), v, 15, b.scope);  // grab
+        mg::SetSlider(b.name.c_str(), v, 3, b.scope);                   // change
         b.dragging = true;
         break;
       }
       case GameBind::kSelect:
-        if (fc && !fc->GetValue().empty()) mg::Choose(b.name.c_str(), std::atoi(fc->GetValue().c_str()));
+        if (fc && !fc->GetValue().empty()) mg::Choose(b.name.c_str(), std::atoi(fc->GetValue().c_str()), b.scope);
         break;
       case GameBind::kTextInput:
-        if (fc) mg::SetText(b.name.c_str(), fc->GetValue());
+        if (fc) mg::SetText(b.name.c_str(), fc->GetValue(), b.scope);
         break;
       default:
         break;
@@ -776,7 +838,13 @@ bool InitRml() {
   return true;
 }
 
+void CloseMirror(const char* why);
+
 void CloseDoc() {
+  if (g.mirror) {
+    CloseMirror("another screen opens");
+    return;
+  }
   if (!g.doc) return;
   FlushPending("screen closed");
   g.doc->RemoveEventListener(Rml::EventId::Change, &g_change);
@@ -786,12 +854,220 @@ void CloseDoc() {
   g.last_focus = nullptr;
   g.settings.clear();
   g.game.clear();
-  g.cover.clear();
+  g.boxes.clear();
   g.back_control.clear();
-  g.suspended = false;
-  g.under_set = false;
-  g.under.clear();
   g.context->Update();  // documents go away at the next update
+}
+
+// ---------------------------------------------------------------- MaXMenus
+
+std::wstring MenusDir() { return UiDir() + L"menus\\"; }
+
+// UI\MaX\menus\*.rml: which game dialogs each copies (game-dialogs= on its
+// <body>), and whether it covers the whole menu (game-opaque).
+void ReadIndex() {
+  g.index.clear();
+  g.index_info.clear();
+  g.index_read = true;
+  WIN32_FIND_DATAW fd;
+  HANDLE h = FindFirstFileW((MenusDir() + L"*.rml").c_str(), &fd);
+  if (h == INVALID_HANDLE_VALUE) {
+    patch::Log("MenuMaX: no screens in %ls; the game's own menus are shown", MenusDir().c_str());
+    return;
+  }
+  do {
+    const std::wstring path = MenusDir() + fd.cFileName;
+    FILE* f = _wfopen(path.c_str(), L"rb");
+    if (!f) continue;
+    std::string text(8192, '\0');
+    text.resize(std::fread(&text[0], 1, text.size(), f));
+    std::fclose(f);
+    const size_t body = text.find("<body");
+    if (body == std::string::npos) continue;
+    const std::string tag = text.substr(body, text.find('>', body) - body);
+    const size_t at = tag.find("game-dialogs=\"");
+    if (at == std::string::npos) continue;
+    const size_t end = tag.find('"', at + 14);
+    std::vector<std::string> dialogs = Words(tag.substr(at + 14, end - at - 14));
+    for (std::string& d : dialogs)
+      for (char& c : d)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    std::string file = Narrow(fd.cFileName);
+    file.resize(file.size() - 4);
+    const bool opaque = tag.find("game-opaque") != std::string::npos;
+    g.index_info[file] = {opaque, dialogs};
+    for (const std::string& d : dialogs) {
+      if (g.index.count(d)) patch::Log("MenuMaX: game dialog %s is in both %s and %s; %s used", d.c_str(), g.index[d].c_str(),
+                                       file.c_str(), g.index[d].c_str());
+      else g.index[d] = file;
+    }
+    std::string list;
+    for (const std::string& d : dialogs) list += " " + d;
+    patch::Log("MenuMaX: menus\\%s.rml copies%s%s", file.c_str(), list.c_str(), opaque ? " (covers the whole menu)" : "");
+  } while (FindNextFileW(h, &fd));
+  FindClose(h);
+}
+
+void CloseMirror(const char* why) {
+  if (!g.mirror) return;
+  patch::Log("MenuMaX: game menu copies closed (%s)", why);
+  for (Layer& l : g.layers) {
+    if (!l.doc) continue;
+    l.doc->RemoveEventListener(Rml::EventId::Change, &g_change);
+    l.doc->RemoveEventListener(Rml::EventId::Click, &g_click);
+    l.doc->Close();
+  }
+  g.layers.clear();
+  g.mirror = false;
+  g.doc = nullptr;
+  g.last_focus = nullptr;
+  g.game.clear();
+  g.boxes.clear();
+  g.settings.clear();
+  g.back_control.clear();
+  {
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    g.active = false;
+    g.held = Rml::Input::KI_UNKNOWN;
+    g.pad_dir_prev = -1;
+  }
+  g.context->Update();
+}
+
+// Which screens the game's dialogs need now, bottom first. From the top
+// dialog down: each needs a screen, until one that covers the whole menu.
+// Empty when one is not copied (the game's own menus are shown).
+std::vector<std::string> Wanted() {
+  std::vector<std::string> top_down;
+  bool all = true;
+  std::string missing;
+  for (auto it = g.dialogs.rbegin(); it != g.dialogs.rend(); ++it) {
+    if (it->names.empty()) continue;
+    auto f = g.index.find(it->dtm);
+    if (f == g.index.end()) {
+      all = false;
+      missing = it->dtm;
+      break;
+    }
+    if (std::find(top_down.begin(), top_down.end(), f->second) == top_down.end()) top_down.push_back(f->second);
+    if (g.index_info[f->second].first) break;
+  }
+  if (!all || top_down.empty()) {
+    if (missing != g.missing && !missing.empty())
+      patch::Log("MenuMaX: the game's %s dialog has no copy in menus\\; the game's own menus are shown", missing.c_str());
+    g.missing = missing;
+    return {};
+  }
+  g.missing.clear();
+  return std::vector<std::string>(top_down.rbegin(), top_down.rend());
+}
+
+// MaXMenus, every frame: the screens follow the game's dialogs.
+void Mirror() {
+  if (!GetConfig().max_menus || (g.doc && !g.mirror) || !g.want_open.empty()) return;
+  if (!g.index_read) ReadIndex();
+  mg::Refresh();
+  mg::Dialogs(&g.dialogs);
+  bool capture = false;
+  for (const mg::Dialog& d : g.dialogs)
+    if (d.dtm == "optcont" && mg::DialogField(d.p, 0x7F70)) capture = true;
+  if (capture != g.capture) {
+    g.capture = capture;
+    patch::Log("MenuMaX: %s", capture ? "the game waits for a key or button to assign: input goes to the game"
+                                      : "the game has its key or button: input comes here again");
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    g.keys.clear();
+    g.chars.clear();
+    g.buttons.clear();
+    g.opened_at = GetTickCount();
+  }
+  const std::vector<std::string> want = Wanted();
+  std::vector<std::string> have;
+  for (const Layer& l : g.layers) have.push_back(l.file);
+  if (want == have) return;
+  if (want.empty()) {
+    CloseMirror("a game dialog shown is not copied, or no menu is shown");
+    MenusRefreshFromIni();
+    return;
+  }
+  if (!InitRml()) return;
+  const bool first = !g.mirror;
+  const std::string old_top = have.empty() ? std::string() : have.back();
+  std::string list;
+  for (const std::string& w : want) list += " " + w;
+  patch::Log("MenuMaX: game menu copies shown:%s", list.c_str());
+  // Screens no longer wanted go; new ones load.
+  std::vector<Layer> next;
+  for (const std::string& w : want) {
+    Layer l;
+    for (Layer& o : g.layers)
+      if (o.file == w && o.doc) {
+        l = o;
+        o.doc = nullptr;
+      }
+    if (!l.doc) {
+      const DWORD t0 = GetTickCount();
+      l.file = w;
+      l.doc = g.context->LoadDocument(Narrow(MenusDir()) + w + ".rml");
+      if (!l.doc) {
+        patch::Log("MenuMaX: menus\\%s.rml could not be loaded (see the RmlUi messages above); the game's own menus are shown",
+                   w.c_str());
+        for (Layer& n : next) {
+          n.doc->RemoveEventListener(Rml::EventId::Change, &g_change);
+          n.doc->RemoveEventListener(Rml::EventId::Click, &g_click);
+          n.doc->Close();
+        }
+        CloseMirror("a screen could not be loaded");
+        // Not tried again until the files change.
+        for (const std::string& d : g.index_info[w].second) g.index.erase(d);
+        return;
+      }
+      l.doc->AddEventListener(Rml::EventId::Change, &g_change);
+      l.doc->AddEventListener(Rml::EventId::Click, &g_click);
+      l.opaque = g.index_info[w].first;
+      l.dialogs = g.index_info[w].second;
+      patch::Log("MenuMaX: menus\\%s.rml loaded in %lu ms", w.c_str(), static_cast<unsigned long>(GetTickCount() - t0));
+    }
+    next.push_back(l);
+  }
+  for (Layer& o : g.layers) {
+    if (!o.doc) continue;
+    o.doc->RemoveEventListener(Rml::EventId::Change, &g_change);
+    o.doc->RemoveEventListener(Rml::EventId::Click, &g_click);
+    o.doc->Close();
+  }
+  g.layers = next;
+  g.mirror = true;
+  g.open_name = "menus";
+  for (size_t i = 0; i < g.layers.size(); ++i) {
+    Rml::ElementDocument* d = g.layers[i].doc;
+    const bool top = i + 1 == g.layers.size();
+    d->Show(top ? Rml::ModalFlag::Modal : Rml::ModalFlag::None, top ? Rml::FocusFlag::Auto : Rml::FocusFlag::None);
+    d->PullToFront();
+  }
+  g.doc = g.layers.back().doc;
+  if (g.layers.back().file != old_top) {
+    g.last_focus = nullptr;
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    g.keys.clear();
+    g.buttons.clear();
+    g.held = Rml::Input::KI_UNKNOWN;
+    g.pad_dir_prev = -1;
+    g.opened_at = GetTickCount();  // a key that opened it is not a press on it
+  }
+  Bind();
+  if (first) {
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    g.active = true;
+    g.pointer_set = false;
+    g.last_report = GetTickCount();
+    std::memset(g.key_down, 0, sizeof g.key_down);
+    g.last_key = Rml::Input::KI_UNKNOWN;
+    g.last_key_source = -1;
+    g.signature = 0;
+    Signature(UiDir(), g.signature, 0);
+    g.last_watch = GetTickCount();
+  }
 }
 
 bool LoadDoc(const std::string& name, const std::string& focus_id) {
@@ -836,6 +1112,14 @@ void Watch() {
   FlushPending("reload");
   Rml::Factory::ClearStyleSheetCache();
   Rml::Factory::ClearTemplateCache();
+  if (g.mirror) {
+    // Read again at the next frame.
+    CloseMirror("files changed");
+    Rml::ReleaseTextures();
+    g.index_read = false;
+    g.signature = sig;
+    return;
+  }
   CloseDoc();
   Rml::ReleaseTextures();
   if (!LoadDoc(g.open_name, focus)) {
@@ -956,12 +1240,13 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
   }
   if (k == KI_ESCAPE) {
     if (!g.back_control.empty()) {
-      patch::Log("MenuMaX: back (%s): the game's %s", from, g.back_control.c_str());
-      mg::Click(g.back_control.c_str());
+      patch::Log("MenuMaX: back (%s): the game's %s%s%s", from, g.back_control.c_str(), g.back_dtm.empty() ? "" : " on ",
+                 g.back_dtm.c_str());
+      mg::Click(g.back_control.c_str(), DialogNamed(g.back_dtm));
       return;
     }
     patch::Log("MenuMaX: back (%s)", from);
-    Close(from);
+    if (!g.mirror) Close(from);
     return;
   }
   if (k == KI_F5) {
@@ -1111,11 +1396,13 @@ void PollPads() {
 
 void DoInput(const RECT& game_rect) {
   std::vector<State::Key> keys;
+  std::vector<Rml::Character> chars;
   std::vector<std::pair<int, bool>> buttons;
   int wheel;
   {
     std::lock_guard<std::recursive_mutex> l(g.mu);
     keys.swap(g.keys);
+    chars.swap(g.chars);
     buttons.swap(g.buttons);
     wheel = g.wheel;
     g.wheel = 0;
@@ -1180,6 +1467,12 @@ void DoInput(const RECT& game_rect) {
     if (k.down) Press(k.id, "keyboard");
     if (!g.context || !g.active) return;
     if (Repeats(k.id)) Hold(k.id, k.down);
+  }
+  // Typed text goes to a focused edit box.
+  if (!chars.empty() && g.context && GetTickCount() - g.opened_at >= 200) {
+    Rml::Element* f = g.context->GetFocusElement();
+    if (f && f->GetTagName() == "input" && f->GetAttribute<Rml::String>("type", "") == "text")
+      for (Rml::Character c : chars) g.context->ProcessTextInput(c);
   }
   PollPads();
   // Held direction: repeat after 400 ms, every 90 ms.
@@ -1263,7 +1556,12 @@ void Install() {
              attr == INVALID_FILE_ATTRIBUTES ? "MISSING" : "found");
 }
 
-bool Active() { return g.active && !g.suspended; }
+bool Active() { return g.active && !g.capture; }
+
+bool IsOpen(const char* name) {
+  std::lock_guard<std::recursive_mutex> l(g.mu);
+  return g.active && !g.mirror && (g.want_open == name || (g.want_open.empty() && g.open_name == name));
+}
 
 bool Open(const char* name, const char* why) {
   if (!g.installed) return false;
@@ -1303,42 +1601,9 @@ void Close(const char* why) {
 
 namespace {
 
-// MaXOptions: the copy of the game's Options screen opens over it when the
-// game shows it, and closes when the game's goes.
-void AutoScreens() {
-  if (!GetConfig().max_options) return;
-  const DWORD now = GetTickCount();
-  if (now - g.auto_check < 100) return;
-  g.auto_check = now;
-  struct Auto {
-    const char* screen;
-    const char* trigger;  // a control only that game screen has
-  };
-  static const Auto kAuto[] = {{"options", "GameSettings"}};
-  if (g.doc && g.auto_screen.empty()) return;  // another screen is open
-  mg::Refresh();
-  for (const Auto& a : kAuto) {
-    mg::Info i;
-    const bool there = mg::Get(a.trigger, &i) && i.shown;
-    std::lock_guard<std::recursive_mutex> l(g.mu);
-    if (there && !g.active && g.want_open.empty()) {
-      if (g.auto_screen != a.screen) patch::Log("MenuMaX: the game's %s screen is shown", a.screen);
-      g.auto_screen = a.screen;
-      Open(a.screen, "the game's own screen is shown");
-      return;
-    }
-    if (!there && g.auto_screen == a.screen) {
-      patch::Log("MenuMaX: the game's %s screen is gone", a.screen);
-      g.auto_screen.clear();
-      if (g.active) Close("the game's own screen is gone");
-    }
-  }
-}
-
 void PresentFrame(const Target& t, const RECT& game_rect) {
   const UINT w = t.w, h = t.h;
   if (!g.installed || g.failed) return;
-  AutoScreens();
   std::string open;
   bool close;
   {
@@ -1365,10 +1630,22 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
       Close("screen could not be loaded");
       return;
     }
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    g.active = true;  // (closing the game menu copies for it let go)
   }
+  if (!RaceRunning()) Mirror();
   if (!g.doc || !g.context) return;
   SyncGame();
-  if (g.suspended) return;  // the game's own screen is in front
+  if (g.capture) {
+    // The game reads input itself for now: none of it is a press here.
+    std::lock_guard<std::recursive_mutex> l(g.mu);
+    g.keys.clear();
+    g.chars.clear();
+    g.buttons.clear();
+    g.dx = g.dy = 0;
+    g.wheel = 0;
+    g.held = Rml::Input::KI_UNKNOWN;
+  }
   // Sizes: the window in pixels, 1dp = one 640x480 menu pixel.
   const Rml::Vector2i dims(static_cast<int>(w), static_cast<int>(h));
   if (g.context->GetDimensions() != dims) {
@@ -1421,13 +1698,29 @@ void DeviceGone9() {
 
 void KeyEvent(unsigned dik, bool down) {
   const Rml::Input::KeyIdentifier k = FromDik(dik);
-  if (k == Rml::Input::KI_UNKNOWN) return;
   std::lock_guard<std::recursive_mutex> l(g.mu);
   // The same change reported twice (two ways of reading the keyboard).
   if (dik < 256) {
     if (g.key_down[dik] == down) return;
     g.key_down[dik] = down;
   }
+  // Typed text, by the keyboard layout (edit boxes).
+  if (down && dik < 256 && g.active) {
+    const bool shift = g.key_down[0x2A] || g.key_down[0x36];
+    const bool ctrl = g.key_down[0x1D] || g.key_down[0x9D];
+    const UINT vk = MapVirtualKeyA(dik & 0x7F, 1 /* MAPVK_VSC_TO_VK */);
+    if (vk && !ctrl) {
+      BYTE ks[256] = {};
+      if (shift) ks[VK_SHIFT] = 0x80;
+      if (GetKeyState(VK_CAPITAL) & 1) ks[VK_CAPITAL] = 1;
+      if (g.key_down[0xB8]) ks[VK_CONTROL] = ks[VK_MENU] = 0x80;  // AltGr
+      wchar_t buf[4] = {};
+      const int n = ToUnicode(vk, dik, ks, buf, 4, 0);
+      for (int i = 0; i < n && i < 4; ++i)
+        if (buf[i] >= 32 && buf[i] != 127 && g.chars.size() < 64) g.chars.push_back(static_cast<Rml::Character>(buf[i]));
+    }
+  }
+  if (k == Rml::Input::KI_UNKNOWN) return;
   if (g.keys.size() < 256) g.keys.push_back({k, down});
 }
 

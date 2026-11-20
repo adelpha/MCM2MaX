@@ -23,14 +23,16 @@ struct Info {
   std::string text;      // the control's text (labels, a multi-state's state text, an edit box's text)
   RECT rect{};           // in 640x480 menu pixels
   uintptr_t dialog = 0;
+  int top = 0, visible = 0;  // list / dropdown: first row shown, rows shown at once
 };
 
 // Looks at the screens shown now (game thread, at most once a frame).
 void Refresh();
-// The control called `name` on a shown screen (the topmost modal one first).
-bool Get(const char* name, Info* out);
+// The control called `name` on a shown screen (the topmost modal one first),
+// or on dialog `scope` only.
+bool Get(const char* name, Info* out, uintptr_t scope = 0);
 // A list's or dropdown's rows.
-bool Rows(const char* name, std::vector<std::string>* rows);
+bool Rows(const char* name, std::vector<std::string>* rows, uintptr_t scope = 0);
 // A modal dialog is shown now: its controls' names.
 bool Modal(std::vector<std::string>* names);
 // The shown dialogs, oldest first, with their named controls (as of the
@@ -38,15 +40,20 @@ bool Modal(std::vector<std::string>* names);
 struct Dialog {
   uintptr_t p = 0;
   bool modal = false;
+  std::string dtm;  // its layout, lower case without ".dtm" (e.g. "optgame")
+  RECT rect{};      // where the game put it: left, top, width, height (+0x160)
   std::vector<std::string> names;
 };
 void Dialogs(std::vector<Dialog>* out);
+// A 32-bit field of a dialog (0 if it can't be read).
+int DialogField(uintptr_t dialog, size_t offset);
 
 // Changes, made at the start of the next tick.
-void Click(const char* name);                   // button, checkbox, radio, multi-state, tab
-void SetSlider(const char* name, int position, int event);  // event: 15 grab, 3 change, 16 release (as dragging sends)
-void Choose(const char* name, int row);         // list / dropdown row, as clicking it does
-void SetText(const char* name, const std::string& text);    // edit box
+// scope: the control on that dialog only (0: as Get finds it).
+void Click(const char* name, uintptr_t scope = 0);  // button, checkbox, radio, multi-state, tab
+void SetSlider(const char* name, int position, int event, uintptr_t scope = 0);  // event: 15 grab, 3 change, 16 release
+void Choose(const char* name, int row, uintptr_t scope = 0);  // list / dropdown row, as clicking it does
+void SetText(const char* name, const std::string& text, uintptr_t scope = 0);  // edit box
 
 // framerate.cpp, at the start of the game's tick (game thread).
 void Tick();

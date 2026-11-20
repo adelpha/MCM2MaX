@@ -5,9 +5,9 @@ The screens in this folder are drawn by RmlUi (https://mikke89.github.io/RmlUiDo
 a library that lays out HTML/CSS-style text files. Open them in any text editor.
 
   settings.rml   the "More Settings" screen (Options > Graphics > More Settings)
-  options.rml    the Options screen (MaXOptions=1), a copy of the game's own
-  options.rcss   its look (each control's pictures are the game's own)
-  max.rcss       the look shared by every screen (colours, sizes, fonts)
+  menus\         copies of the game's own menu screens (MaXMenus=1), one .rml
+                 and .rcss each, and menus.rcss (the look they share)
+  max.rcss       the look shared by every other screen (colours, sizes, fonts)
   images\        pictures (PNG; pointer.png is the mouse pointer)
   fonts\         fonts (TTF/OTF, all loaded at start)
 
@@ -57,10 +57,23 @@ set a different order where the automatic one is wrong.
 
 Copies of the game's screens
 ----------------------------
-options.rml is drawn over the game's own Options screen, which keeps running
-underneath and does all the saving and applying. Each element is tied to the
-game's control of the same name (the names come from the game's layouts,
-UI\<NAME>.DAT; tools/mcm2rml.py in the MCM2MaX source writes a first copy):
+The screens in menus\ are drawn over the game's own menus, which keep running
+underneath and do all the saving and applying. A screen copies one or more of
+the game's dialogs (each is one layout, UI\<NAME>.DAT; tools/mcm2rml.py in the
+MCM2MaX source writes a first copy of them):
+
+  <body game-dialogs="optbase optgame">   the game dialogs this screen copies
+  game-opaque (on <body>)   it covers the whole menu: nothing under it is drawn
+  game-back="Back" (on <body>)   Esc / B / the right mouse button click this
+                    control (on the screen's first dialog)
+  <div game-dialog="optgame">   the part copying that dialog: shown while the
+                    game shows it, moved to where the game put it
+
+While the game shows dialogs, the screens copying them are shown, the game's
+top one above the others. When the game shows a dialog no screen copies, the
+game's own menus show instead (the log says which: "has no copy in menus\").
+
+Each element is tied to the game's control of the same name, on its dialog:
 
   game="Name"     shows that control: its text (the game's own, so translated
                   versions show theirs), greyed out (class "disabled"), ticked
@@ -68,14 +81,11 @@ UI\<NAME>.DAT; tools/mcm2rml.py in the MCM2MaX source writes a first copy):
                   "game-hidden"); a click on the element clicks the control.
                   <input type="range">, <select> and <input type="text"> take
                   the game's slider position, list rows and text, and pass
-                  changes back. The text goes into a child of class "t" if
-                  there is one; game-text="off" keeps the element's own text.
-  game-if="Name"  shown only while the game shows that control (a page)
-  On <body>:
-  game-back="Back"   Esc / B / the right mouse button click this game control
-  game-cover="A B"   the screen hides and the game's own shows unless one of
-                     these controls is shown (pages not copied yet, message
-                     boxes; a message box of the game's always shows)
+                  changes back; <div class="list"> shows a list's rows as
+                  <div class="row"> (class "on": the chosen one). The text goes
+                  into a child of class "t" if there is one; game-text="off"
+                  keeps the element's own text.
+  game-if="Name"  shown only while the game shows that control
 
 Pictures can be the game's own, read from its UI\<ARCHIVE>.DAT files:
   decorator: image(/dat/OPTBASE/Options/OptTab01.tga);

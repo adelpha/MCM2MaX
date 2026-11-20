@@ -114,6 +114,7 @@ struct Entry {
 struct Action {
   enum Type { kClick, kSlider, kChoose, kText } type = kClick;
   std::string name;
+  uintptr_t scope = 0;  // only on this dialog (0: any)
   int a = 0, b = 0;
   std::string text;
 };
@@ -130,10 +131,14 @@ struct State {
   std::vector<uintptr_t> dialogs, logged;  // shown now / as last logged
 } g;
 
-const Entry* FindEntry(const char* name) {
+const Entry* FindEntry(const char* name, uintptr_t scope = 0) {
   const Entry* best = nullptr;
   for (const Entry& e : g.controls) {
     if (e.name != name) continue;
+    if (scope) {
+      if (e.dialog == scope) return &e;
+      continue;
+    }
     if (e.modal) return &e;
     best = &e;  // the last shown dialog with it (the newest)
   }
@@ -164,9 +169,10 @@ void Send(uintptr_t c, int type) {
 
 void Do(const Action& a) {
   Refresh();
-  const Entry* e = FindEntry(a.name.c_str());
+  const Entry* e = FindEntry(a.name.c_str(), a.scope);
   if (!e) {
-    patch::Log("MenuMaX: game control %s is not on the screen now; nothing done", a.name.c_str());
+    patch::Log("MenuMaX: game control %s is not on the screen now%s; nothing done", a.name.c_str(),
+               a.scope ? " (on its dialog)" : "");
     return;
   }
   const uintptr_t c = e->p;
@@ -250,12 +256,24 @@ void Queue(Action a) {
   // A newer position / text for the same control replaces one not yet made.
   if (a.type == Action::kSlider || a.type == Action::kText) {
     for (Action& o : g.queue)
-      if (o.type == a.type && o.name == a.name && (a.type != Action::kSlider || o.b == a.b)) {
+      if (o.type == a.type && o.name == a.name && o.scope == a.scope && (a.type != Action::kSlider || o.b == a.b)) {
         o = a;
         return;
       }
   }
   if (g.queue.size() < 64) g.queue.push_back(std::move(a));
+}
+
+// The dialog's layout file, e.g. "optgame" (from "OptGame.dtm" at +0x38).
+std::string DtmOf(uintptr_t d) {
+  std::string n = Str(d + 0x38, 64);
+  const size_t slash = n.find_last_of("\\/");
+  if (slash != std::string::npos) n = n.substr(slash + 1);
+  const size_t dot = n.find('.');
+  if (dot != std::string::npos) n.resize(dot);
+  for (char& c : n)
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  return n;
 }
 
 }  // namespace
@@ -297,11 +315,14 @@ void Refresh() {
         if (e.dialog == d && n++ < 6) names += " " + e.name;
       int total = 0;
       for (const Entry& e : g.controls) total += e.dialog == d;
-      patch::Log("MenuMaX:   dialog %08X%s, %d controls:%s%s", static_cast<unsigned>(d), d == g.modal ? " (modal)" : "", total,
+      patch::Log("MenuMaX:   dialog %08X %s at %d,%d %dx%d%s, %d controls:%s%s", static_cast<unsigned>(d), DtmOf(d).c_str(),
+                 I32(d + 0x160), I32(d + 0x164), I32(d + 0x168), I32(d + 0x16C), d == g.modal ? " (modal)" : "", total,
                  names.c_str(), total > 6 ? " ..." : "");
     }
   }
 }
+
+int DialogField(uintptr_t d, size_t off) { return Readable(d + off, 4) ? I32(d + off) : 0; }
 
 void Dialogs(std::vector<Dialog>* out) {
   out->clear();
@@ -309,14 +330,16 @@ void Dialogs(std::vector<Dialog>* out) {
     Dialog x;
     x.p = d;
     x.modal = d == g.modal;
+    x.dtm = DtmOf(d);
+    x.rect = {I32(d + 0x160), I32(d + 0x164), I32(d + 0x168), I32(d + 0x16C)};
     for (const Entry& e : g.controls)
       if (e.dialog == d) x.names.push_back(e.name);
     out->push_back(std::move(x));
   }
 }
 
-bool Get(const char* name, Info* out) {
-  const Entry* e = FindEntry(name);
+bool Get(const char* name, Info* out, uintptr_t scope) {
+  const Entry* e = FindEntry(name, scope);
   if (!e) return false;
   const uintptr_t c = e->p;
   Info i;
@@ -344,6 +367,8 @@ bool Get(const char* name, Info* out) {
       if (const uintptr_t l = ListOf(c, i.kind)) {
         i.value = I32(l + 0x1F4);
         i.range = I32(l + 0x1EC);
+        i.top = I32(l + 0x1F0);
+        i.visible = I32(l + 0x200);
       }
       break;
     default:
@@ -353,9 +378,9 @@ bool Get(const char* name, Info* out) {
   return true;
 }
 
-bool Rows(const char* name, std::vector<std::string>* rows) {
+bool Rows(const char* name, std::vector<std::string>* rows, uintptr_t scope) {
   rows->clear();
-  const Entry* e = FindEntry(name);
+  const Entry* e = FindEntry(name, scope);
   if (!e) return false;
   const uintptr_t l = ListOf(e->p, KindFor(e->p));
   if (!l) return false;
@@ -377,21 +402,24 @@ bool Modal(std::vector<std::string>* names) {
 }
 
 namespace {
-Action Make(Action::Type type, const char* name, int a = 0, int b = 0) {
+Action Make(Action::Type type, const char* name, uintptr_t scope, int a = 0, int b = 0) {
   Action x;
   x.type = type;
   x.name = name;
+  x.scope = scope;
   x.a = a;
   x.b = b;
   return x;
 }
 }  // namespace
 
-void Click(const char* name) { Queue(Make(Action::kClick, name)); }
-void SetSlider(const char* name, int position, int event) { Queue(Make(Action::kSlider, name, position, event)); }
-void Choose(const char* name, int row) { Queue(Make(Action::kChoose, name, row)); }
-void SetText(const char* name, const std::string& text) {
-  Action a = Make(Action::kText, name);
+void Click(const char* name, uintptr_t scope) { Queue(Make(Action::kClick, name, scope)); }
+void SetSlider(const char* name, int position, int event, uintptr_t scope) {
+  Queue(Make(Action::kSlider, name, scope, position, event));
+}
+void Choose(const char* name, int row, uintptr_t scope) { Queue(Make(Action::kChoose, name, scope, row)); }
+void SetText(const char* name, const std::string& text, uintptr_t scope) {
+  Action a = Make(Action::kText, name, scope);
   a.text = text;
   Queue(std::move(a));
 }

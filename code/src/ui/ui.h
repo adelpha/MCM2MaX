@@ -39,6 +39,8 @@ bool Open(const char* name, const char* why);
 void Close(const char* why);
 // Closes the screen only if it is `name`.
 void CloseScreen(const char* name, const char* why);
+// The screen `name` (UI\\MaX\\<name>.rml) is open (or opening).
+bool IsOpen(const char* name);
 
 // Present (Direct3D 11, under the renderer lock): draws the open screen over
 // the frame; game_rect is where the 640x480 picture went in the window.

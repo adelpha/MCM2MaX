@@ -196,7 +196,8 @@ void LoadConfig() {
   g_config.menu_flag = GetPrivateProfileIntA(sec, "MenuFlag", 1, ini) != 0;
   g_config.menu_hires_3d = GetPrivateProfileIntA(sec, "MenuHiRes3D", 1, ini) != 0;
   g_config.menu_max = GetPrivateProfileIntA(sec, "MenuMaX", 1, ini) != 0;
-  g_config.max_options = GetPrivateProfileIntA(sec, "MaXOptions", 1, ini) != 0;
+  // (MaXOptions: its name in the first test builds.)
+  g_config.max_menus = GetPrivateProfileIntA(sec, "MaXMenus", GetPrivateProfileIntA(sec, "MaXOptions", 1, ini), ini) != 0;
   g_config.menu_nav = GetPrivateProfileIntA(sec, "MenuNav", 1, ini) != 0;
   g_config.zone_fix = GetPrivateProfileIntA(sec, "ZoneFix", 1, ini) != 0;
   {

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""mcm2rml: writes a MenuMaX copy (.rml + .rcss) of game menu screens from the
-game's own layouts (the .dtm files in UI\\*.DAT).
+"""mcm2rml: writes MenuMaX copies (.rml + .rcss) of the game's menu screens
+from the game's own layouts (the .dtm files in UI\\*.DAT).
 
   python3 mcm2rml.py <game UI folder> <out dir>
 
-Writes options.rml and options.rcss: the Options screen (OPTBASE) with the
-Game Settings, Graphics (as MCM2MaX lays it out, with the Enhancements box)
-and Sound pages. Every control becomes an element tied to the game's control
-of the same name (game="Name"), at the same place (1dp = one 640x480 menu
-pixel); pictures are the game's own (/dat/<ARCHIVE>/<file>, read from the
-DATs at run time). The output is meant to be edited by hand afterwards.
+Writes <out dir>/<screen>.rml and .rcss for each screen in SCREENS, plus the
+shared menus.rcss. A screen copies one or more of the game's dialogs (its
+<body game-dialogs="...">); MenuMaX shows it while the game shows them
+(MaXMenus=1). Every control becomes an element tied to the game's control of
+the same name on its own dialog (game="Name" inside game-dialog="..."), at
+the same place (1dp = one 640x480 menu pixel); pictures are the game's own
+(/dat/<ARCHIVE>/<file>, read from the DATs at run time). The output is meant
+to be edited by hand afterwards.
 """
 import os
 import re
@@ -77,11 +79,15 @@ class Game:
         return self.dats[name]
 
     def layout(self, archive):
+        """The dialog's controls; self.info[archive] its [Set_Control] and
+        [Set_Information] keys."""
         d = self.dat(archive)
         dtm = [v for k, v in d.items() if k.endswith('.dtm')][0][1].decode('latin1')
         secs = parse_dtm(dtm)
         anim = False
         controls = []
+        info = {}
+        own = {}
         for s in secs:
             if s['_name'] == 'Set_Anim':
                 anim = True
@@ -89,21 +95,39 @@ class Game:
             if anim:
                 if 'Files1' in s:
                     self.sprites.setdefault(s['_name'], (archive.upper(), s['Files1']))
+                    own[s['_name']] = (archive.upper(), s['Files1'])
                 continue
-            if s['_name'] not in ('Set_Control', 'Set_Information'):
-                controls.append(s)
+            if s['_name'] in ('Set_Control', 'Set_Information'):
+                info.update(s)
+                continue
+            controls.append(s)
+        self.own = getattr(self, 'own', {})
+        self.own[archive.upper()] = own
+        self.info = getattr(self, 'info', {})
+        self.info[archive.upper()] = info
         return controls
+
+    def use(self, archive):
+        """Sprites are looked for in this archive first (names repeat)."""
+        self.current = archive.upper()
+
+    def where(self, name):
+        cur = getattr(self, 'current', None)
+        if cur and name in self.own.get(cur, {}):
+            return self.own[cur][name]
+        return self.sprites.get(name)
 
     def sprite(self, name, opts=''):
         if not name:
             return None
-        if name not in self.sprites:
+        w = self.where(name)
+        if not w:
             return None
-        arch, path = self.sprites[name]
+        arch, path = w
         return '/dat/' + arch + '/' + path.replace('\\', '/') + ('?' + opts if opts else '')
 
     def size(self, name):
-        arch, path = self.sprites[name]
+        arch, path = self.where(name)
         return tga_size(self.dat(arch)[path.lower()][1])
 
 
@@ -129,6 +153,7 @@ class Writer:
     def __init__(self, game):
         self.g = game
         self.rcss = []
+        self.prefix = ''
 
     def rule(self, sel, body):
         self.rcss.append(f'{sel} {{ {body} }}')
@@ -143,6 +168,9 @@ class Writer:
             st.append('font-effect: none')
         av = s.get('TextAlignV', 'TOP')
         top = 0
+        if h >= 2 * LINE + 8 and s.get('Type', '').strip() == 'STATICTEXT':
+            st.append('white-space: normal')  # room for more lines: the text wraps
+            av = 'TOP'
         if av == 'MIDDLE':
             top = max(0, (h - LINE) // 2)
         elif av == 'BOTTOM':
@@ -166,88 +194,141 @@ class Writer:
         text = esc(s.get('Text', ''))
         kids = [c for c in by.values() if c.get('Anchor') == name]
         g = self.g
+        eid = self.prefix + name
+        sel = '#' + eid
+        tip = s.get('ToolTipText')
+        attrs = f'id="{eid}" game="{name}"' + (f' title="{esc(tip)}"' if tip else '')
+
+        def styled(st):
+            return pos + (' ' + '; '.join(st) + ';' if st else '')
+
         if t == 'STATIC':
-            if s.get('Show', '-1').startswith('0'):
-                return
             spr = s.get('AnimNorm')
             if s.get('_frame'):
-                self.rule('#' + name, 'decorator: ninepatch(plate-outer, plate-inner, 1);')
+                self.rule(sel, 'decorator: ninepatch(plate-outer, plate-inner, 1);')
             elif g.sprite(spr):
-                self.rule('#' + name, f'decorator: image({g.sprite(spr)});')
+                self.rule(sel, f'decorator: image({g.sprite(spr)});')
             if not kids:
-                out.append(f'{pad}<div id="{name}" class="plate" style="{pos}"/>')
+                out.append(f'{pad}<div {attrs} class="plate" game-text="off" style="{pos}"/>')
                 return
-            out.append(f'{pad}<div id="{name}" class="plate" style="{pos}">')
+            out.append(f'{pad}<div {attrs} class="plate" game-text="off" style="{pos}">')
             for c in reading_order(kids):
                 self.element(c, by, out, indent + 1)
             out.append(f'{pad}</div>')
             return
         if t == 'STATICTEXT':
-            st = self.text_style(s, h)
-            style = pos + (' ' + '; '.join(st) + ';' if st else '')
-            out.append(f'{pad}<div id="{name}" class="text" game="{name}" style="{style}">{text}</div>')
+            spr = s.get('AnimNorm')
+            if g.sprite(spr):
+                self.rule(sel, f'decorator: image({g.sprite(spr)});')
+            out.append(f'{pad}<div {attrs} class="text" style="{styled(self.text_style(s, h))}">{text}</div>')
             return
         if t == 'MULTISTATE' and s.get('State0'):
-            self.check_sprites(s)
-            st = self.text_style(s, h, 14)
-            style = pos + (' ' + '; '.join(st) + ';' if st else '')
-            out.append(f'{pad}<div id="{name}" class="check" game="{name}" style="{style}"><div class="box"/><span class="t">{text}</span></div>')
+            on, off = s.get('State1'), s.get('State0')
+            if off != 'CheckBoxOff' and g.sprite(off):
+                self.rule(f'{sel} .box', f'decorator: image({g.sprite(off)});')
+                if g.sprite(on):
+                    self.rule(f'{sel}.on .box', f'decorator: image({g.sprite(on)});')
+                ow, oh = g.size(off)
+                self.rule(f'{sel} .box', f'width: {ow}dp; height: {oh}dp;')
+            out.append(f'{pad}<div {attrs} class="check" style="{styled(self.text_style(s, h, 14))}"><div class="box"/><span class="t">{text}</span></div>')
             return
         if t == 'MULTISTATE':
-            st = self.text_style(s, h)
-            style = pos + (' ' + '; '.join(st) + ';' if st else '')
-            out.append(f'{pad}<div id="{name}" class="cycle" game="{name}" style="{style}">{text}</div>')
+            out.append(f'{pad}<div {attrs} class="cycle" style="{styled(self.text_style(s, h))}">{text}</div>')
             return
         if t == 'RADIOBUTTON':
             on, off = s.get('AnimOn'), s.get('AnimOff')
             if on and on.startswith('OptTab'):
-                self.rule('#' + name, f'decorator: image({g.sprite(off, "black")});')
-                self.rule('#' + name + '.on', f'decorator: image({g.sprite(on, "black")});')
-                st = self.text_style(s, h)
-                style = pos + (' ' + '; '.join(st) + ';' if st else '')
-                out.append(f'{pad}<div id="{name}" class="tab" game="{name}" style="{style}">{text}</div>')
+                self.rule(sel, f'decorator: image({g.sprite(off, "black")});')
+                self.rule(sel + '.on', f'decorator: image({g.sprite(on, "black")});')
+                out.append(f'{pad}<div {attrs} class="tab" style="{styled(self.text_style(s, h))}">{text}</div>')
                 return
-            st = self.text_style(s, h, 14)
-            style = pos + (' ' + '; '.join(st) + ';' if st else '')
-            out.append(f'{pad}<div id="{name}" class="radio" game="{name}" style="{style}"><div class="box"/><span class="t">{text}</span></div>')
+            if on and on != 'RadioButtonOn' and g.sprite(on):
+                # A radio button drawn as a picture of its own (no text box).
+                self.rule(sel, f'decorator: image({g.sprite(off)});')
+                self.rule(sel + '.on', f'decorator: image({g.sprite(on)});')
+                if s.get('AnimOffDisable') and g.sprite(s['AnimOffDisable']):
+                    self.rule(sel + '.disabled', f'decorator: image({g.sprite(s["AnimOffDisable"])});')
+                out.append(f'{pad}<div {attrs} class="pick" style="{styled(self.text_style(s, h))}">{text}</div>')
+                return
+            out.append(f'{pad}<div {attrs} class="radio" style="{styled(self.text_style(s, h, 14))}"><div class="box"/><span class="t">{text}</span></div>')
             return
         if t == 'BUTTON':
             norm = s.get('AnimNorm')
             lit = s.get('AnimFocus') or norm
             push = s.get('AnimPush') or norm
-            self.rule('#' + name, f'decorator: image({g.sprite(norm)});')
-            if lit != norm:
-                self.rule(f'#{name}:hover, #{name}:focus-visible', f'decorator: image({g.sprite(lit)});')
-            if push != norm:
-                self.rule(f'#{name}:active', f'decorator: image({g.sprite(push)});')
-            body = text if s.get('LocalTextId') or s.get('_label') else ''
+            grey = s.get('AnimDisable')
+            if g.sprite(norm):
+                self.rule(sel, f'decorator: image({g.sprite(norm)});')
+            if lit != norm and g.sprite(lit):
+                self.rule(f'{sel}:hover, {sel}:focus-visible', f'decorator: image({g.sprite(lit)});')
+            if push != norm and g.sprite(push):
+                self.rule(f'{sel}:active', f'decorator: image({g.sprite(push)});')
+            if grey and g.sprite(grey):
+                self.rule(f'{sel}.disabled', f'decorator: image({g.sprite(grey)});')
+            body = text if s.get('LocalTextId') or s.get('_label') or s.get('Text') else ''
             st = self.text_style(s, h) if body else []
-            style = pos + (' ' + '; '.join(st) + ';' if st else '')
-            out.append(f'{pad}<div id="{name}" class="button" game="{name}" style="{style}">{body}</div>')
+            out.append(f'{pad}<div {attrs} class="button" style="{styled(st)}">{body}</div>')
             return
-        if t == 'HSCROLLBAR':
+        if t in ('HSCROLLBAR', 'VSCROLLBAR'):
+            vert = t == 'VSCROLLBAR'
             track = s.get('AnimNorm')
-            thumb = s.get('AnimThumb') or 'HorizSliderThumbUp'
-            tw, th = g.size(thumb)
+            thumb = s.get('AnimThumb') or ('ElevatorThumbUp' if vert else 'HorizSliderThumbUp')
+            tw, th = g.size(thumb) if g.where(thumb) else (12, 12)
             if track and g.sprite(track):
-                self.rule(f'#{name} slidertrack', f'decorator: image({g.sprite(track)});')
+                self.rule(f'{sel} slidertrack', f'decorator: image({g.sprite(track)});')
             elif s.get('_track'):
-                self.rule(f'#{name} slidertrack', f'decorator: image({g.sprite(s["_track"], "bar")});')
-            self.rule(f'#{name} sliderbar', f'width: {tw}dp; height: {th}dp; margin-top: {(h - th) // 2}dp; '
-                      f'decorator: image({g.sprite(thumb)});')
-            out.append(f'{pad}<input type="range" id="{name}" class="slider" game="{name}" style="{pos}"/>')
+                self.rule(f'{sel} slidertrack', f'decorator: image({g.sprite(s["_track"], "bar")});')
+            if vert:
+                self.rule(f'{sel} sliderbar', f'width: {tw}dp; height: {th}dp; margin-left: {(w - tw) // 2}dp; '
+                          f'decorator: image({g.sprite(thumb)});')
+            else:
+                self.rule(f'{sel} sliderbar', f'width: {tw}dp; height: {th}dp; margin-top: {(h - th) // 2}dp; '
+                          f'decorator: image({g.sprite(thumb)});')
+            extra = ' orientation="vertical"' if vert else ''
+            out.append(f'{pad}<input type="range"{extra} {attrs} class="slider{" vslider" if vert else ""}" style="{pos}"/>')
             return
         if t == 'DROPDOWNLIST':
             style = pos.replace(f'height: {h}dp;', 'height: 21dp;')
             if s.get('TextColor'):
                 style += ' color: ' + colour(s['TextColor']) + ';'
-            out.append(f'{pad}<select id="{name}" class="dropdown" game="{name}" style="{style}"></select>')
+            tb = s.get('AnimTextBack')
+            if tb and tb != 'DropDown05' and g.sprite(tb):
+                self.rule(f'{sel} selectvalue', f'decorator: image({g.sprite(tb)});')
+            lb = s.get('AnimListBack')
+            if lb and g.sprite(lb):
+                self.rule(f'{sel} selectbox', f'decorator: image({g.sprite(lb)});')
+            out.append(f'{pad}<select {attrs} class="dropdown" style="{style}"></select>')
+            return
+        if t == 'LISTBOX':
+            spr = s.get('AnimNorm')
+            if g.sprite(spr):
+                self.rule(sel, f'decorator: image({g.sprite(spr)});')
+            st = []
+            if s.get('TextColor'):
+                st.append('color: ' + colour(s['TextColor']))
+            if s.get('SelectColor'):
+                self.rule(f'{sel} .row.on', 'color: ' + colour(s['SelectColor']) + ';')
+            al = s.get('TextAlign', 'LEFT')
+            if al in ('CENTER', 'RIGHT'):
+                st.append('text-align: ' + al.lower())
+            if s.get('TextDrop', '-1').startswith('0'):
+                st.append('font-effect: none')
+            out.append(f'{pad}<div {attrs} class="list" style="{styled(st)}"></div>')
+            return
+        if t == 'EDITBOX':
+            spr = s.get('AnimNorm')
+            if g.sprite(spr):
+                self.rule(sel, f'decorator: image({g.sprite(spr)});')
+            st = []
+            if s.get('TextColor'):
+                st.append('color: ' + colour(s['TextColor']))
+            lm = int(s.get('TextLMargin', '0'))
+            if lm:
+                st.append(f'padding-left: {lm}dp')
+            ml = s.get('MaxLen')
+            out.append(f'{pad}<input type="text" {attrs} class="edit"{f" maxlength={chr(34)}{ml}{chr(34)}" if ml else ""} style="{styled(st)}"/>')
             return
         out.append(f'{pad}<!-- {name}: {t} not copied yet -->')
-
-    def check_sprites(self, s):
-        pass  # the shared checkbox / radio rules cover every one
-
 
 def covered(controls):
     """Names of controls the game draws under a later box plate (hidden by it)."""
@@ -355,34 +436,106 @@ def max_graphics(controls):
 
 # ---------------------------------------------------------------- output
 
-PAGES = [  # archive, page title, a control only that page has, edit
-    ('OPTGAME', 'Game Settings', 'OverlaysBox', None),
-    ('OPTGRAPH', 'Graphics', 'DisplayResolutionBox', max_graphics),
-    ('OPTSOUND', 'Sound', 'SoundSettingsBox', None),
+# Each screen: its file, the game dialogs it copies (archives; the first is the
+# base: its background covers the menu when it is full size), edits, and the
+# control Esc / B / the right mouse button clicks (the first found).
+SCREENS = [
+    ('options', ['OPTBASE', 'OPTGAME', 'OPTGRAPH', 'OPTSOUND', 'OPTCONT', 'OPTMESS', 'OPTGAR']),
+    ('optadvg', ['OPTADVG']),
+    ('messbox1', ['MESSBOX1']),
+    ('messbox2', ['MESSBOX2']),
+    ('messbox3', ['MESSBOX3']),
 ]
+EDITS = {'OPTGRAPH': max_graphics}
+BACKS = ['Back', 'BackButton', 'CancelButton', 'Cancel', 'NoButton', 'No', 'CloseButton', 'Close', 'OKButton', 'OK']
 
-HEAD = '''<rml>
+HEAD = """<rml>
 <head>
-  <title>Options</title>
-  <link type="text/rcss" href="options.rcss"/>
+  <title>{title}</title>
+  <link type="text/rcss" href="menus.rcss"/>
+  <link type="text/rcss" href="{file}.rcss"/>
 </head>
 <!--
-  The Options screen (MaXOptions=1): a copy of the game's own Options pages,
-  drawn over them. Made by tools/mcm2rml.py from the game's layouts, then
-  edited by hand. 1dp = one pixel of the game's 640x480 menus.
+  A copy of the game's own {title} (MaXMenus=1), drawn over it while the game
+  shows it. Made by tools/mcm2rml.py from the game's layouts, then edited by
+  hand. 1dp = one pixel of the game's 640x480 menus. See ..\\README.txt.
 
-  game="Name"     tied to the game's control of that name: shows its state,
-                  text, greying and visibility; clicks and changes go to it
-  game-if="Name"  shown only while the game's control of that name is (a page)
-  game-back       the game's control Esc / B / the right mouse button clicks
-  game-cover      the screen hides (the game's own shows) unless one of these
-                  is shown: pages not copied yet, the Advanced screen
-  Pictures: /dat/<ARCHIVE>/<file> is read from the game's UI\\<ARCHIVE>.DAT;
-  a PNG of the same name under UI\\MaX\\dat\\ replaces it.
+  game-dialogs     the game dialogs (layouts) this screen copies
+  game-opaque      it covers the whole menu (nothing under it is drawn)
+  game-dialog="x"  the part that copies the game's dialog x: shown while the
+                   game shows x, where the game put it
+  game="Name"      tied to the game's control of that name on that dialog
+  game-back        the control Esc / B / the right mouse button clicks
 -->
-<body game-back="Back" game-cover="{cover}">
+<body game-dialogs="{dialogs}"{opaque}{back}>
 <div id="screen">
-'''
+"""
+
+
+def dialog_size(g, arch):
+    info = g.info[arch]
+    try:
+        _, _, w, h = [int(float(t)) for t in info.get('Xywh', '0,0,640,480').split(',')]
+    except ValueError:
+        w, h = 640, 480
+    return w, h
+
+
+def default_place(g, arch, base_full):
+    """Where the game puts the dialog (MenuMaX moves it to the game's place)."""
+    w, h = dialog_size(g, arch)
+    if w >= 640 and h >= 480:
+        return 0, 0
+    if g.info[arch].get('PopUp', '0').startswith('-1'):
+        return (640 - w) // 2, (480 - h) // 2
+    return (20, 35) if base_full else (0, 0)
+
+
+def write_screen(g, out_dir, file, archs):
+    w = Writer(g)
+    for a in archs:
+        g.layout(a)
+    base = archs[0]
+    bw, bh = dialog_size(g, base)
+    base_full = bw >= 640 and bh >= 480
+    opaque = base_full and bool(g.info[base].get('BackgroundImage'))
+    names = set()
+    for a in archs:
+        names |= {c['_name'] for c in g.layout(a)}
+    back = next((b for b in BACKS if b in {c['_name'] for c in g.layout(base)}), None)
+    title = file
+    rml = [HEAD.format(title=title, file=file, dialogs=' '.join(a.lower() for a in archs),
+                       opaque=' game-opaque' if opaque else '', back=f' game-back="{back}"' if back else '')]
+    for a in archs:
+        g.use(a)
+        controls = g.layout(a)
+        if a in EDITS:
+            controls = EDITS[a](controls)
+        hidden = covered(controls)
+        controls = [c for c in controls if c['_name'] not in hidden]
+        by, roots = resolve_page(controls)
+        dw, dh = dialog_size(g, a)
+        x, y = default_place(g, a, base_full)
+        w.prefix = a.lower() + '-'
+        bg = g.info[a].get('BackgroundImage')
+        did = 'd-' + a.lower()
+        if bg and g.sprite(bg, 'opaque' if dw >= 640 else ''):
+            w.rule('#' + did, f'decorator: image({g.sprite(bg, "opaque" if dw >= 640 else "")});')
+        rml.append('')
+        rml.append(f'  <!-- {a}.DAT -->')
+        if hidden:
+            rml.append(f'  <!-- not copied: {", ".join(sorted(hidden))} (the game draws a box over it) -->')
+        rml.append(f'  <div id="{did}" class="dialog" game-dialog="{a.lower()}" style="left: {x}dp; top: {y}dp; width: {dw}dp; height: {dh}dp;">')
+        for s in roots:
+            w.element(s, by, rml, 2)
+        rml.append('  </div>')
+    rml.append('</div>')
+    rml.append('</body>')
+    rml.append('</rml>')
+    open(os.path.join(out_dir, file + '.rml'), 'w').write('\n'.join(rml) + '\n')
+    open(os.path.join(out_dir, file + '.rcss'), 'w').write(
+        f'/* {file}.rml: each control\'s own pictures (from the game\'s layouts). Made by tools/mcm2rml.py. */\n' +
+        '\n'.join(w.rcss) + '\n')
 
 
 def main():
@@ -390,38 +543,18 @@ def main():
         raise SystemExit(__doc__)
     g = Game(sys.argv[1])
     out_dir = sys.argv[2]
-    w = Writer(g)
+    os.makedirs(out_dir, exist_ok=True)
     g.layout('GLOBAL')
-    base = g.layout('OPTBASE')
-    pages = [(a, title, trig, edit, g.layout(a)) for a, title, trig, edit in PAGES]
-    rml = [HEAD.replace('{cover}', ' '.join(p[2] for p in PAGES))]
-    by, roots = resolve_page(base)
-    rml.append('  <!-- The frame: tabs, Back, Help, Advanced, Restore -->')
-    for s in roots:
-        w.element(s, by, rml, 1)
-    for arch, title, trig, edit, controls in pages:
-        if edit:
-            controls = edit(controls)
-        hidden = covered(controls)
-        controls = [c for c in controls if c['_name'] not in hidden]
-        by, roots = resolve_page(controls)
-        rml.append('')
-        rml.append(f'  <!-- {title} ({arch}.DAT) -->')
-        if hidden:
-            rml.append(f'  <!-- not copied: {", ".join(sorted(hidden))} (the game draws a box over it) -->')
-        rml.append(f'  <div id="page-{arch.lower()}" class="page" game-if="{trig}">')
-        for s in roots:
-            w.element(s, by, rml, 2)
-        rml.append('  </div>')
-    rml.append('</div>')
-    rml.append('</body>')
-    rml.append('</rml>')
-    open(os.path.join(out_dir, 'options.rml'), 'w').write('\n'.join(rml) + '\n')
-
-    plate = g.sprite('GPlate03', 'frame=2')
+    g.layout('OPTBASE')
+    for file, archs in SCREENS:
+        write_screen(g, out_dir, file, archs)
+    g.use('OPTBASE')
+    plate = g.sprite('GPlate03', 'frame=2') if g.where('GPlate03') else None
+    if not plate:
+        g.layout('OPTGRAPH')
+        plate = g.sprite('GPlate03', 'frame=2')
     pw, ph = g.size('GPlate03')
     shared = SHARED.format(
-        bg=g.sprite('OptionsBackGround', 'opaque'),
         cb_off=g.sprite('CheckBoxOff'), cb_on=g.sprite('CheckBoxOn'),
         cb_off_grey=g.sprite('CheckBoxOffGrey'), cb_on_grey=g.sprite('CheckBoxOnGrey'),
         rb_off=g.sprite('RadioButtonOff'), rb_on=g.sprite('RadioButtonOn'),
@@ -429,13 +562,12 @@ def main():
         dd_text=g.sprite('DropDown05'), dd_arrow=g.sprite('DownArrowUp'), dd_arrow_lit=g.sprite('DownArrowLit'),
         dd_arrow_down=g.sprite('DownArrowDown'), dd_list=g.sprite('DropDownBG05'), dd_scroll=g.sprite('VerticleScroll04'),
         dd_thumb=g.sprite('ElevatorThumbUp'), plate=plate, pw=pw, ph=ph, pw2=pw - 4, ph2=ph - 4)
-    open(os.path.join(out_dir, 'options.rcss'), 'w').write(
-        shared + '\n/* ---- each control\'s own pictures (from the game\'s layouts) ---- */\n' + '\n'.join(w.rcss) + '\n')
-    print('wrote options.rml and options.rcss to', out_dir)
+    open(os.path.join(out_dir, 'menus.rcss'), 'w').write(shared)
+    print('wrote', ', '.join(f for f, _ in SCREENS), 'and menus.rcss to', out_dir)
 
 
-SHARED = '''/* The Options screen (options.rml). 1dp = one pixel of the game's 640x480
-   menus. Made by tools/mcm2rml.py, then edited by hand. Pictures:
+SHARED = '''/* Shared by the game menu copies (menus/*.rml). 1dp = one pixel of the
+   game's 640x480 menus. Made by tools/mcm2rml.py, then edited by hand. Pictures:
    /dat/<ARCHIVE>/<file> is the game's own (UI\\<ARCHIVE>.DAT); options after
    '?': black (black is see-through too), opaque, frame=N (only the outer N
    pixels), bar (a slider track without its tick marks). */
@@ -445,7 +577,6 @@ span {{ display: inline; }}
 body {{
   width: 100%;
   height: 100%;
-  background-color: #000000;
   font-family: Arial;
   font-weight: bold;
   font-size: 13dp;
@@ -463,15 +594,16 @@ body {{
   height: 480dp;
   margin-left: -320dp;
   margin-top: -240dp;
-  decorator: image({bg});
 }}
+/* A screen that covers the whole menu: black beside the 640x480 area. */
+body[game-opaque] {{ background-color: #000000; }}
 #screen div, #screen input, #screen select {{ position: absolute; box-sizing: border-box; }}
 #screen span {{ position: static; }}
-.page {{ left: 20dp; top: 35dp; width: 600dp; height: 360dp; }}
+#screen .list div {{ position: static; }}
 .game-hidden {{ display: none; }}
 
 /* Everything that can be picked: arrows / d-pad move, Enter / A clicks. */
-.tab, .button, .check, .radio, .cycle, .slider, .dropdown {{ tab-index: auto; nav: auto; focus: auto; }}
+.tab, .button, .check, .radio, .pick, .cycle, .slider, .dropdown, .edit, .list {{ tab-index: auto; nav: auto; focus: auto; }}
 .disabled {{ tab-index: none; nav: none; focus: none; }}
 
 /* Box plates on MCM2MaX's own layouts: the edge of a game plate only. */
@@ -499,6 +631,21 @@ body {{
 
 /* A setting that steps through its choices (Chat Box Mode). */
 .cycle {{ text-align: center; }}
+
+/* A radio button drawn as a picture of its own. */
+.pick {{ text-align: center; }}
+
+/* Lists: the rows the game shows now; .on the chosen one. */
+.list {{ overflow: hidden; padding: 2dp 4dp; }}
+.list .row {{ display: block; height: 16dp; line-height: 16dp; }}
+.list .row:hover {{ background-color: #3a4a8c80; }}
+.list .row.on {{ background-color: #3a4a8c; }}
+
+/* Edit boxes. */
+.edit {{ padding-top: 3dp; }}
+
+/* Vertical sliders (a list's scroll bar). */
+.vslider slidertrack {{ width: 100%; }}
 
 /* Sliders: the track and its thumb (each slider's own pictures below). */
 .slider slidertrack {{ height: 100%; }}

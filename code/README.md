@@ -421,12 +421,14 @@ MenuHiRes3D=1
 ; reloads. Works with both renderers. 0 = no new screens. Default 1.
 MenuMaX=1
 
-; MaXOptions: 1 = the Options screen is drawn by MenuMaX from
-; UI\MaX\options.rml: a copy of the game's own Options pages that works
-; through them (the game's pages stay underneath and do all the saving), at
-; the window's resolution, with the game's own art read from its UI\*.DAT
-; files. Needs MenuMaX=1. 0 = the game's own Options pages. Default 1.
-MaXOptions=1
+; MaXMenus: 1 = the game's menus are drawn by MenuMaX from the screens in
+; UI\MaX\menus\ (copies of the game's own, made from its layouts) wherever
+; one copies every dialog the game shows; they work through the game's menus
+; underneath (which do all the saving), at the window's resolution, with the
+; game's own art read from its UI\*.DAT files. For now: Options (all pages),
+; Advanced Options and the message boxes. Needs MenuMaX=1. 0 = the game's own
+; menus. Default 1.
+MaXMenus=1
 
 ; MenuNav: 1 = the game's own menu screens also work with the keyboard and
 ; controllers, and look as they always have: arrows / d-pad / left stick (a

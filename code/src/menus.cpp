@@ -796,7 +796,7 @@ void __fastcall OptGraphEvent(uintptr_t self, void* edx, uintptr_t event) {
   }
   if ((type == 1 || type == 3) && std::strcmp(SafeName(event), kMaxButton) == 0) {
     patch::Log("menus: %s clicked (event %d)", kMaxButton, type);
-    if (!ui::Active()) ui::Open("settings", "Options > Graphics button");
+    if (!ui::IsOpen("settings")) ui::Open("settings", "Options > Graphics button");
   }
   reinterpret_cast<EventFn>(kOptGraphEvent)(self, edx, event);
   if (type == 5) {
