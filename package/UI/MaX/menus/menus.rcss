@@ -27,8 +27,6 @@ body {
   margin-left: -320dp;
   margin-top: -240dp;
 }
-/* A screen that covers the whole menu: black beside the 640x480 area. */
-body[game-opaque] { background-color: #000000; }
 #screen div, #screen input, #screen select { position: absolute; box-sizing: border-box; }
 #screen span { position: static; }
 #screen .list div { position: static; }

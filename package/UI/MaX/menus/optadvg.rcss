@@ -1,5 +1,5 @@
 /* optadvg.rml: each control's own pictures (from the game's layouts). Made by tools/mcm2rml.py. */
-#d-optadvg { decorator: image(/dat/OPTADVG/Options/AdvancedGraphics/AGBackGround.tga?opaque); }
+#d-optadvg { decorator: image(/dat/OPTADVG/Options/AdvancedGraphics/AGBackGround.tga); }
 #optadvg-UnusedGraphicsSlideBox { decorator: image(/dat/OPTADVG/Options/AdvancedGraphics/AGPlate02.tga); }
 #optadvg-SldEcosystem slidertrack { decorator: image(/dat/OPTADVG/Options/AdvancedGraphics/AGHorizontalSlider01.tga); }
 #optadvg-SldEcosystem sliderbar { width: 8dp; height: 15dp; margin-top: 0dp; decorator: image(/dat/OPTADVG/Options/AdvancedGraphics/AGSmallHSliderUp.tga); }

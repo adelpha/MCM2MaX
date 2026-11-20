@@ -1,5 +1,5 @@
 /* options.rml: each control's own pictures (from the game's layouts). Made by tools/mcm2rml.py. */
-#d-optbase { decorator: image(/dat/OPTBASE/Options/OptionsBackGround.tga?opaque); }
+#d-optbase { decorator: image(/dat/OPTBASE/Options/OptionsBackGround.tga); }
 #optbase-GameSettings { decorator: image(/dat/OPTBASE/Options/OptTabDown01.tga?black); }
 #optbase-GameSettings.on { decorator: image(/dat/OPTBASE/Options/OptTab01.tga?black); }
 #optbase-Graphics { decorator: image(/dat/OPTBASE/Options/OptTabDown02.tga?black); }

@@ -252,7 +252,7 @@ class Writer:
                 return
             out.append(f'{pad}<div {attrs} class="radio" style="{styled(self.text_style(s, h, 14))}"><div class="box"/><span class="t">{text}</span></div>')
             return
-        if t == 'BUTTON':
+        if t in ('BUTTON', 'SCROLLUP', 'SCROLLDOWN'):
             norm = s.get('AnimNorm')
             lit = s.get('AnimFocus') or norm
             push = s.get('AnimPush') or norm
@@ -445,7 +445,26 @@ SCREENS = [
     ('messbox1', ['MESSBOX1']),
     ('messbox2', ['MESSBOX2']),
     ('messbox3', ['MESSBOX3']),
+    # The main menu: no background of its own (MCM2MaX's flag and picture,
+    # MenuFlag, show through).
+    ('mainmenu', ['MAINMENU']),
+    ('single', ['SPBASE', 'SPEVENT', 'SPRINFO', 'SPBIKER']),
+    ('multi', ['MPBASE', 'MPEVENT', 'MPRINFO', 'MPBIKER', 'MPOPT']),
+    ('hostjoin', ['HOSTJOIN']),
+    ('career', ['PCC', 'PCCBIKER', 'PCCNEXT', 'PCCSTAND']),
+    ('careerstart', ['PCSTART']),
+    ('careernew', ['PCNEW']),
+    ('careerdeal', ['PCDEAL']),
+    ('careerdone', ['PCDONE']),
+    ('careerfinish', ['PCFINISH']),
+    ('careerrace', ['PCLRACE']),
+    ('careertrans', ['PCTRANS']),
+    ('hiscores', ['HISCORES']),
+    ('replays', ['GRBASE', 'GHOSTFIL', 'REPLYFIL']),
+    ('globset', ['GLOBSET']),
+    ('serial', ['SERPOPUP']),
 ]
+NO_BACKGROUND = {'MAINMENU'}
 EDITS = {'OPTGRAPH': max_graphics}
 BACKS = ['Back', 'BackButton', 'CancelButton', 'Cancel', 'NoButton', 'No', 'CloseButton', 'Close', 'OKButton', 'OK']
 
@@ -498,7 +517,7 @@ def write_screen(g, out_dir, file, archs):
     base = archs[0]
     bw, bh = dialog_size(g, base)
     base_full = bw >= 640 and bh >= 480
-    opaque = base_full and bool(g.info[base].get('BackgroundImage'))
+    opaque = base_full and bool(g.info[base].get('BackgroundImage')) and base not in NO_BACKGROUND
     names = set()
     for a in archs:
         names |= {c['_name'] for c in g.layout(a)}
@@ -517,10 +536,13 @@ def write_screen(g, out_dir, file, archs):
         dw, dh = dialog_size(g, a)
         x, y = default_place(g, a, base_full)
         w.prefix = a.lower() + '-'
-        bg = g.info[a].get('BackgroundImage')
+        bg = None if a in NO_BACKGROUND else g.info[a].get('BackgroundImage')
         did = 'd-' + a.lower()
-        if bg and g.sprite(bg, 'opaque' if dw >= 640 else ''):
-            w.rule('#' + did, f'decorator: image({g.sprite(bg, "opaque" if dw >= 640 else "")});')
+        # (Magenta in a background is a hole the game draws into: a 3-D view,
+        # e.g. the bike on Single Player > Bike; the game's own frame shows
+        # there.)
+        if bg and g.sprite(bg):
+            w.rule('#' + did, f'decorator: image({g.sprite(bg)});')
         rml.append('')
         rml.append(f'  <!-- {a}.DAT -->')
         if hidden:
@@ -595,8 +617,6 @@ body {{
   margin-left: -320dp;
   margin-top: -240dp;
 }}
-/* A screen that covers the whole menu: black beside the 640x480 area. */
-body[game-opaque] {{ background-color: #000000; }}
 #screen div, #screen input, #screen select {{ position: absolute; box-sizing: border-box; }}
 #screen span {{ position: static; }}
 #screen .list div {{ position: static; }}
