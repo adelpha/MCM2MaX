@@ -169,6 +169,8 @@ struct State {
   std::vector<GameBind> game;
   bool updating = false;     // the game's values being put into elements: not changes
   std::string back_control;  // game-back="Back": Esc / B clicks it (the game closes the page)
+  std::vector<uintptr_t> under;    // game dialogs already shown when the screen opened (behind it)
+  bool under_set = false;
   std::vector<std::string> cover;  // game-cover="A B": shown only while one of these is
   bool suspended = false;    // hidden: the game's own screen is in front (a message box, a page not copied)
   DWORD auto_check = 0;      // last look for a game screen to open a copy over
@@ -438,18 +440,53 @@ void SyncGame() {
     mg::Info i;
     if (mg::Get(n.c_str(), &i) && i.shown) covered = true;
   }
-  std::vector<std::string> modal;
-  bool other_modal = false;
-  if (mg::Modal(&modal)) {
-    other_modal = true;
-    for (const std::string& n : modal)
-      if (BoundToGame(n)) other_modal = false;
+  // Any shown game dialog none of whose controls this screen copies (the
+  // Advanced page, a message box, the menu Back leads to) is in front.
+  std::vector<mg::Dialog> dialogs;
+  mg::Dialogs(&dialogs);
+  // Dialogs already shown when the screen opened (e.g. the menu behind the
+  // game's Options) stay behind it until they go.
+  if (!g.under_set) {
+    g.under_set = true;
+    g.under.clear();
+    for (const mg::Dialog& d : dialogs) {
+      bool bound = false;
+      for (const std::string& n : d.names)
+        if (BoundToGame(n)) bound = true;
+      if (!bound && !d.names.empty()) {
+        g.under.push_back(d.p);
+        patch::Log("MenuMaX: game dialog %08X (first control %s) was shown before %s opened; it stays behind",
+                   static_cast<unsigned>(d.p), d.names[0].c_str(), g.open_name.c_str());
+      }
+    }
   }
-  const bool suspend = !covered || other_modal;
+  for (size_t k = 0; k < g.under.size();) {
+    bool still = false;
+    for (const mg::Dialog& d : dialogs) still |= d.p == g.under[k];
+    if (still) {
+      ++k;
+    } else {
+      patch::Log("MenuMaX: game dialog %08X from behind %s is gone", static_cast<unsigned>(g.under[k]), g.open_name.c_str());
+      g.under.erase(g.under.begin() + static_cast<long>(k));
+    }
+  }
+  const mg::Dialog* other = nullptr;
+  for (const mg::Dialog& d : dialogs) {
+    if (d.names.empty()) continue;
+    bool behind = false;
+    for (uintptr_t u : g.under) behind |= u == d.p;
+    if (behind) continue;
+    bool bound = false;
+    for (const std::string& n : d.names)
+      if (BoundToGame(n)) bound = true;
+    if (!bound) other = &d;
+  }
+  const bool suspend = !covered || other;
   if (suspend != g.suspended) {
     g.suspended = suspend;
-    patch::Log("MenuMaX: %s %s (%s)", g.open_name.c_str(), suspend ? "hidden: the game's own screen is in front" : "shown again",
-               !covered ? "a page this screen does not copy" : other_modal ? "a message box of the game's" : "back to a copied page");
+    patch::Log("MenuMaX: %s %s (%s%s)", g.open_name.c_str(), suspend ? "hidden: the game's own screen is in front" : "shown again",
+               !covered ? "a page this screen does not copy" : other ? "a game dialog it does not copy, first control " : "back to a copied page",
+               other && covered ? other->names[0].c_str() : "");
     if (suspend) {
       g.doc->Hide();
     } else {
@@ -530,6 +567,8 @@ void Bind() {
     }
   }
   g.suspended = false;
+  g.under_set = false;
+  g.under.clear();
   UpdateTexts();
   patch::Log("MenuMaX: %u settings and %u game controls bound on %s%s%s", static_cast<unsigned>(g.settings.size()),
              static_cast<unsigned>(g.game.size()), g.open_name.c_str(), g.back_control.empty() ? "" : "; back = ",
@@ -750,6 +789,8 @@ void CloseDoc() {
   g.cover.clear();
   g.back_control.clear();
   g.suspended = false;
+  g.under_set = false;
+  g.under.clear();
   g.context->Update();  // documents go away at the next update
 }
 

@@ -127,6 +127,7 @@ struct State {
   std::vector<Action> queue;
   DWORD tick_at = 0;
   unsigned done = 0;
+  std::vector<uintptr_t> dialogs, logged;  // shown now / as last logged
 } g;
 
 const Entry* FindEntry(const char* name) {
@@ -265,7 +266,8 @@ void Refresh() {
   const uintptr_t mgr = Manager();
   if (!mgr) return;
   ++g.refreshes;
-  std::vector<uintptr_t> dialogs;
+  std::vector<uintptr_t>& dialogs = g.dialogs;
+  dialogs.clear();
   Each(mgr, "UIDialog", [&](uintptr_t d) {
     if (!Readable(d, 0x7F40) || !Shown(d, d)) return;
     dialogs.push_back(d);
@@ -284,6 +286,32 @@ void Refresh() {
       e.modal = d == g.modal;
       g.controls.push_back(std::move(e));
     });
+  }
+  if (dialogs != g.logged) {
+    g.logged = dialogs;
+    patch::Log("MenuMaX: game dialogs shown now: %u", static_cast<unsigned>(dialogs.size()));
+    for (uintptr_t d : dialogs) {
+      std::string names;
+      int n = 0;
+      for (const Entry& e : g.controls)
+        if (e.dialog == d && n++ < 6) names += " " + e.name;
+      int total = 0;
+      for (const Entry& e : g.controls) total += e.dialog == d;
+      patch::Log("MenuMaX:   dialog %08X%s, %d controls:%s%s", static_cast<unsigned>(d), d == g.modal ? " (modal)" : "", total,
+                 names.c_str(), total > 6 ? " ..." : "");
+    }
+  }
+}
+
+void Dialogs(std::vector<Dialog>* out) {
+  out->clear();
+  for (uintptr_t d : g.dialogs) {
+    Dialog x;
+    x.p = d;
+    x.modal = d == g.modal;
+    for (const Entry& e : g.controls)
+      if (e.dialog == d) x.names.push_back(e.name);
+    out->push_back(std::move(x));
   }
 }
 

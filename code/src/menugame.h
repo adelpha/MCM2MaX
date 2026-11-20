@@ -33,6 +33,14 @@ bool Get(const char* name, Info* out);
 bool Rows(const char* name, std::vector<std::string>* rows);
 // A modal dialog is shown now: its controls' names.
 bool Modal(std::vector<std::string>* names);
+// The shown dialogs, oldest first, with their named controls (as of the
+// last Refresh).
+struct Dialog {
+  uintptr_t p = 0;
+  bool modal = false;
+  std::vector<std::string> names;
+};
+void Dialogs(std::vector<Dialog>* out);
 
 // Changes, made at the start of the next tick.
 void Click(const char* name);                   // button, checkbox, radio, multi-state, tab
