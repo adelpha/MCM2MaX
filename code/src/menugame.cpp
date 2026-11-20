@@ -4,7 +4,7 @@
 //   - Screens: the GUI manager's dialogs (tree iterator, class "UIDialog");
 //     +0x148 modal; controls: iterator over [dialog + 0x7f3c], class
 //     "UIControl". Control +0xf4 name, +0xc0 text (char*), +0x2c..+0x38 rect,
-//     +0x6c enabled, +0x70 shown, +0x74 id, +0xb8 dialog, +0xbc its event
+//     +0x6c enabled, +0x68 show/hide animation, +0x70 shown, +0x74 id, +0xb8 dialog, +0xbc its event
 //     target, vtable = class.
 //   - Events: dialog vtable +0x74 with {id, name, type, dialog, target,
 //     control, 0, 0}; types 1 click, 2 list row, 3 change, 10 edit changed,
@@ -344,7 +344,10 @@ bool Get(const char* name, Info* out, uintptr_t scope) {
   const uintptr_t c = e->p;
   Info i;
   i.kind = KindFor(c);
-  i.shown = Live(c);
+  // +0x68: show / hide animation running (1 in, 2 out; 0x471590). A pop-out
+  // panel (FX=Anim) plays its frames before it counts as shown, so the copy
+  // waits for the game's animation to finish, and goes as soon as it hides.
+  i.shown = Live(c) && I32(c + 0x68) == 0;
   i.enabled = I32(c + 0x6C) != 0;
   i.dialog = e->dialog;
   i.rect = {I32(c + 0x2C), I32(c + 0x30), I32(c + 0x34), I32(c + 0x38)};

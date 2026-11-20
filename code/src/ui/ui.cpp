@@ -431,6 +431,8 @@ void SyncOne(GameBind& b, DWORD now) {
     patch::Log("MenuMaX: game control %s: %s, %s%s, value %d of %d, text \"%s\" (%ld,%ld %ldx%ld)", b.name.c_str(),
                KindName(i.kind), i.shown ? "shown" : "hidden", i.enabled ? "" : ", greyed", i.value, i.range, i.text.c_str(),
                i.rect.left, i.rect.top, i.rect.right - i.rect.left, i.rect.bottom - i.rect.top);
+  else if (i.shown != b.last.shown)
+    patch::Log("MenuMaX: game control %s now %s", b.name.c_str(), i.shown ? "shown" : "hidden (or animating)");
   b.seen = true;
   if (b.only_if) {
     b.last = i;

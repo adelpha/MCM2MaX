@@ -16,7 +16,7 @@ enum Kind { kUnknown, kButton, kCheck, kRadio, kDropdown, kEdit, kList, kSlider,
 
 struct Info {
   Kind kind = kUnknown;
-  bool shown = false;    // shown and taking input (the game's own test)
+  bool shown = false;    // shown and taking input (the game's own test), not mid show/hide animation
   bool enabled = false;  // not greyed out
   int value = 0;         // checkbox / radio / multi-state: state; slider: position; list / dropdown: chosen row (-1 none)
   int range = 0;         // multi-state: number of states; slider: highest position; list / dropdown: rows
