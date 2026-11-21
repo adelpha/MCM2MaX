@@ -165,6 +165,10 @@ struct GameBind {
   // network check stalls the game for seconds). Hidden until it moves on.
   int prev_anim = 0, start_frame = -1;
   bool located = false;  // looked for in the whole GUI tree once (log)
+  // game-window: the game's own picture of the control is shown here (drawn
+  // again over the screen at the control's place), e.g. the track preview.
+  bool window = false;
+  bool window_logged = false;
 };
 
 // <div game-dialog="optgame">: the part of a screen that copies one game
@@ -425,6 +429,7 @@ void BindGame(Rml::Element* e, const std::string& base_dtm) {
       at = sp + 1;
     }
   }
+  b.window = e->HasAttribute("game-window");
   e->SetClass("game-hidden", true);  // until the control is seen
   g.game.push_back(b);
 }
@@ -1661,7 +1666,45 @@ struct Target {
   ID3D11RenderTargetView* rtv = nullptr;
   IDirect3DSurface9* surf9 = nullptr;
   UINT w = 0, h = 0;
+  const dd::BlitParams* frame = nullptr;  // how the game's picture was drawn
 };
+
+// game-window parts: the game's own picture at the control's place, drawn
+// again over the screen (pictures the game draws itself, e.g. track previews).
+void DrawGameWindows(const Target& t) {
+  if (!t.frame || !t.frame->HasSrc()) return;
+  const dd::BlitParams& f = *t.frame;
+  const LONG sw = f.src_rect.right - f.src_rect.left, sh = f.src_rect.bottom - f.src_rect.top;
+  if (sw <= 0 || sh <= 0) return;
+  const double sx = static_cast<double>(f.dst_rect.right - f.dst_rect.left) / sw;
+  const double sy = static_cast<double>(f.dst_rect.bottom - f.dst_rect.top) / sh;
+  for (GameBind& b : g.game) {
+    if (!b.window) continue;
+    const bool show = b.seen && b.last.shown && b.el->IsVisible(true) && b.el->GetOwnerDocument() &&
+                      b.el->GetOwnerDocument()->IsVisible();
+    const RECT r = b.last.rect;  // left, top, right, bottom in menu pixels
+    if (!show || r.right <= r.left || r.bottom <= r.top) {
+      b.window_logged = false;
+      continue;
+    }
+    dd::BlitParams p = f;
+    p.src_rect = {f.src_rect.left + r.left, f.src_rect.top + r.top, f.src_rect.left + r.right, f.src_rect.top + r.bottom};
+    p.dst_rect = {f.dst_rect.left + static_cast<LONG>(r.left * sx + 0.5), f.dst_rect.top + static_cast<LONG>(r.top * sy + 0.5),
+                  f.dst_rect.left + static_cast<LONG>(r.right * sx + 0.5), f.dst_rect.top + static_cast<LONG>(r.bottom * sy + 0.5)};
+    if (t.surf9) {
+      p.dst9 = t.surf9;
+      dd::Blit9(p);
+    } else {
+      p.dst = t.rtv;
+      dd::Blit(p);
+    }
+    if (!b.window_logged)
+      patch::Log("MenuMaX: game window %s: the game's picture %ld,%ld %ldx%ld drawn at %ld,%ld %ldx%ld", b.name.c_str(), r.left,
+                 r.top, r.right - r.left, r.bottom - r.top, p.dst_rect.left, p.dst_rect.top, p.dst_rect.right - p.dst_rect.left,
+                 p.dst_rect.bottom - p.dst_rect.top);
+    b.window_logged = true;
+  }
+}
 
 void BeginDraw(const Target& t) {
   if (g.r9) {
@@ -1918,6 +1961,7 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
   BeginDraw(t);
   g.context->Render();
   EndDraw();
+  DrawGameWindows(t);
   DrawPointer(t, dp);
   ++g.frames;
   if (g.dump_at && static_cast<int>(GetTickCount() - g.dump_at) >= 0) {
@@ -1929,18 +1973,20 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
 
 }  // namespace
 
-void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect) {
+void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect, const dd::BlitParams* frame) {
   if (!g.installed || g.failed || dd::IsD3D9()) return;
   Target t;
+  t.frame = frame;
   t.rtv = rtv;
   t.w = w;
   t.h = h;
   PresentFrame(t, game_rect);
 }
 
-void Present9(IDirect3DSurface9* back, UINT w, UINT h, const RECT& game_rect) {
+void Present9(IDirect3DSurface9* back, UINT w, UINT h, const RECT& game_rect, const dd::BlitParams* frame) {
   if (!g.installed || g.failed || !dd::IsD3D9() || !back) return;
   Target t;
+  t.frame = frame;
   t.surf9 = back;
   t.w = w;
   t.h = h;

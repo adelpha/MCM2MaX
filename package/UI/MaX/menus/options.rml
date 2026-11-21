@@ -125,7 +125,7 @@
   <!-- OPTCONT.DAT -->
   <div id="d-optcont" class="dialog" game-dialog="optcont" style="left: 20dp; top: 35dp; width: 600dp; height: 360dp;">
     <div id="optcont-InputDeviceText" game="InputDeviceText" class="text" style="left: 4dp; top: 7dp; width: 110dp; height: 15dp; text-align: right;">Presets:</div>
-    <select id="optcont-InputDeviceDDL" game="InputDeviceDDL" title="Click arrow to display all available controller types" class="dropdown" style="left: 119dp; top: 4dp; width: 287dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="optcont-InputDeviceDDL" game="InputDeviceDDL" title="Click arrow to display all available controller types" class="dropdown" style="left: 119dp; top: 4dp; width: 287dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="optcont-ChkAnalogAxes" game="ChkAnalogAxes" class="check" style="left: 416dp; top: 8dp; width: 177dp; height: 17dp; padding-top: 1dp; padding-left: 17dp;"><div class="box"/><span class="t">Analog Axes</span></div>
     <div id="optcont-ClickBelowText" game="ClickBelowText" class="text" style="left: 84dp; top: 30dp; width: 209dp; height: 18dp; text-align: center;">Controls - Click below to remap</div>
     <div id="optcont-CurrentAssignmentText" game="CurrentAssignmentText" class="text" style="left: 291dp; top: 30dp; width: 228dp; height: 18dp; text-align: center;">Current Assignment</div>
@@ -191,7 +191,7 @@
   <!-- OPTGAR.DAT -->
   <div id="d-optgar" class="dialog" game-dialog="optgar" style="left: 20dp; top: 35dp; width: 600dp; height: 360dp;">
     <div id="optgar-CurveLeft" game="CurveLeft" class="button" style="left: 72dp; top: 8dp; width: 21dp; height: 21dp;"></div>
-    <select id="optgar-DDLCurves" game="DDLCurves" title="Lists available stock and custom power curve settings for each engine cc size" class="dropdown" style="left: 94dp; top: 8dp; width: 412dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="optgar-DDLCurves" game="DDLCurves" title="Lists available stock and custom power curve settings for each engine cc size" class="dropdown" style="left: 94dp; top: 8dp; width: 412dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="optgar-CurveRight" game="CurveRight" class="button" style="left: 507dp; top: 8dp; width: 21dp; height: 21dp;"></div>
     <div id="optgar-rbwLabel6" game="rbwLabel6" class="text" style="left: 16dp; top: 36dp; width: 57dp; height: 17dp; padding-top: 1dp; text-align: right;">HP</div>
     <div id="optgar-HP1" game="HP1" title="Displays horsepower generated at specific RPM levels to create a power curve" class="text" style="left: 84dp; top: 34dp; width: 33dp; height: 21dp; color: #7ab9fe; padding-top: 3dp; text-align: center;"></div>

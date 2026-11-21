@@ -28,6 +28,10 @@
 struct ID3D11RenderTargetView;
 struct IDirect3DSurface9;
 
+namespace dd {
+struct BlitParams;
+}
+
 namespace ui {
 
 // At start-up, after the config is loaded.
@@ -44,9 +48,11 @@ bool IsOpen(const char* name);
 
 // Present (Direct3D 11, under the renderer lock): draws the open screen over
 // the frame; game_rect is where the 640x480 picture went in the window.
-void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect);
+// `frame` is how the game's picture was drawn (game-window parts of a screen
+// show it through: it is drawn again there, over the screen).
+void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect, const dd::BlitParams* frame = nullptr);
 // The same for Direct3D 9: drawn into the back buffer `back` (w x h).
-void Present9(IDirect3DSurface9* back, UINT w, UINT h, const RECT& game_rect);
+void Present9(IDirect3DSurface9* back, UINT w, UINT h, const RECT& game_rect, const dd::BlitParams* frame = nullptr);
 // The Direct3D 9 device is about to be released (a new one follows).
 void DeviceGone9();
 

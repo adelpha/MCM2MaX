@@ -38,14 +38,14 @@
     <div id="pccbiker-TxtEngineSize" game="TxtEngineSize" class="text" style="left: 198dp; top: 8dp; width: 179dp; height: 14dp;">Custom Engine Size</div>
     <select id="pccbiker-DDLEngineSize" game="DDLEngineSize" class="dropdown" style="left: 197dp; top: 23dp; width: 178dp; height: 21dp; color: #7ab9fe;"></select>
     <div id="pccbiker-RiderLeft" game="RiderLeft" title="Click arrow to change clothing colors" class="button" style="left: 64dp; top: 51dp; width: 21dp; height: 21dp;"></div>
-    <select id="pccbiker-DDLRiders" game="DDLRiders" title="Click arrow to change clothing colors" class="dropdown" style="left: 86dp; top: 51dp; width: 412dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="pccbiker-DDLRiders" game="DDLRiders" title="Click arrow to change clothing colors" class="dropdown" style="left: 86dp; top: 51dp; width: 412dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="pccbiker-RiderRight" game="RiderRight" title="Click arrow to change clothing colors" class="button" style="left: 499dp; top: 51dp; width: 21dp; height: 21dp;"></div>
     <div id="pccbiker-CornerUL" game="CornerUL" class="plate" game-text="off" style="left: 64dp; top: 73dp; width: 4dp; height: 4dp;"/>
     <div id="pccbiker-CornerUR" game="CornerUR" class="plate" game-text="off" style="left: 516dp; top: 73dp; width: 4dp; height: 4dp;"/>
     <div id="pccbiker-CornerLL" game="CornerLL" class="plate" game-text="off" style="left: 64dp; top: 293dp; width: 4dp; height: 4dp;"/>
     <div id="pccbiker-CornerLR" game="CornerLR" class="plate" game-text="off" style="left: 516dp; top: 293dp; width: 4dp; height: 4dp;"/>
     <div id="pccbiker-BikeLeft" game="BikeLeft" title="Click arrow to change bikes" class="button" style="left: 64dp; top: 297dp; width: 21dp; height: 21dp;"></div>
-    <select id="pccbiker-DDLBikes" game="DDLBikes" title="Click arrow to change bikes" class="dropdown" style="left: 86dp; top: 297dp; width: 412dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="pccbiker-DDLBikes" game="DDLBikes" title="Click arrow to change bikes" class="dropdown" style="left: 86dp; top: 297dp; width: 412dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="pccbiker-BikeRight" game="BikeRight" title="Click arrow to change bikes" class="button" style="left: 499dp; top: 297dp; width: 21dp; height: 21dp;"></div>
     <div id="pccbiker-ButWrench" game="ButWrench" title="Click to display Garage screen, where you can tweak your bike's engine &amp; suspension" class="button" style="left: 287dp; top: 318dp; width: 99dp; height: 37dp;"></div>
     <div id="pccbiker-rbwLabel1" game="rbwLabel1" class="text" style="left: 80dp; top: 328dp; width: 145dp; height: 17dp; padding-top: 1dp; text-align: right;">Bike Plate #</div>

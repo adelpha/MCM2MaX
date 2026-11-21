@@ -1512,7 +1512,7 @@ void Present9(const GpuTexture& src, UINT src_w, UINT src_h, UINT interval) {
     p.linear = true;
     Blit9(p);
     GpuTextComposite(src, nullptr, back, g_sc.w, g_sc.h, p.dst_rect);
-    ui::Present9(back, g_sc.w, g_sc.h, p.dst_rect);  // MenuMaX screens
+    ui::Present9(back, g_sc.w, g_sc.h, p.dst_rect, &p);  // MenuMaX screens
   }
   DrawRendererLabel(nullptr, back, g_sc.w, g_sc.h);
   back->Release();

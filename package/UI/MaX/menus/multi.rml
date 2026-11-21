@@ -59,7 +59,7 @@
     <div id="mpevent-RaceModeText" game="RaceModeText" class="text" style="left: 207dp; top: 2dp; width: 187dp; height: 14dp; text-align: center;">Race Mode</div>
     <select id="mpevent-EventTypeDropDown" game="EventTypeDropDown" title="Click arrow to display all available event types" class="dropdown" style="left: 4dp; top: 19dp; width: 178dp; height: 21dp; color: #7ab9fe;"></select>
     <select id="mpevent-RaceModeDropDown" game="RaceModeDropDown" title="Click arrow to display all available race modes" class="dropdown" style="left: 212dp; top: 19dp; width: 178dp; height: 21dp; color: #7ab9fe;"></select>
-    <div id="mpevent-PictureBox" game="PictureBox" class="list" style="left: 4dp; top: 46dp; width: 289dp; height: 143dp; color: #ffffff; text-align: right;"></div>
+    <div id="mpevent-PictureBox" game="PictureBox" game-window class="list" style="left: 4dp; top: 46dp; width: 289dp; height: 143dp; color: #ffffff; text-align: right;"></div>
     <div id="mpevent-CornerUL" game="CornerUL" class="plate" game-text="off" style="left: 4dp; top: 46dp; width: 4dp; height: 4dp;"/>
     <div id="mpevent-CornerUR" game="CornerUR" class="plate" game-text="off" style="left: 289dp; top: 46dp; width: 4dp; height: 4dp;"/>
     <div id="mpevent-OpponentsControlBox" game="OpponentsControlBox" class="plate" game-text="off" style="left: 305dp; top: 45dp; width: 99dp; height: 51dp;">
@@ -84,7 +84,7 @@
     </div>
     <div id="mpevent-TrackLeft" game="TrackLeft" class="button" style="left: 4dp; top: 189dp; width: 21dp; height: 21dp;"></div>
     <div id="mpevent-CornerLL" game="CornerLL" class="plate" game-text="off" style="left: 4dp; top: 185dp; width: 4dp; height: 4dp;"/>
-    <select id="mpevent-DDLTextBox" game="DDLTextBox" class="dropdown" style="left: 26dp; top: 189dp; width: 245dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="mpevent-DDLTextBox" game="DDLTextBox" class="dropdown" style="left: 26dp; top: 189dp; width: 245dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="mpevent-TrackRight" game="TrackRight" class="button" style="left: 272dp; top: 189dp; width: 21dp; height: 21dp;"></div>
     <div id="mpevent-CornerLR" game="CornerLR" class="plate" game-text="off" style="left: 289dp; top: 185dp; width: 4dp; height: 4dp;"/>
   </div>
@@ -111,7 +111,7 @@
     <select id="mpbiker-LargestOpponentDropDown" game="LargestOpponentDropDown" class="dropdown" style="left: 8dp; top: 20dp; width: 178dp; height: 21dp; color: #7ab9fe;"></select>
     <select id="mpbiker-DDLEngineSize" game="DDLEngineSize" class="dropdown" style="left: 192dp; top: 20dp; width: 178dp; height: 21dp; color: #7ab9fe;"></select>
     <div id="mpbiker-RiderLeft" game="RiderLeft" title="Click arrow to change clothing colors" class="button" style="left: 8dp; top: 47dp; width: 21dp; height: 21dp;"></div>
-    <select id="mpbiker-DDLRiders" game="DDLRiders" title="Click arrow to change clothing colors" class="dropdown" style="left: 30dp; top: 47dp; width: 245dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="mpbiker-DDLRiders" game="DDLRiders" title="Click arrow to change clothing colors" class="dropdown" style="left: 30dp; top: 47dp; width: 245dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="mpbiker-RiderRight" game="RiderRight" title="Click arrow to change clothing colors" class="button" style="left: 276dp; top: 47dp; width: 21dp; height: 21dp;"></div>
     <div id="mpbiker-CornerUL" game="CornerUL" class="plate" game-text="off" style="left: 8dp; top: 68dp; width: 4dp; height: 4dp;"/>
     <div id="mpbiker-CornerUR" game="CornerUR" class="plate" game-text="off" style="left: 293dp; top: 68dp; width: 4dp; height: 4dp;"/>
@@ -120,7 +120,7 @@
     <div id="mpbiker-ButWrench" game="ButWrench" title="Click to display Garage screen, where you can tweak your bike's engine &amp; suspension" class="button" style="left: 305dp; top: 171dp; width: 99dp; height: 37dp;"></div>
     <div id="mpbiker-CornerLL" game="CornerLL" class="plate" game-text="off" style="left: 8dp; top: 209dp; width: 4dp; height: 4dp;"/>
     <div id="mpbiker-BikeLeft" game="BikeLeft" title="Click arrow to change bikes" class="button" style="left: 8dp; top: 213dp; width: 21dp; height: 21dp;"></div>
-    <select id="mpbiker-DDLBikes" game="DDLBikes" title="Click arrow to change bikes" class="dropdown" style="left: 30dp; top: 213dp; width: 245dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="mpbiker-DDLBikes" game="DDLBikes" title="Click arrow to change bikes" class="dropdown" style="left: 30dp; top: 213dp; width: 245dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="mpbiker-BikeRight" game="BikeRight" title="Click arrow to change bikes" class="button" style="left: 276dp; top: 213dp; width: 21dp; height: 21dp;"></div>
     <div id="mpbiker-CornerLR" game="CornerLR" class="plate" game-text="off" style="left: 293dp; top: 209dp; width: 4dp; height: 4dp;"/>
   </div>

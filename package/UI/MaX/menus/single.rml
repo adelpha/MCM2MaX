@@ -35,7 +35,7 @@
   <!-- SPEVENT.DAT -->
   <div id="d-spevent" class="dialog" game-dialog="spevent" style="left: 20dp; top: 35dp; width: 610dp; height: 355dp;">
     <div id="spevent-EventTypeText" game="EventTypeText" class="text" style="left: 470dp; top: 5dp; width: 129dp; height: 20dp; padding-top: 5dp; text-align: center;">Event Type</div>
-    <div id="spevent-PictureBox" game="PictureBox" class="list" style="left: 5dp; top: 18dp; width: 456dp; height: 224dp; color: #ffffff; text-align: right; font-effect: none;"></div>
+    <div id="spevent-PictureBox" game="PictureBox" game-window class="list" style="left: 5dp; top: 18dp; width: 456dp; height: 224dp; color: #ffffff; text-align: right; font-effect: none;"></div>
     <div id="spevent-CornerUL" game="CornerUL" class="plate" game-text="off" style="left: 5dp; top: 18dp; width: 4dp; height: 4dp;"/>
     <div id="spevent-CornerUR" game="CornerUR" class="plate" game-text="off" style="left: 457dp; top: 18dp; width: 4dp; height: 4dp;"/>
     <select id="spevent-EventTypeDropDown" game="EventTypeDropDown" title="Click arrow to display all available event types" class="dropdown" style="left: 470dp; top: 27dp; width: 129dp; height: 21dp; color: #7ab9fe;"></select>
@@ -56,7 +56,7 @@
     <div id="spevent-CornerLL" game="CornerLL" class="plate" game-text="off" style="left: 5dp; top: 238dp; width: 4dp; height: 4dp;"/>
     <div id="spevent-CornerLR" game="CornerLR" class="plate" game-text="off" style="left: 457dp; top: 238dp; width: 4dp; height: 4dp;"/>
     <div id="spevent-TrackLeft" game="TrackLeft" class="button" style="left: 5dp; top: 244dp; width: 21dp; height: 21dp;"></div>
-    <select id="spevent-DDLTextBox" game="DDLTextBox" class="dropdown" style="left: 27dp; top: 244dp; width: 411dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="spevent-DDLTextBox" game="DDLTextBox" class="dropdown" style="left: 27dp; top: 244dp; width: 411dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="spevent-TrackRight" game="TrackRight" class="button" style="left: 440dp; top: 244dp; width: 21dp; height: 21dp;"></div>
     <div id="spevent-racesControlBox" game="racesControlBox" class="plate" game-text="off" style="left: 470dp; top: 244dp; width: 130dp; height: 57dp;">
       <div id="spevent-RacesLabel" game="RacesLabel" class="text" style="left: 3dp; top: 6dp; width: 121dp; height: 18dp; padding-top: 1dp; text-align: center;">Races</div>
@@ -66,7 +66,7 @@
     </div>
     <div id="spevent-GhostBox" game="GhostBox" class="plate" game-text="off" style="left: 25dp; top: 265dp; width: 415dp; height: 28dp;">
       <div id="spevent-GhostLeft" game="GhostLeft" class="button" style="left: 20dp; top: 7dp; width: 21dp; height: 21dp;"></div>
-      <select id="spevent-DDLGhostRaces" game="DDLGhostRaces" class="dropdown" style="left: 42dp; top: 7dp; width: 332dp; height: 21dp; color: #7ab9fe;"></select>
+      <select id="spevent-DDLGhostRaces" game="DDLGhostRaces" class="dropdown" style="left: 42dp; top: 7dp; width: 332dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
       <div id="spevent-GhostRight" game="GhostRight" class="button" style="left: 374dp; top: 7dp; width: 21dp; height: 21dp;"></div>
     </div>
     <div id="spevent-rbwLabel2" game="rbwLabel2" class="text" style="left: 40dp; top: 272dp; width: 145dp; height: 18dp; padding-top: 1dp; padding-left: 3dp; text-align: center;">Difficulty Level:</div>
@@ -108,10 +108,10 @@
     <div id="spbiker-TxtEngineSize" game="TxtEngineSize" class="text" style="left: 207dp; top: 1dp; width: 179dp; height: 14dp;">Custom Engine Size</div>
     <select id="spbiker-DDLEngineSize" game="DDLEngineSize" class="dropdown" style="left: 206dp; top: 16dp; width: 178dp; height: 21dp; color: #7ab9fe;"></select>
     <div id="spbiker-RiderLeft" game="RiderLeft" title="Click arrow to change clothing colors" class="button" style="left: 73dp; top: 44dp; width: 21dp; height: 21dp;"></div>
-    <select id="spbiker-DDLRiders" game="DDLRiders" title="Click arrow to change clothing colors" class="dropdown" style="left: 95dp; top: 44dp; width: 412dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="spbiker-DDLRiders" game="DDLRiders" title="Click arrow to change clothing colors" class="dropdown" style="left: 95dp; top: 44dp; width: 412dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="spbiker-RiderRight" game="RiderRight" title="Click arrow to change clothing colors" class="button" style="left: 508dp; top: 44dp; width: 21dp; height: 21dp;"></div>
     <div id="spbiker-BikeLeft" game="BikeLeft" title="Click arrow to change bikes" class="button" style="left: 73dp; top: 290dp; width: 21dp; height: 21dp;"></div>
-    <select id="spbiker-DDLBikes" game="DDLBikes" title="Click arrow to change bikes" class="dropdown" style="left: 95dp; top: 290dp; width: 412dp; height: 21dp; color: #7ab9fe;"></select>
+    <select id="spbiker-DDLBikes" game="DDLBikes" title="Click arrow to change bikes" class="dropdown" style="left: 95dp; top: 290dp; width: 412dp; height: 21dp; color: #7ab9fe; text-align: center;"></select>
     <div id="spbiker-BikeRight" game="BikeRight" title="Click arrow to change bikes" class="button" style="left: 508dp; top: 290dp; width: 21dp; height: 21dp;"></div>
     <div id="spbiker-ButWrench" game="ButWrench" title="Click to display Garage screen, where you can tweak your bike's engine &amp; suspension" class="button" style="left: 296dp; top: 312dp; width: 99dp; height: 37dp;"></div>
     <div id="spbiker-rbwLabel1" game="rbwLabel1" class="text" style="left: 88dp; top: 320dp; width: 145dp; height: 17dp; padding-top: 1dp; text-align: right;">Bike Plate #</div>

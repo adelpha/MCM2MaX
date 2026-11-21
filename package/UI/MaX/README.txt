@@ -86,6 +86,8 @@ Each element is tied to the game's control of the same name, on its dialog:
                   into a child of class "t" if there is one; game-text="off"
                   keeps the element's own text.
   game-if="Name"  shown only while the game shows that control
+  game-window     (with game="Name") the game's own picture of that control
+                  shows through here, e.g. the track preview the game draws
 
 Pictures can be the game's own, read from its UI\<ARCHIVE>.DAT files:
   decorator: image(/dat/OPTBASE/Options/OptTab01.tga);

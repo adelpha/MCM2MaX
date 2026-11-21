@@ -13,8 +13,8 @@ bool Open(const char*, const char*) { return false; }
 void Close(const char*) {}
 void CloseScreen(const char*, const char*) {}
 bool IsOpen(const char*) { return false; }
-void Present11(ID3D11RenderTargetView*, UINT, UINT, const RECT&) {}
-void Present9(IDirect3DSurface9*, UINT, UINT, const RECT&) {}
+void Present11(ID3D11RenderTargetView*, UINT, UINT, const RECT&, const dd::BlitParams*) {}
+void Present9(IDirect3DSurface9*, UINT, UINT, const RECT&, const dd::BlitParams*) {}
 void DeviceGone9() {}
 void KeyEvent(unsigned, bool) {}
 void MouseButton(int, bool) {}

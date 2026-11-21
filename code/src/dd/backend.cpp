@@ -1096,7 +1096,7 @@ void Present(const GpuTexture& src_tex, UINT src_w, UINT src_h, UINT interval) {
     p.linear = true;
     if (!MenuBgPresent(src, src_w, src_h, p.dst_rect)) Blit(p);  // MenuFlag: main menu over a waving flag
     GpuTextComposite(src_tex, b.swap_rtv, nullptr, b.swap_w, b.swap_h, p.dst_rect);
-    ui::Present11(b.swap_rtv, b.swap_w, b.swap_h, p.dst_rect);  // MenuMaX screens
+    ui::Present11(b.swap_rtv, b.swap_w, b.swap_h, p.dst_rect, &p);  // MenuMaX screens
   }
   DrawRendererLabel(b.swap_rtv, nullptr, b.swap_w, b.swap_h);
   PerfBeforePresent();

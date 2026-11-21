@@ -474,6 +474,15 @@ bool Get(const char* name, Info* out, uintptr_t scope) {
     default:
       break;
   }
+  if (i.text.empty() && (i.kind == kCheck || i.kind == kRadio)) {
+    // A control with a text per state (the game's tabs, e.g. Single Player's
+    // Event / Bike & Rider / Race Info: set by 0x4799e0): +0x1F4 states,
+    // 0x20 bytes each, +8 text; +0x1EC count, +0x1F0 the state shown.
+    const int n = I32(c + 0x1EC), v = I32(c + 0x1F0);
+    const uintptr_t st = Ptr(c + 0x1F4);
+    if (n > 0 && n <= 64 && v >= 0 && v < n && Readable(st + static_cast<uintptr_t>(v) * 0x20, 0x20))
+      i.text = Str(Ptr(st + static_cast<uintptr_t>(v) * 0x20 + 8), 256);
+  }
   *out = i;
   return true;
 }

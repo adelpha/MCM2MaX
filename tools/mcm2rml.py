@@ -307,6 +307,8 @@ class Writer:
             style = pos.replace(f'height: {h}dp;', 'height: 21dp;')
             if s.get('TextColor'):
                 style += ' color: ' + colour(s['TextColor']) + ';'
+            if s.get('TextAlign', 'LEFT').strip() in ('CENTER', 'RIGHT'):
+                style += ' text-align: ' + s['TextAlign'].strip().lower() + ';'
             tb = s.get('AnimTextBack')
             if tb and tb != 'DropDown05' and g.sprite(tb):
                 self.rule(f'{sel} selectvalue', f'decorator: image({g.sprite(tb)});')
@@ -329,7 +331,9 @@ class Writer:
                 st.append('text-align: ' + al.lower())
             if s.get('TextDrop', '-1').startswith('0'):
                 st.append('font-effect: none')
-            out.append(f'{pad}<div {attrs} class="list" style="{styled(st)}"></div>')
+            # The track preview: a picture the game draws itself, shown through.
+            win = ' game-window' if name == 'PictureBox' else ''
+            out.append(f'{pad}<div {attrs}{win} class="list" style="{styled(st)}"></div>')
             return
         if t == 'EDITBOX':
             spr = s.get('AnimNorm')
