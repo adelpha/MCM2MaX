@@ -224,6 +224,7 @@ struct State {
   std::vector<DialogBox> boxes;
   // MaXMenus.
   bool mirror = false;       // g.doc is the top of `layers` (not a screen opened by name)
+  DWORD race_mirror_at = 0;  // the game's dialogs last looked at in a race
   std::vector<Layer> layers;  // bottom first
   std::map<std::string, std::string> index;  // game dialog -> screen file
   std::map<std::string, std::pair<bool, std::vector<std::string>>> index_info;  // file -> opaque, dialogs
@@ -1961,7 +1962,16 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
     std::lock_guard<std::recursive_mutex> l(g.mu);
     g.active = true;  // (closing the game menu copies for it let go)
   }
-  if (!RaceRunning()) Mirror();
+  if (!RaceRunning()) {
+    Mirror();
+  } else if (g.mirror || GetTickCount() - g.race_mirror_at >= 50) {
+    // In a race: the pause box shows its copy as soon as the game shows it,
+    // and a copy goes as soon as the game's box does (Restart Race left the
+    // copy up, tied to a box that was gone). Looked at 20 times a second
+    // while nothing is shown, every frame while a copy is.
+    g.race_mirror_at = GetTickCount();
+    Mirror();
+  }
   if (!g.doc || !g.context) return;
   SyncGame();
   if (g.capture) {
