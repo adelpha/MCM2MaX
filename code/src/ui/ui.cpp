@@ -155,6 +155,12 @@ struct GameBind {
   // panel's show / hide animation, drawn frame by frame as the game plays it.
   std::vector<std::string> anim_in, anim_out;
   int anim_shown = -1;  // the picture drawn now: 0 none (the element's own), else 1 + frame (+ 1000 for hide)
+  // A panel the game has just shown but not yet started animating (the game
+  // can stall for seconds first, e.g. Multiplayer probing the network): the
+  // frames it has waited for its animation. -1: not waiting.
+  int anim_wait = -1;
+  bool was_live = false;
+  bool located = false;  // looked for in the whole GUI tree once (log)
 };
 
 // <div game-dialog="optgame">: the part of a screen that copies one game
@@ -476,10 +482,29 @@ void SyncOne(GameBind& b, DWORD now) {
   // A panel with its animation's pictures shows while it animates;
   // anything else waits for the game's animation to end.
   const bool animated = !b.anim_in.empty() || !b.anim_out.empty();
-  b.el->SetClass("game-hidden", !(found && (animated ? i.live : i.shown)));
+  bool visible = found && (animated ? i.live : i.shown);
+  if (animated) {
+    const bool live = found && i.live;
+    if (live && !b.was_live && b.seen && i.anim == 0) {
+      b.anim_wait = 0;  // just shown, its animation not begun: wait for it
+      if (GetConfig().menu_log) patch::Log("MenuMaX: game control %s shown, waiting for its animation", b.name.c_str());
+    }
+    if (!live || i.anim != 0) b.anim_wait = -1;
+    else if (b.anim_wait >= 0 && ++b.anim_wait > 12) {
+      if (GetConfig().menu_log) patch::Log("MenuMaX: game control %s: no animation came, shown as is", b.name.c_str());
+      b.anim_wait = -1;
+    }
+    if (b.anim_wait >= 0) visible = false;
+    b.was_live = live;
+  }
+  b.el->SetClass("game-hidden", !visible);
   if (found && animated) SyncAnim(b, i);
   if (!found) {
     if (b.seen) patch::Log("MenuMaX: game control %s gone", b.name.c_str());
+    if (b.scope && !b.located) {  // its dialog is shown, the control is not on it
+      b.located = true;
+      mg::Locate(b.name.c_str());
+    }
     b.seen = false;
     return;
   }

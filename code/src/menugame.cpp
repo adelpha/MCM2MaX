@@ -313,6 +313,20 @@ void Refresh() {
       e.modal = d == g.modal;
       g.controls.push_back(std::move(e));
     });
+    // Controls under the dialog in the GUI tree but not (yet) in its list.
+    const size_t listed = g.controls.size();
+    Each(d, "UIControl", [&](uintptr_t c) {
+      if (!Readable(c, 0x240)) return;
+      for (size_t k = 0; k < listed; ++k)
+        if (g.controls[k].p == c) return;
+      Entry e;
+      e.name = Str(c + 0xF4, 64);
+      if (e.name.empty()) return;
+      e.p = c;
+      e.dialog = d;
+      e.modal = d == g.modal;
+      g.controls.push_back(std::move(e));
+    });
   }
   if (dialogs != g.logged) {
     g.logged = dialogs;
@@ -329,6 +343,28 @@ void Refresh() {
                  names.c_str(), total > 6 ? " ..." : "");
     }
   }
+}
+
+void Locate(const char* name) {
+  const uintptr_t mgr = Manager();
+  if (!mgr) return;
+  int found = 0;
+  Each(mgr, "UIControl", [&](uintptr_t c) {
+    if (!Readable(c, 0x240) || Str(c + 0xF4, 64) != name || found >= 4) return;
+    ++found;
+    std::string chain;
+    uintptr_t n = c;
+    for (int depth = 0; n && depth < 8 && Readable(n, 0x40); ++depth) {
+      char b[96];
+      std::snprintf(b, sizeof b, " %08X(flags %02X%s%s)", static_cast<unsigned>(n), *reinterpret_cast<const uint8_t*>(n + 0x25),
+                    n == c ? "" : " ", n == c ? "" : DtmOf(n).c_str());
+      chain += b;
+      n = Ptr(n + 0x14);
+    }
+    patch::Log("MenuMaX: game control %s is in the GUI tree at%s; shown %d, animation %d", name, chain.c_str(), I32(c + 0x70),
+               I32(c + 0x68));
+  });
+  if (!found) patch::Log("MenuMaX: game control %s is nowhere in the GUI tree", name);
 }
 
 int DialogField(uintptr_t d, size_t off) { return Readable(d + off, 4) ? I32(d + off) : 0; }

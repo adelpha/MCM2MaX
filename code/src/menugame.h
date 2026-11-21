@@ -35,6 +35,8 @@ void Refresh();
 // The control called `name` on a shown screen (the topmost modal one first),
 // or on dialog `scope` only.
 bool Get(const char* name, Info* out, uintptr_t scope = 0);
+// Logs where a control of that name is in the whole GUI tree (diagnostics).
+void Locate(const char* name);
 // A list's or dropdown's rows.
 bool Rows(const char* name, std::vector<std::string>* rows, uintptr_t scope = 0);
 // A modal dialog is shown now: its controls' names.
