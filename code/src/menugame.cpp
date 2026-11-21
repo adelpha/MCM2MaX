@@ -110,6 +110,25 @@ void Each(uintptr_t root, const char* cls, F f) {
   reinterpret_cast<IterEndFn>(kIterEnd)(it, nullptr);
 }
 
+// Every node under root in the GUI tree (+0x10 first child, +0xc next),
+// whatever its class: the game's class filter (a per-node class string at
+// +0x28) misses some controls, e.g. Pro Circuit on a fresh main menu.
+template <typename F>
+void RawEach(uintptr_t root, F f) {
+  if (!Readable(root, 0x18)) return;
+  std::vector<uintptr_t> stack;
+  stack.push_back(Ptr(root + 0x10));
+  for (int guard = 0; !stack.empty() && guard < 20000; ++guard) {
+    const uintptr_t n = stack.back();
+    stack.pop_back();
+    if (!n || !Readable(n, 0x240)) continue;
+    const uintptr_t vt = Ptr(n);
+    if (vt >= 0x550000 && vt < 0x560000) f(n);
+    stack.push_back(Ptr(n + 0x0C));
+    stack.push_back(Ptr(n + 0x10));
+  }
+}
+
 struct Entry {
   std::string name;
   uintptr_t p;
@@ -315,8 +334,8 @@ void Refresh() {
     });
     // Controls under the dialog in the GUI tree but not (yet) in its list.
     const size_t listed = g.controls.size();
-    Each(d, "UIControl", [&](uintptr_t c) {
-      if (!Readable(c, 0x240)) return;
+    RawEach(d, [&](uintptr_t c) {
+      if (Ptr(c + 0xB8) != d) return;  // not one of this dialog's controls
       for (size_t k = 0; k < listed; ++k)
         if (g.controls[k].p == c) return;
       Entry e;
@@ -349,8 +368,8 @@ void Locate(const char* name) {
   const uintptr_t mgr = Manager();
   if (!mgr) return;
   int found = 0;
-  Each(mgr, "UIControl", [&](uintptr_t c) {
-    if (!Readable(c, 0x240) || Str(c + 0xF4, 64) != name || found >= 4) return;
+  RawEach(mgr, [&](uintptr_t c) {
+    if (Str(c + 0xF4, 64) != name || found >= 4) return;
     ++found;
     std::string chain;
     uintptr_t n = c;
@@ -361,8 +380,9 @@ void Locate(const char* name) {
       chain += b;
       n = Ptr(n + 0x14);
     }
-    patch::Log("MenuMaX: game control %s is in the GUI tree at%s; shown %d, animation %d", name, chain.c_str(), I32(c + 0x70),
-               I32(c + 0x68));
+    patch::Log("MenuMaX: game control %s is in the GUI tree at%s; vtable %08X, class string \"%s\", dialog %08X, shown %d, animation %d",
+               name, chain.c_str(), static_cast<unsigned>(Ptr(c)), Str(Ptr(c + 0x28), 64).c_str(),
+               static_cast<unsigned>(Ptr(c + 0xB8)), I32(c + 0x70), I32(c + 0x68));
   });
   if (!found) patch::Log("MenuMaX: game control %s is nowhere in the GUI tree", name);
 }
