@@ -124,7 +124,16 @@ class Game:
         if not w:
             return None
         arch, path = w
+        path = path.split(',')[0].strip()  # an animation: its first picture
         return '/dat/' + arch + '/' + path.replace('\\', '/') + ('?' + opts if opts else '')
+
+    def frames(self, name):
+        """An animation's pictures (Files1 = a.tga,b.tga,...), in order."""
+        w = self.where(name) if name else None
+        if not w:
+            return []
+        arch, paths = w
+        return ['/dat/' + arch + '/' + p.strip().replace('\\', '/') for p in paths.split(',') if p.strip()]
 
     def size(self, name):
         arch, path = self.where(name)
@@ -198,6 +207,13 @@ class Writer:
         sel = '#' + eid
         tip = s.get('ToolTipText')
         attrs = f'id="{eid}" game="{name}"' + (f' title="{esc(tip)}"' if tip else '')
+        if s.get('FX', '').strip().lower() == 'anim':
+            # A pop-out panel: MenuMaX draws its show / hide animation's
+            # pictures as the game plays them.
+            for key, attr in (('FXAnimIn', 'game-anim-in'), ('FXAnimOut', 'game-anim-out')):
+                fr = g.frames(s.get(key))
+                if len(fr) > 1:
+                    attrs += f' {attr}="{" ".join(fr)}"'
 
         def styled(st):
             return pos + (' ' + '; '.join(st) + ';' if st else '')
@@ -350,6 +366,10 @@ def covered(controls):
         _, _, w, h = xywh(c)
         for p in order[i + 1:]:
             if p.get('Type', '').strip() != 'STATIC' or p['_name'] == c.get('Anchor') or p.get('Show', '-1').startswith('0'):
+                continue
+            # Only a plate beside it (in the same panel) covers it; a pop-out
+            # panel (FX) shows at other times.
+            if p.get('FX', '').strip() or p.get('Anchor') != c.get('Anchor'):
                 continue
             px, py = pos(p)
             _, _, pw, ph = xywh(p)
@@ -548,7 +568,8 @@ def write_screen(g, out_dir, file, archs):
         if hidden:
             rml.append(f'  <!-- not copied: {", ".join(sorted(hidden))} (the game draws a box over it) -->')
         rml.append(f'  <div id="{did}" class="dialog" game-dialog="{a.lower()}" style="left: {x}dp; top: {y}dp; width: {dw}dp; height: {dh}dp;">')
-        for s in roots:
+        # Pop-out panels (FX) last: the game draws them over the rest.
+        for s in sorted(roots, key=lambda c: bool(c.get('FX', '').strip())):
             w.element(s, by, rml, 2)
         rml.append('  </div>')
     rml.append('</div>')
@@ -623,7 +644,7 @@ body {{
 .game-hidden {{ display: none; }}
 
 /* Everything that can be picked: arrows / d-pad move, Enter / A clicks. */
-.tab, .button, .check, .radio, .pick, .cycle, .slider, .dropdown, .edit, .list {{ tab-index: auto; nav: auto; focus: auto; }}
+.tab, .button, .check, .radio, .pick, .cycle, .slider, .dropdown, .edit, .list .row {{ tab-index: auto; nav: auto; focus: auto; }}
 .disabled {{ tab-index: none; nav: none; focus: none; }}
 
 /* Box plates on MCM2MaX's own layouts: the edge of a game plate only. */
@@ -660,6 +681,10 @@ body {{
 .list .row {{ display: block; height: 16dp; line-height: 16dp; }}
 .list .row:hover {{ background-color: #3a4a8c80; }}
 .list .row.on {{ background-color: #3a4a8c; }}
+/* A control's tooltip (its title=, the game's tooltip text), shown by MenuMaX
+   when the pointer rests on it. */
+#max-tooltip {{ position: absolute; z-index: 100; max-width: 260dp; padding: 2dp 5dp; background-color: #fff8d0;
+  border: 1dp #000000; color: #000000; font-size: 12dp; pointer-events: none; }}
 
 /* Edit boxes. */
 .edit {{ padding-top: 3dp; }}

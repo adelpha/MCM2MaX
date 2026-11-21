@@ -24,6 +24,10 @@ struct Info {
   RECT rect{};           // in 640x480 menu pixels
   uintptr_t dialog = 0;
   int top = 0, visible = 0;  // list / dropdown: first row shown, rows shown at once
+  bool live = false;         // shown (+0x70), its panels open, maybe mid show / hide animation
+  bool tree = false;         // the GUI tree marks it shown
+  int anim = 0;              // 1 show animation running, 2 hide animation, 0 none
+  int frame = -1, frames = 0;  // the running animation's frame, of frames
 };
 
 // Looks at the screens shown now (game thread, at most once a frame).

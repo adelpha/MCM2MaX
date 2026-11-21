@@ -151,6 +151,10 @@ struct GameBind {
   std::string scope_dtm;
   uintptr_t scope = 0;  // that dialog now (0: not shown)
   int list_top = -1, list_value = -2;  // a list's rows as last drawn
+  // game-anim-in / game-anim-out="url url ...": the pictures of a pop-out
+  // panel's show / hide animation, drawn frame by frame as the game plays it.
+  std::vector<std::string> anim_in, anim_out;
+  int anim_shown = -1;  // the picture drawn now: 0 none (the element's own), else 1 + frame (+ 1000 for hide)
 };
 
 // <div game-dialog="optgame">: the part of a screen that copies one game
@@ -242,6 +246,11 @@ struct State {
   // The control that had focus last: a click on empty space or text keeps it.
   Rml::Element* last_focus = nullptr;
   bool shift = false;
+  // Tooltips: the control with a title= under the pointer (only compared,
+  // never used: it may be gone), and since when.
+  const Rml::Element* tip_owner = nullptr;
+  DWORD tip_since = 0;
+  bool tip_logged = false;
   // Pointer.
   // The screen's own pointer (window pixels), moved by the mouse movement
   // kept from the game (its cursor stays where it was, so the page under the
@@ -394,6 +403,17 @@ void BindGame(Rml::Element* e, const std::string& base_dtm) {
     }
     if (!b.text_el && only_text) b.text_el = e;
   }
+  for (int k = 0; k < 2; ++k) {
+    std::vector<std::string>& v = k ? b.anim_out : b.anim_in;
+    std::string urls = e->GetAttribute<Rml::String>(k ? "game-anim-out" : "game-anim-in", "");
+    size_t at = 0;
+    while (at < urls.size()) {
+      size_t sp = urls.find(' ', at);
+      if (sp == std::string::npos) sp = urls.size();
+      if (sp > at) v.push_back(urls.substr(at, sp - at));
+      at = sp + 1;
+    }
+  }
   e->SetClass("game-hidden", true);  // until the control is seen
   g.game.push_back(b);
 }
@@ -410,17 +430,54 @@ void SyncList(GameBind& b, const mg::Info& i) {
   b.rows = rows;
   b.list_top = i.top;
   b.list_value = i.value;
-  std::string rml;
-  for (int r = i.top < 0 ? 0 : i.top, n = 0; r < static_cast<int>(rows.size()) && n < shown; ++r, ++n)
-    rml += "<div class=\"row" + std::string(r == i.value ? " on" : "") + "\" row=\"" + std::to_string(r) + "\">" +
-           Rml::StringUtilities::EncodeRml(rows[r]) + "</div>";
-  b.el->SetInnerRML(rml);
+  // Rows are changed in place, not made again, so a row picked with the
+  // keyboard / a controller keeps focus when the game's choice moves.
+  const int first = i.top < 0 ? 0 : i.top;
+  int n = 0;
+  for (int r = first; r < static_cast<int>(rows.size()) && n < shown; ++r, ++n) {
+    Rml::Element* row = n < b.el->GetNumChildren() ? b.el->GetChild(n) : nullptr;
+    if (!row) {
+      Rml::ElementPtr made = b.el->GetOwnerDocument()->CreateElement("div");
+      row = b.el->AppendChild(std::move(made));
+      row->SetClass("row", true);
+    }
+    row->SetClass("on", r == i.value);
+    row->SetAttribute("row", r);
+    if (row->GetInnerRML() != Rml::StringUtilities::EncodeRml(rows[r])) row->SetInnerRML(Rml::StringUtilities::EncodeRml(rows[r]));
+  }
+  while (b.el->GetNumChildren() > n) {
+    Rml::Element* gone = b.el->GetChild(b.el->GetNumChildren() - 1);
+    if (g.last_focus == gone) g.last_focus = nullptr;
+    if (g.context && g.context->GetFocusElement() == gone) b.el->Focus();
+    b.el->RemoveChild(gone);
+  }
+}
+
+// A pop-out panel's animation: the game's frame, drawn as the element's
+// picture (inline decorator over its own rule).
+void SyncAnim(GameBind& b, const mg::Info& i) {
+  const std::vector<std::string>& v = i.anim == 2 ? b.anim_out : b.anim_in;
+  int want = 0;
+  if ((i.anim == 1 || i.anim == 2) && !v.empty() && i.frame >= 0) {
+    const int f = i.frame < static_cast<int>(v.size()) ? i.frame : static_cast<int>(v.size()) - 1;
+    want = 1 + f + (i.anim == 2 ? 1000 : 0);
+    if (want != b.anim_shown) b.el->SetProperty("decorator", "image(" + v[f] + ")");
+  } else if (b.anim_shown > 0) {
+    b.el->RemoveProperty("decorator");
+  }
+  if (want != b.anim_shown && GetConfig().menu_log)
+    patch::Log("MenuMaX: game control %s: animation %d frame %d of %d", b.name.c_str(), i.anim, i.frame, i.frames);
+  b.anim_shown = want;
 }
 
 void SyncOne(GameBind& b, DWORD now) {
   mg::Info i;
   const bool found = (b.scope || b.scope_dtm.empty()) && mg::Get(b.name.c_str(), &i, b.scope);
-  b.el->SetClass("game-hidden", !(found && i.shown));
+  // A panel with its animation's pictures shows while it animates;
+  // anything else waits for the game's animation to end.
+  const bool animated = !b.anim_in.empty() || !b.anim_out.empty();
+  b.el->SetClass("game-hidden", !(found && (animated ? i.live : i.shown)));
+  if (found && animated) SyncAnim(b, i);
   if (!found) {
     if (b.seen) patch::Log("MenuMaX: game control %s gone", b.name.c_str());
     b.seen = false;
@@ -428,8 +485,9 @@ void SyncOne(GameBind& b, DWORD now) {
   }
   const bool first = !b.seen;
   if (first)
-    patch::Log("MenuMaX: game control %s: %s, %s%s, value %d of %d, text \"%s\" (%ld,%ld %ldx%ld)", b.name.c_str(),
-               KindName(i.kind), i.shown ? "shown" : "hidden", i.enabled ? "" : ", greyed", i.value, i.range, i.text.c_str(),
+    patch::Log("MenuMaX: game control %s: %s, %s%s%s, value %d of %d, text \"%s\" (%ld,%ld %ldx%ld)", b.name.c_str(),
+               KindName(i.kind), i.shown ? "shown" : "hidden", i.enabled ? "" : ", greyed",
+               i.tree ? "" : ", not marked shown in the GUI tree", i.value, i.range, i.text.c_str(),
                i.rect.left, i.rect.top, i.rect.right - i.rect.left, i.rect.bottom - i.rect.top);
   else if (i.shown != b.last.shown)
     patch::Log("MenuMaX: game control %s now %s", b.name.c_str(), i.shown ? "shown" : "hidden (or animating)");
@@ -1186,6 +1244,46 @@ void PointAt(Rml::Element* e) {
   g.context->ProcessMouseMove(g.mouse_x, g.mouse_y, 0);
 }
 
+// Arrow keys / d-pad when RmlUi finds nothing that way (it skips controls
+// that overlap the current one by even a pixel, e.g. Replay and Quit on the
+// main menu): the nearest control whose middle lies that way.
+void NavFallback(Rml::Element* from, Rml::Input::KeyIdentifier k) {
+  using namespace Rml::Input;
+  Rml::ElementDocument* doc = from->GetOwnerDocument();
+  if (!doc) return;
+  auto middle = [](Rml::Element* e) {
+    const Rml::Vector2f at = e->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const Rml::Vector2f size = e->GetBox().GetSize(Rml::BoxArea::Border);
+    return Rml::Vector2f(at.x + size.x * 0.5f, at.y + size.y * 0.5f);
+  };
+  const Rml::Vector2f m0 = middle(from);
+  Rml::ElementList list;
+  doc->QuerySelectorAll(list, "input, select, button, .tab, .button, .check, .radio, .pick, .cycle, .slider, .dropdown, .edit, .list .row");
+  Rml::Element* best = nullptr;
+  float best_score = 0;
+  for (Rml::Element* e : list) {
+    if (e == from || !e->IsVisible(true) || !IsControl(e) || e->IsClassSet("disabled") || e->IsClassSet("game-hidden")) continue;
+    const Rml::Vector2f m = middle(e);
+    float along = 0, across = 0;
+    switch (k) {
+      case KI_DOWN: along = m.y - m0.y; across = m.x - m0.x; break;
+      case KI_UP: along = m0.y - m.y; across = m.x - m0.x; break;
+      case KI_RIGHT: along = m.x - m0.x; across = m.y - m0.y; break;
+      case KI_LEFT: along = m0.x - m.x; across = m.y - m0.y; break;
+      default: return;
+    }
+    if (along <= 1.0f) continue;
+    const float score = along + 2.0f * std::fabs(across);
+    if (!best || score < best_score) {
+      best = e;
+      best_score = score;
+    }
+  }
+  if (!best || !best->Focus(true)) return;
+  patch::Log("MenuMaX: key %d: nothing that way for RmlUi, %s#%s picked (nearest middle)", static_cast<int>(k),
+             best->GetTagName().c_str(), best->GetId().c_str());
+}
+
 // After any input: remember the focused control, or give focus back to the
 // last one when a click on empty space or text took it away.
 void KeepFocus(const char* why) {
@@ -1280,6 +1378,8 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
   Rml::Element* before = g.context->GetFocusElement();
   g.context->ProcessKeyDown(k, mods);
   g.context->ProcessKeyUp(k, mods);
+  if (g.doc && Repeats(k) && k != Rml::Input::KI_TAB && g.context->GetFocusElement() == before && IsControl(before))
+    NavFallback(before, k);
   if (g.doc) KeepFocus("key");
   if (g.doc && Repeats(k) && g.context->GetFocusElement() != before && IsControl(g.context->GetFocusElement()))
     PointAt(g.context->GetFocusElement());
@@ -1603,6 +1703,51 @@ void Close(const char* why) {
 
 namespace {
 
+// The tooltip (title=) of the control under the pointer, after it rests
+// there for half a second, in #max-tooltip of that control's screen.
+void Tooltip(float dp) {
+  const Rml::Element* owner = nullptr;
+  std::string text;
+  if (!g.capture && g.pointer_set)
+    for (Rml::Element* e = g.context->GetHoverElement(); e; e = e->GetParentNode())
+      if (e->HasAttribute("title")) {
+        owner = e;
+        text = e->GetAttribute<Rml::String>("title", "");
+        break;
+      }
+  const DWORD now = GetTickCount();
+  if (owner != g.tip_owner) {
+    g.tip_owner = owner;
+    g.tip_since = now;
+    g.tip_logged = false;
+  }
+  const bool show = owner && !text.empty() && now - g.tip_since >= 500;
+  Rml::ElementDocument* in = show ? const_cast<Rml::Element*>(owner)->GetOwnerDocument() : nullptr;
+  for (Rml::ElementDocument* d : Docs()) {
+    Rml::Element* tip = d->GetElementById("max-tooltip");
+    if (d != in) {
+      if (tip) tip->SetProperty("display", "none");
+      continue;
+    }
+    if (!tip) {
+      Rml::ElementPtr made = d->CreateElement("div");
+      made->SetId("max-tooltip");
+      tip = d->AppendChild(std::move(made));
+    }
+    const Rml::String rml = Rml::StringUtilities::EncodeRml(text);
+    if (tip->GetInnerRML() != rml) tip->SetInnerRML(rml);
+    const Rml::Vector2f at = d->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const float width = static_cast<float>(g.context->GetDimensions().x);
+    float x = g.mouse_x - at.x + 4.0f * dp, y = g.mouse_y - at.y + 22.0f * dp;
+    if (g.mouse_x + 264.0f * dp > width) x = g.mouse_x - at.x - 264.0f * dp;
+    tip->SetProperty("left", Rml::ToString(x) + "px");
+    tip->SetProperty("top", Rml::ToString(y) + "px");
+    tip->SetProperty("display", "block");
+    if (!g.tip_logged && GetConfig().menu_log) patch::Log("MenuMaX: tooltip \"%s\"", text.c_str());
+    g.tip_logged = true;
+  }
+}
+
 void PresentFrame(const Target& t, const RECT& game_rect) {
   const UINT w = t.w, h = t.h;
   if (!g.installed || g.failed) return;
@@ -1665,6 +1810,7 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
   Watch();
   if (!g.doc) return;
   if (!g.pending.empty() && GetTickCount() - g.last_change > 300) FlushPending("settled");
+  Tooltip(dp);
   g.context->Update();
   BeginDraw(t);
   g.context->Render();

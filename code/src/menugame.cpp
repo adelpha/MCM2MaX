@@ -295,7 +295,10 @@ void Refresh() {
     const uintptr_t list = Ptr(d + 0x7F3C);
     if (!Readable(list, 0x28)) continue;
     Each(list, "UIControl", [&](uintptr_t c) {
-      if (!Readable(c, 0x240) || !Shown(c, d)) return;
+      // Not only controls the GUI tree marks shown: some are left unmarked
+      // while the game shows them (Pro Circuit on the main menu's Single
+      // Player panel until another screen has been opened); +0x70 decides.
+      if (!Readable(c, 0x240)) return;
       Entry e;
       e.name = Str(c + 0xF4, 64);
       if (e.name.empty()) return;
@@ -347,7 +350,18 @@ bool Get(const char* name, Info* out, uintptr_t scope) {
   // +0x68: show / hide animation running (1 in, 2 out; 0x471590). A pop-out
   // panel (FX=Anim) plays its frames before it counts as shown, so the copy
   // waits for the game's animation to finish, and goes as soon as it hides.
-  i.shown = Live(c) && I32(c + 0x68) == 0;
+  i.live = Live(c);
+  i.shown = i.live && I32(c + 0x68) == 0;
+  i.tree = Shown(c, e->dialog);
+  i.anim = I32(c + 0x68);
+  if (i.anim == 1 || i.anim == 2) {
+    // The show (+0x184) / hide (+0x188) animation: +8 frame, +0x10 frames.
+    const uintptr_t a = Ptr(c + (i.anim == 1 ? 0x184 : 0x188));
+    if (Readable(a, 0x14)) {
+      i.frame = I32(a + 8);
+      i.frames = I32(a + 0x10);
+    }
+  }
   i.enabled = I32(c + 0x6C) != 0;
   i.dialog = e->dialog;
   i.rect = {I32(c + 0x2C), I32(c + 0x30), I32(c + 0x34), I32(c + 0x38)};
