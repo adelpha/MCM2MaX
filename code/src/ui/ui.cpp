@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <algorithm>
 #include <cstring>
 #include <map>
@@ -1451,6 +1452,38 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
                  g.back_dtm.c_str());
       mg::Click(g.back_control.c_str(), DialogNamed(g.back_dtm));
       return;
+    }
+    // A message box (messbox1/2/3, e.g. the pause box in races) has no fixed
+    // back button: its buttons' texts change with use. Esc clicks the shown
+    // button reading Cancel, else Resume / Continue / Back / No, else the
+    // only button shown.
+    {
+      static const char* const kWords[] = {"cancel", "resume", "continue", "back", "no"};
+      const GameBind* pick = nullptr;
+      int pick_rank = 99, buttons = 0;
+      const GameBind* only = nullptr;
+      for (const GameBind& b : g.game) {
+        if (b.ui != GameBind::kDiv || !b.el || !b.el->IsClassSet("button") || !b.scope) continue;
+        if (!b.last.shown || !b.last.enabled) continue;
+        ++buttons;
+        only = &b;
+        std::string t;
+        for (char c : b.last.text) t += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        while (!t.empty() && (t.back() == ' ' || t.back() == '.')) t.pop_back();
+        for (int i = 0; i < static_cast<int>(sizeof kWords / sizeof kWords[0]); ++i)
+          if (t == kWords[i] && i < pick_rank) {
+            pick = &b;
+            pick_rank = i;
+          }
+      }
+      if (!pick && buttons == 1) pick = only;
+      if (pick) {
+        patch::Log("MenuMaX: back (%s): the game's %s (\"%s\", of %d buttons shown)", from, pick->name.c_str(),
+                   pick->last.text.c_str(), buttons);
+        mg::Click(pick->name.c_str(), pick->scope);
+        return;
+      }
+      if (buttons) patch::Log("MenuMaX: back (%s): no Cancel / No button among %d shown", from, buttons);
     }
     patch::Log("MenuMaX: back (%s)", from);
     if (!g.mirror) Close(from);
