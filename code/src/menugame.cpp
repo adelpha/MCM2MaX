@@ -97,23 +97,11 @@ uintptr_t Manager() {
   return Readable(mgr, 0x310) ? mgr : 0;
 }
 
-template <typename F>
-void Each(uintptr_t root, const char* cls, F f) {
-  alignas(16) uint8_t it[0x100] = {};
-  reinterpret_cast<IterInitFn>(kIterInit)(it, nullptr, root, 1, cls);
-  // Next (0x46a980) returns 0 for a node of another class but still moves
-  // on: the walk ends only when its node (+4) is none.
-  for (int guard = 0; guard < 100000; ++guard) {
-    const uintptr_t c = reinterpret_cast<IterNextFn>(kIterNext)(it, nullptr);
-    if (c) f(c);
-    else if (!*reinterpret_cast<const uintptr_t*>(it + 4)) break;
-  }
-  reinterpret_cast<IterEndFn>(kIterEnd)(it, nullptr);
-}
-
 // Every node under root in the GUI tree (+0x10 first child, +0xc next),
-// whatever its class: the game's class filter (a per-node class string at
-// +0x28) misses some controls, e.g. Pro Circuit on a fresh main menu.
+// whatever its class. Not the game's own iterator (0x46a880): that counts
+// open walks in a global (0x661690) and while it is non-zero the game
+// refuses to add controls to a dialog (0x46a070), which looked like what
+// dropped Pro Circuit from a fresh main menu.
 template <typename F>
 void RawEach(uintptr_t root, F f) {
   if (!Readable(root, 0x18)) return;
@@ -134,6 +122,21 @@ void RawEach(uintptr_t root, F f) {
     stack.push_back(Ptr(n + 0x0C));
     stack.push_back(Ptr(n + 0x10));
   }
+}
+
+bool IsDialog(uintptr_t n) {
+  if (!Readable(n, 0x7F40)) return false;
+  const std::string name = Str(n + 0x38, 64);
+  return name.size() > 4 && _stricmp(name.c_str() + name.size() - 4, ".dtm") == 0;
+}
+
+// The dialogs (cls "UIDialog") or controls (anything else) under root.
+template <typename F>
+void Each(uintptr_t root, const char* cls, F f) {
+  const bool dialogs = std::strcmp(cls, "UIDialog") == 0;
+  RawEach(root, [&](uintptr_t n) {
+    if (IsDialog(n) == dialogs) f(n);
+  });
 }
 
 struct Entry {
@@ -311,6 +314,15 @@ std::string DtmOf(uintptr_t d) {
 }  // namespace
 
 void Refresh() {
+  // The game's count of open GUI walks: non-zero between frames would make
+  // it refuse new controls (0x46a070). Logged when it changes.
+  static int walks = 0, walk_logs = 0;
+  const int now_walks = *reinterpret_cast<const int*>(0x661690);
+  if (now_walks != walks && walk_logs < 40) {
+    ++walk_logs;
+    patch::Log("MenuMaX: the game's open GUI walk count is %d (was %d)", now_walks, walks);
+    walks = now_walks;
+  }
   g.controls.clear();
   g.modal = 0;
   const uintptr_t mgr = Manager();
@@ -330,7 +342,7 @@ void Refresh() {
       // Not only controls the GUI tree marks shown: some are left unmarked
       // while the game shows them (Pro Circuit on the main menu's Single
       // Player panel until another screen has been opened); +0x70 decides.
-      if (!Readable(c, 0x240)) return;
+      if (!Readable(c, 0x240) || Ptr(c + 0xB8) != d) return;
       Entry e;
       e.name = Str(c + 0xF4, 64);
       if (e.name.empty()) return;

@@ -471,8 +471,10 @@ void SyncAnim(GameBind& b, const mg::Info& i) {
   } else if (b.anim_shown > 0) {
     b.el->RemoveProperty("decorator");
   }
-  if (want != b.anim_shown && GetConfig().menu_log)
-    patch::Log("MenuMaX: game control %s: animation %d frame %d of %d", b.name.c_str(), i.anim, i.frame, i.frames);
+  // Every frame with MenuLog=1; otherwise when the animation starts or ends.
+  if (want != b.anim_shown && (GetConfig().menu_log || (want == 0) != (b.anim_shown <= 0)))
+    patch::Log("MenuMaX: game control %s: animation %d frame %d of %d (shown %d)", b.name.c_str(), i.anim, i.frame, i.frames,
+               i.live ? 1 : 0);
   b.anim_shown = want;
 }
 
@@ -487,14 +489,16 @@ void SyncOne(GameBind& b, DWORD now) {
     const bool live = found && i.live;
     if (live && !b.was_live && b.seen && i.anim == 0) {
       b.anim_wait = 0;  // just shown, its animation not begun: wait for it
-      if (GetConfig().menu_log) patch::Log("MenuMaX: game control %s shown, waiting for its animation", b.name.c_str());
+      patch::Log("MenuMaX: game control %s shown, waiting for its animation", b.name.c_str());
     }
     if (!live || i.anim != 0) b.anim_wait = -1;
     else if (b.anim_wait >= 0 && ++b.anim_wait > 12) {
-      if (GetConfig().menu_log) patch::Log("MenuMaX: game control %s: no animation came, shown as is", b.name.c_str());
+      patch::Log("MenuMaX: game control %s: no animation came, shown as is", b.name.c_str());
       b.anim_wait = -1;
     }
     if (b.anim_wait >= 0) visible = false;
+    // Showing, but the game has not reached its animation's first frame.
+    if (live && i.anim == 1 && i.frame < 0) visible = false;
     b.was_live = live;
   }
   b.el->SetClass("game-hidden", !visible);

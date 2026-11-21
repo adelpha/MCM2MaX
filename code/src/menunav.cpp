@@ -52,6 +52,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <unordered_set>
+#include <vector>
 #include <string>
 #include <vector>
 
@@ -198,18 +200,36 @@ uintptr_t Manager() {
   return Readable(mgr, 0x310) ? mgr : 0;
 }
 
+// The dialogs (cls "UIDialog") or controls under root, by a walk of the GUI
+// tree (+0x10 child, +0xc next, +8 previous). Not the game's iterator
+// (0x46a880): it counts open walks in a global the game checks before
+// adding controls to a dialog.
 template <typename F>
 void Each(uintptr_t root, const char* cls, F f) {
-  alignas(16) uint8_t it[0x100] = {};
-  reinterpret_cast<IterInitFn>(kIterInit)(it, nullptr, root, 1, cls);
-  // Next (0x46a980) returns 0 for a node of another class but still moves
-  // on: the walk ends only when its node (+4) is none.
-  for (int guard = 0; guard < 100000; ++guard) {
-    const uintptr_t c = reinterpret_cast<IterNextFn>(kIterNext)(it, nullptr);
-    if (c) f(c);
-    else if (!*reinterpret_cast<const uintptr_t*>(it + 4)) break;
+  if (!Readable(root, 0x18)) return;
+  const bool want_dialogs = std::strcmp(cls, "UIDialog") == 0;
+  std::vector<uintptr_t> stack;
+  std::unordered_set<uintptr_t> seen;
+  stack.push_back(*reinterpret_cast<const uintptr_t*>(root + 0x10));
+  for (int guard = 0; !stack.empty() && guard < 40000; ++guard) {
+    const uintptr_t n = stack.back();
+    stack.pop_back();
+    if (!n || n == root || !Readable(n, 0x240)) continue;
+    if (!seen.insert(n).second) continue;
+    const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(n);
+    if (vt >= 0x550000 && vt < 0x560000) {
+      bool dialog = false;
+      if (Readable(n, 0x7F40)) {
+        const char* name = reinterpret_cast<const char*>(n + 0x38);
+        const size_t len = strnlen(name, 64);
+        dialog = len > 4 && len < 64 && _stricmp(name + len - 4, ".dtm") == 0;
+      }
+      if (dialog == want_dialogs) f(n);
+    }
+    stack.push_back(*reinterpret_cast<const uintptr_t*>(n + 0x08));
+    stack.push_back(*reinterpret_cast<const uintptr_t*>(n + 0x0C));
+    stack.push_back(*reinterpret_cast<const uintptr_t*>(n + 0x10));
   }
-  reinterpret_cast<IterEndFn>(kIterEnd)(it, nullptr);
 }
 
 // A list box's visible rows, one place each (0x478e20 hit-tests them the
