@@ -22,6 +22,21 @@
 #include "render_d3d11.h"
 #include "render_d3d9.h"
 
+// Counts the game's dialog shows (see Install).
+extern "C" {
+volatile long g_max_dialog_shows = 0;
+void MaxDialogShowHook();
+}
+asm(".text\n"
+    ".globl _MaxDialogShowHook\n"
+    "_MaxDialogShowHook:\n"
+    "  lock incl _g_max_dialog_shows\n"
+    "  subl $0x10, %esp\n"
+    "  pushl %ebx\n"
+    "  movl 0x20(%esp), %ebx\n"
+    "  pushl $0x486A08\n"
+    "  ret\n");
+
 // menus.cpp: the Enhancements box brought up to date after a screen.
 void MenusRefreshFromIni();
 
@@ -225,6 +240,7 @@ struct State {
   // MaXMenus.
   bool mirror = false;       // g.doc is the top of `layers` (not a screen opened by name)
   DWORD race_mirror_at = 0;  // the game's dialogs last looked at in a race
+  long dialog_shows_seen = 0;  // g_max_dialog_shows when last looked
   std::vector<Layer> layers;  // bottom first
   std::map<std::string, std::string> index;  // game dialog -> screen file
   std::map<std::string, std::pair<bool, std::vector<std::string>>> index_info;  // file -> opaque, dialogs
@@ -1830,6 +1846,19 @@ void Install() {
     return;
   }
   g.installed = true;
+  if (c.max_menus) {
+    // The game's "show a dialog" (0x486a00, all 58 places that show one):
+    // counted, so a copy is made for the very frame the game's dialog first
+    // shows in (in races the dialogs are otherwise not looked at).
+    // sub esp,10h; push ebx; mov ebx,[esp+20h]
+    static const uint8_t orig[] = {0x83, 0xEC, 0x10, 0x53, 0x8B, 0x5C, 0x24, 0x20};
+    if (patch::Matches(0x486A00, orig, sizeof orig)) {
+      patch::Jump(0x486A00, reinterpret_cast<uintptr_t>(&MaxDialogShowHook), sizeof orig);
+      patch::Log("MenuMaX: the game's dialog show (486a00) hooked");
+    } else {
+      patch::Log("MenuMaX: the game's dialog show (486a00) NOT hooked (bytes differ); dialogs in races are looked for 20 times a second");
+    }
+  }
   const DWORD attr = GetFileAttributesW((UiDir() + L"settings.rml").c_str());
   patch::Log("MenuMaX: on; screens in %ls (settings.rml %s); RmlUi starts when a screen first opens", UiDir().c_str(),
              attr == INVALID_FILE_ATTRIBUTES ? "MISSING" : "found");
@@ -1964,7 +1993,8 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
   }
   if (!RaceRunning()) {
     Mirror();
-  } else if (g.mirror || GetTickCount() - g.race_mirror_at >= 50) {
+  } else if (g.mirror || g_max_dialog_shows != g.dialog_shows_seen || GetTickCount() - g.race_mirror_at >= 50) {
+    g.dialog_shows_seen = g_max_dialog_shows;
     // In a race: the pause box shows its copy as soon as the game shows it,
     // and a copy goes as soon as the game's box does (Restart Race left the
     // copy up, tied to a box that was gone). Looked at 20 times a second
