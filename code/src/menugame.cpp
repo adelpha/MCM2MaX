@@ -531,4 +531,54 @@ void Frame() {
   if (GetTickCount() - g.tick_at > 500) RunQueue("from the menu cursor update (no tick seen)");
 }
 
+// ---- Diagnostics: every control the game adds to a dialog (0x46b7d0) -------
+
+namespace {
+uint8_t* g_add_tramp = nullptr;
+int g_add_logs = 0;
+
+void __fastcall AddControlHook(uintptr_t dialog, void* edx, uintptr_t ctrl, int a, int b) {
+  const int walks_before = *reinterpret_cast<const int*>(0x661690);
+  using Fn = void(__fastcall*)(uintptr_t, void*, uintptr_t, int, int);
+  reinterpret_cast<Fn>(g_add_tramp)(dialog, edx, ctrl, a, b);
+  if (!ctrl || !Readable(ctrl, 0x240) || g_add_logs >= 400) return;
+  const std::string name = Str(ctrl + 0xF4, 64);
+  const uintptr_t parent = Ptr(ctrl + 0x14);
+  const bool interesting = parent == 0 || name == "ButProCircuit" || name == "ButSupercross" || name == "ScreenOverCtl";
+  if (!interesting) return;
+  ++g_add_logs;
+  // Return addresses on the stack (the game's code only).
+  char chain[160] = {};
+  size_t used = 0;
+  const uintptr_t* sp = reinterpret_cast<const uintptr_t*>(&ctrl);
+  for (int k = 0, found = 0; k < 64 && found < 6; ++k) {
+    const uintptr_t v = sp[k];
+    if (v > 0x401000 && v < 0x550000) {
+      used += std::snprintf(chain + used, sizeof chain - used, " %06X", static_cast<unsigned>(v));
+      ++found;
+    }
+  }
+  patch::Log("MenuMaX: the game adds control %s (%08X) to dialog %08X %s: %s (open walks %d); stack%s", name.c_str(),
+             static_cast<unsigned>(ctrl), static_cast<unsigned>(dialog), DtmOf(dialog).c_str(),
+             parent ? "linked" : "NOT LINKED", walks_before, chain);
+}
+}  // namespace
+
+void InstallDiagnostics() {
+  static const uint8_t kOrig[] = {0x56, 0x8B, 0x74, 0x24, 0x08, 0x57};  // push esi; mov esi,[esp+8]; push edi
+  if (!patch::Matches(0x46B7D0, kOrig, sizeof kOrig)) {
+    patch::Log("MenuMaX: add-control diagnostics not installed (unexpected code at 0x46b7d0)");
+    return;
+  }
+  g_add_tramp = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+  if (!g_add_tramp) return;
+  std::memcpy(g_add_tramp, kOrig, sizeof kOrig);
+  g_add_tramp[6] = 0xE9;
+  const int32_t rel = static_cast<int32_t>(0x46B7D6 - (reinterpret_cast<uintptr_t>(g_add_tramp) + 11));
+  std::memcpy(g_add_tramp + 7, &rel, 4);
+  patch::Jump(0x46B7D0, reinterpret_cast<uintptr_t>(&AddControlHook), 6);
+  patch::Log("MenuMaX: logging controls the game adds to dialogs (unlinked ones, Pro Circuit and its neighbours)");
+}
+
 }  // namespace mg
+

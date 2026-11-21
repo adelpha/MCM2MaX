@@ -160,6 +160,10 @@ struct GameBind {
   // frames it has waited for its animation. -1: not waiting.
   int anim_wait = -1;
   bool was_live = false;
+  // The show animation's frame when it began: the game can leave its frame
+  // counter on the last frame until the first tick (Multiplayer, before its
+  // network check stalls the game for seconds). Hidden until it moves on.
+  int prev_anim = 0, start_frame = -1;
   bool located = false;  // looked for in the whole GUI tree once (log)
 };
 
@@ -499,6 +503,14 @@ void SyncOne(GameBind& b, DWORD now) {
     if (b.anim_wait >= 0) visible = false;
     // Showing, but the game has not reached its animation's first frame.
     if (live && i.anim == 1 && i.frame < 0) visible = false;
+    if (i.anim == 1 && b.prev_anim != 1) {
+      b.start_frame = i.frame;
+      patch::Log("MenuMaX: game control %s: show animation begins at frame %d of %d", b.name.c_str(), i.frame, i.frames);
+    }
+    if (i.anim != 1) b.start_frame = -1;
+    else if (b.start_frame > 0 && i.frame == b.start_frame) visible = false;
+    else b.start_frame = -1;
+    b.prev_anim = found ? i.anim : 0;
     b.was_live = live;
   }
   b.el->SetClass("game-hidden", !visible);
