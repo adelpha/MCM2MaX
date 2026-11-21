@@ -24,6 +24,7 @@ Here's just a few of Motocross Madness 2 MaXimuM's core features:
 | Graphical enhancements | Widescreen, AA, AF, FoV, Alpha-to-coverage, support for high-resolution replacement textures, environment mapped reflections on bikes and riders, soft shadows for all riders, sharp antialiased text in the menus and HUD and more! |
 | Audio | Drop in [DSOAL](https://github.com/kcat/dsoal) and the EAX effects will just work. You can change the EAX 1.0 presets per-event type in the ini file! |
 | Music | Optional music tracks, either per-event or per-track (provide your own). |
+| UI | Original UI assets and functionality reimplemented with [RmlUi](https://github.com/mikke89/RmlUi) for simple modification and extensibility. New options unique to MCM2MaX added to the menus. |
 | Input | Native XInput support with analog and force-feedback-to-rumble translation. SDL3 for wide controller support. |
 
 See the [Features](#features) section for more details.
