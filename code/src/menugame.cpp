@@ -58,6 +58,12 @@ const KindOf kKinds[] = {{0x557D98, kButton}, {0x5582C8, kCheck},  {0x5585E0, kR
                          {0x5580B0, kSlider}, {0x557FA8, kScrollArrow}};
 
 bool Readable(uintptr_t p, size_t n) { return p && !IsBadReadPtr(reinterpret_cast<const void*>(p), n); }
+
+// The smallest GUI object the game makes (0x1ec bytes, the layout loader at
+// 0x46ce90). Checking more than that skipped controls that sit at the end of
+// the game's committed heap: Pro Circuit and ScreenOverCtl, the last controls
+// of a fresh main menu, until another screen made the heap grow.
+constexpr size_t kNodeMin = 0x1EC;
 int I32(uintptr_t p) { return *reinterpret_cast<const int*>(p); }
 uintptr_t Ptr(uintptr_t p) { return *reinterpret_cast<const uintptr_t*>(p); }
 
@@ -99,22 +105,20 @@ uintptr_t Manager() {
 
 // Every node under root in the GUI tree (+0x10 first child, +0xc next),
 // whatever its class. Not the game's own iterator (0x46a880): that counts
-// open walks in a global (0x661690) and while it is non-zero the game
-// refuses to add controls to a dialog (0x46a070), which looked like what
-// dropped Pro Circuit from a fresh main menu.
+// open walks in a global (0x661690), and while it is non-zero the game
+// refuses to add controls to a dialog (0x46a070).
 template <typename F>
 void RawEach(uintptr_t root, F f) {
   if (!Readable(root, 0x18)) return;
-  // Also follows +8 (previous): a control can drop out of its parent's
-  // chain while its neighbour still points back at it (Pro Circuit on a
-  // fresh main menu, until another dialog loads).
+  // Also follows +8 (previous): the main menu inserts its screen object
+  // before ScreenOverCtl without a parent (0x46a190).
   std::vector<uintptr_t> stack;
   std::unordered_set<uintptr_t> seen;
   stack.push_back(Ptr(root + 0x10));
   for (int guard = 0; !stack.empty() && guard < 40000; ++guard) {
     const uintptr_t n = stack.back();
     stack.pop_back();
-    if (!n || n == root || !Readable(n, 0x240)) continue;
+    if (!n || n == root || !Readable(n, kNodeMin)) continue;
     if (!seen.insert(n).second) continue;
     const uintptr_t vt = Ptr(n);
     if (vt >= 0x550000 && vt < 0x560000) f(n);
@@ -339,10 +343,8 @@ void Refresh() {
     const uintptr_t list = Ptr(d + 0x7F3C);
     if (!Readable(list, 0x28)) continue;
     Each(list, "UIControl", [&](uintptr_t c) {
-      // Not only controls the GUI tree marks shown: some are left unmarked
-      // while the game shows them (Pro Circuit on the main menu's Single
-      // Player panel until another screen has been opened); +0x70 decides.
-      if (!Readable(c, 0x240) || Ptr(c + 0xB8) != d) return;
+      // Not only controls the GUI tree marks shown: +0x70 decides.
+      if (!Readable(c, kNodeMin) || Ptr(c + 0xB8) != d) return;
       Entry e;
       e.name = Str(c + 0xF4, 64);
       if (e.name.empty()) return;
@@ -529,137 +531,6 @@ void Tick() {
 
 void Frame() {
   if (GetTickCount() - g.tick_at > 500) RunQueue("from the menu cursor update (no tick seen)");
-}
-
-// ---- Diagnostics: who links / unlinks Pro Circuit and its neighbours ------
-// The game's tree edits: 0x46a070 add child, 0x46a0d0 unlink, 0x46a140 insert
-// after, 0x46a190 insert before. Each is logged (with the calling code) when
-// it touches ButProCircuit, ButSupercross, ScreenOverCtl or the main menu's
-// screen object (vtable 0x558c18).
-
-namespace {
-int g_tree_logs = 0;
-uint8_t* g_tr_add = nullptr;
-uint8_t* g_tr_unlink = nullptr;
-uint8_t* g_tr_after = nullptr;
-uint8_t* g_tr_before = nullptr;
-
-std::string NodeName(uintptr_t n) {
-  if (!n) return "null";
-  if (!Readable(n, 0x200)) return "unreadable";
-  if (Ptr(n) == 0x558C18) return "screen-object";
-  const std::string s = Str(n + 0xF4, 64);
-  return s.empty() ? "unnamed" : s;
-}
-
-bool Watched(uintptr_t n) {
-  if (!n || !Readable(n, 0x200)) return false;
-  if (Ptr(n) == 0x558C18) return true;
-  const std::string s = Str(n + 0xF4, 64);
-  return s == "ButProCircuit" || s == "ButSupercross" || s == "ScreenOverCtl";
-}
-
-std::string Links(uintptr_t n) {
-  if (!n || !Readable(n, 0x200)) return "?";
-  char buf[200];
-  std::snprintf(buf, sizeof buf, "prev %s, next %s, parent %s, child %s", NodeName(Ptr(n + 8)).c_str(),
-                NodeName(Ptr(n + 0xC)).c_str(), NodeName(Ptr(n + 0x14)).c_str(), NodeName(Ptr(n + 0x10)).c_str());
-  return buf;
-}
-
-std::string Stack(const void* from) {
-  char chain[120] = {};
-  size_t used = 0;
-  const uintptr_t* sp = static_cast<const uintptr_t*>(from);
-  for (int k = 0, found = 0; k < 48 && found < 5; ++k) {
-    const uintptr_t v = sp[k];
-    if (v > 0x401000 && v < 0x550000) {
-      used += std::snprintf(chain + used, sizeof chain - used, " %06X", static_cast<unsigned>(v));
-      ++found;
-    }
-  }
-  return chain;
-}
-
-void TreeLog(const char* what, uintptr_t node, uintptr_t other, uintptr_t ret, int result, const void* sp) {
-  if (g_tree_logs >= 300) return;
-  ++g_tree_logs;
-  patch::Log("MenuMaX: tree: %s %s (%08X)%s%s from %06X -> %d; now %s; walks %d; stack%s", what, NodeName(node).c_str(),
-             static_cast<unsigned>(node), other ? " / " : "", other ? NodeName(other).c_str() : "",
-             static_cast<unsigned>(ret), result, Links(node).c_str(), *reinterpret_cast<const int*>(0x661690),
-             Stack(sp).c_str());
-}
-
-int __fastcall TreeAddHook(uintptr_t list, void* edx, uintptr_t ctrl, int a) {
-  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-  using Fn = int(__fastcall*)(uintptr_t, void*, uintptr_t, int);
-  const int r = reinterpret_cast<Fn>(g_tr_add)(list, edx, ctrl, a);
-  if (Watched(ctrl)) TreeLog("add child of", ctrl, list, ret, r, &ctrl);
-  return r;
-}
-
-int __fastcall TreeUnlinkHook(uintptr_t ctrl, void* edx) {
-  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-  const bool w = Watched(ctrl);
-  const std::string before = w ? Links(ctrl) : std::string();
-  using Fn = int(__fastcall*)(uintptr_t, void*);
-  const int r = reinterpret_cast<Fn>(g_tr_unlink)(ctrl, edx);
-  if (w) {
-    if (g_tree_logs < 300) patch::Log("MenuMaX: tree: before unlink %s: %s", NodeName(ctrl).c_str(), before.c_str());
-    TreeLog("unlink", ctrl, 0, ret, r, &ctrl);
-  }
-  return r;
-}
-
-int __fastcall TreeAfterHook(uintptr_t ctrl, void* edx, uintptr_t target, int a) {
-  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-  using Fn = int(__fastcall*)(uintptr_t, void*, uintptr_t, int);
-  const int r = reinterpret_cast<Fn>(g_tr_after)(ctrl, edx, target, a);
-  if (Watched(ctrl) || Watched(target)) TreeLog("insert after", ctrl, target, ret, r, &ctrl);
-  return r;
-}
-
-int __fastcall TreeBeforeHook(uintptr_t ctrl, void* edx, uintptr_t target, int a) {
-  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-  using Fn = int(__fastcall*)(uintptr_t, void*, uintptr_t, int);
-  const int r = reinterpret_cast<Fn>(g_tr_before)(ctrl, edx, target, a);
-  if (Watched(ctrl) || Watched(target)) {
-    TreeLog("insert before", ctrl, target, ret, r, &ctrl);
-    if (Readable(target, 0x200) && g_tree_logs < 300)
-      patch::Log("MenuMaX: tree:   target %s now %s", NodeName(target).c_str(), Links(target).c_str());
-  }
-  return r;
-}
-
-// Copies the first `n` bytes of the game's function (position independent:
-// they only read absolute addresses) and jumps back after them.
-uint8_t* Hook(uintptr_t at, const uint8_t* orig, size_t n, void* hook, const char* what) {
-  if (!patch::Matches(at, orig, n)) {
-    patch::Log("MenuMaX: tree diagnostics: %s not hooked (unexpected code at %06X)", what, static_cast<unsigned>(at));
-    return nullptr;
-  }
-  uint8_t* t = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-  if (!t) return nullptr;
-  std::memcpy(t, orig, n);
-  t[n] = 0xE9;
-  const int32_t rel = static_cast<int32_t>(at + n - (reinterpret_cast<uintptr_t>(t) + n + 5));
-  std::memcpy(t + n + 1, &rel, 4);
-  FlushInstructionCache(GetCurrentProcess(), t, 32);
-  patch::Jump(at, reinterpret_cast<uintptr_t>(hook), n);
-  return t;
-}
-}  // namespace
-
-void InstallDiagnostics() {
-  // mov eax,[0x661690]; test eax,eax / mov eax,[0x661690]; push esi
-  static const uint8_t kAdd[] = {0xA1, 0x90, 0x16, 0x66, 0x00, 0x85, 0xC0};
-  static const uint8_t kUnlink[] = {0xA1, 0x90, 0x16, 0x66, 0x00, 0x56};
-  g_tr_add = Hook(0x46A070, kAdd, sizeof kAdd, reinterpret_cast<void*>(&TreeAddHook), "add child");
-  g_tr_unlink = Hook(0x46A0D0, kUnlink, sizeof kUnlink, reinterpret_cast<void*>(&TreeUnlinkHook), "unlink");
-  g_tr_after = Hook(0x46A140, kUnlink, sizeof kUnlink, reinterpret_cast<void*>(&TreeAfterHook), "insert after");
-  g_tr_before = Hook(0x46A190, kUnlink, sizeof kUnlink, reinterpret_cast<void*>(&TreeBeforeHook), "insert before");
-  patch::Log("MenuMaX: tree diagnostics: logging links and unlinks of Pro Circuit, Supercross, ScreenOverCtl and the screen object (%d of 4 hooked)",
-             (g_tr_add != nullptr) + (g_tr_unlink != nullptr) + (g_tr_after != nullptr) + (g_tr_before != nullptr));
 }
 
 }  // namespace mg

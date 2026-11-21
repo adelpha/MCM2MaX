@@ -38,7 +38,6 @@ bool Get(const char* name, Info* out, uintptr_t scope = 0);
 // Logs where a control of that name is in the whole GUI tree (diagnostics).
 void Locate(const char* name);
 // Logs the controls the game adds to dialogs that end up unlinked (diagnostics).
-void InstallDiagnostics();
 // A list's or dropdown's rows.
 bool Rows(const char* name, std::vector<std::string>* rows, uintptr_t scope = 0);
 // A modal dialog is shown now: its controls' names.

@@ -214,7 +214,7 @@ void Each(uintptr_t root, const char* cls, F f) {
   for (int guard = 0; !stack.empty() && guard < 40000; ++guard) {
     const uintptr_t n = stack.back();
     stack.pop_back();
-    if (!n || n == root || !Readable(n, 0x240)) continue;
+    if (!n || n == root || !Readable(n, 0x1EC)) continue;  // smallest GUI object (see menugame.cpp)
     if (!seen.insert(n).second) continue;
     const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(n);
     if (vt >= 0x550000 && vt < 0x560000) {
