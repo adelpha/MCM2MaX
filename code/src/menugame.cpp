@@ -537,15 +537,16 @@ namespace {
 uint8_t* g_add_tramp = nullptr;
 int g_add_logs = 0;
 
-void __fastcall AddControlHook(uintptr_t dialog, void* edx, uintptr_t ctrl, int a, int b) {
+// Returns what the game's function returns (the control): callers use it.
+uintptr_t __fastcall AddControlHook(uintptr_t dialog, void* edx, uintptr_t ctrl, int a, int b) {
   const int walks_before = *reinterpret_cast<const int*>(0x661690);
-  using Fn = void(__fastcall*)(uintptr_t, void*, uintptr_t, int, int);
-  reinterpret_cast<Fn>(g_add_tramp)(dialog, edx, ctrl, a, b);
-  if (!ctrl || !Readable(ctrl, 0x240) || g_add_logs >= 400) return;
+  using Fn = uintptr_t(__fastcall*)(uintptr_t, void*, uintptr_t, int, int);
+  const uintptr_t result = reinterpret_cast<Fn>(g_add_tramp)(dialog, edx, ctrl, a, b);
+  if (!ctrl || !Readable(ctrl, 0x240) || g_add_logs >= 400) return result;
   const std::string name = Str(ctrl + 0xF4, 64);
   const uintptr_t parent = Ptr(ctrl + 0x14);
   const bool interesting = parent == 0 || name == "ButProCircuit" || name == "ButSupercross" || name == "ScreenOverCtl";
-  if (!interesting) return;
+  if (!interesting) return result;
   ++g_add_logs;
   // Return addresses on the stack (the game's code only).
   char chain[160] = {};
@@ -561,6 +562,7 @@ void __fastcall AddControlHook(uintptr_t dialog, void* edx, uintptr_t ctrl, int 
   patch::Log("MenuMaX: the game adds control %s (%08X) to dialog %08X %s: %s (open walks %d); stack%s", name.c_str(),
              static_cast<unsigned>(ctrl), static_cast<unsigned>(dialog), DtmOf(dialog).c_str(),
              parent ? "linked" : "NOT LINKED", walks_before, chain);
+  return result;
 }
 }  // namespace
 
