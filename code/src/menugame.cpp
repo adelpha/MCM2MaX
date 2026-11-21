@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <unordered_set>
 
 #include "config.h"
 #include "patch.h"
@@ -116,14 +117,20 @@ void Each(uintptr_t root, const char* cls, F f) {
 template <typename F>
 void RawEach(uintptr_t root, F f) {
   if (!Readable(root, 0x18)) return;
+  // Also follows +8 (previous): a control can drop out of its parent's
+  // chain while its neighbour still points back at it (Pro Circuit on a
+  // fresh main menu, until another dialog loads).
   std::vector<uintptr_t> stack;
+  std::unordered_set<uintptr_t> seen;
   stack.push_back(Ptr(root + 0x10));
-  for (int guard = 0; !stack.empty() && guard < 20000; ++guard) {
+  for (int guard = 0; !stack.empty() && guard < 40000; ++guard) {
     const uintptr_t n = stack.back();
     stack.pop_back();
-    if (!n || !Readable(n, 0x240)) continue;
+    if (!n || n == root || !Readable(n, 0x240)) continue;
+    if (!seen.insert(n).second) continue;
     const uintptr_t vt = Ptr(n);
     if (vt >= 0x550000 && vt < 0x560000) f(n);
+    stack.push_back(Ptr(n + 0x08));
     stack.push_back(Ptr(n + 0x0C));
     stack.push_back(Ptr(n + 0x10));
   }
