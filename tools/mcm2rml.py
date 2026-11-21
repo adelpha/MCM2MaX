@@ -487,8 +487,10 @@ SCREENS = [
     ('replays', ['GRBASE', 'GHOSTFIL', 'REPLYFIL']),
     ('globset', ['GLOBSET']),
     ('serial', ['SERPOPUP']),
+    # The credits: the game's video shows through (only Back is copied).
+    ('credits', ['CREDITS']),
 ]
-NO_BACKGROUND = {'MAINMENU'}
+NO_BACKGROUND = {'MAINMENU', 'CREDITS'}
 EDITS = {'OPTGRAPH': max_graphics}
 BACKS = ['Back', 'BackButton', 'CancelButton', 'Cancel', 'NoButton', 'No', 'CloseButton', 'Close', 'OKButton', 'OK']
 
