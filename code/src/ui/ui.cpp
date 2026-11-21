@@ -312,7 +312,7 @@ XInputGetStateFn LoadXInput() {
 
 void Collect(Rml::Element* e, std::vector<Rml::Element*>& out) {
   if (e->HasAttribute("ini") || e->HasAttribute("game") || e->HasAttribute("game-if") || e->HasAttribute("ini-text") ||
-      e->HasAttribute("enable-if"))
+      e->HasAttribute("enable-if") || e->HasAttribute("game-dialog"))
     out.push_back(e);
   for (int i = 0; i < e->GetNumChildren(); ++i) Collect(e->GetChild(i), out);
 }
