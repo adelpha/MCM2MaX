@@ -72,8 +72,8 @@ body {
 .list .row.on { background-color: #3a4a8c; }
 /* A control's tooltip (its title=, the game's tooltip text), shown by MenuMaX
    when the pointer rests on it. */
-#max-tooltip { position: absolute; z-index: 100; max-width: 260dp; padding: 2dp 5dp; background-color: #fff8d0;
-  border: 1dp #000000; color: #000000; font-size: 12dp; pointer-events: none; }
+#max-tooltip { position: absolute; z-index: 100; padding: 2dp 5dp; background-color: #fff8d0;
+  border: 1dp #000000; color: #000000; font-size: 12dp; font-effect: none; white-space: nowrap; pointer-events: none; }
 
 /* Edit boxes. */
 .edit { padding-top: 3dp; }

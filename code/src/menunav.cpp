@@ -202,7 +202,13 @@ template <typename F>
 void Each(uintptr_t root, const char* cls, F f) {
   alignas(16) uint8_t it[0x100] = {};
   reinterpret_cast<IterInitFn>(kIterInit)(it, nullptr, root, 1, cls);
-  for (uintptr_t c; (c = reinterpret_cast<IterNextFn>(kIterNext)(it, nullptr)) != 0;) f(c);
+  // Next (0x46a980) returns 0 for a node of another class but still moves
+  // on: the walk ends only when its node (+4) is none.
+  for (int guard = 0; guard < 100000; ++guard) {
+    const uintptr_t c = reinterpret_cast<IterNextFn>(kIterNext)(it, nullptr);
+    if (c) f(c);
+    else if (!*reinterpret_cast<const uintptr_t*>(it + 4)) break;
+  }
   reinterpret_cast<IterEndFn>(kIterEnd)(it, nullptr);
 }
 

@@ -1,5 +1,8 @@
 #include "gputext.h"
 
+#include "../mode_prompt.h"
+#include "../ui/ui.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -1053,6 +1056,9 @@ void GpuTextComposite(const GpuTexture& src, ID3D11RenderTargetView* dst, IDirec
                       UINT dst_h, const RECT& r) {
   Report();
   if (!g_nonempty) return;
+  // While a MenuMaX screen is up it draws all the text itself: the game's
+  // own (kept, for when its screens show again) is not drawn.
+  if (ui::Active() && !ModePromptActive()) return;
   auto it = g_overlays.find(src.Native());
   if (it == g_overlays.end() || it->second.empty || !it->second.tex.Valid()) return;
   const GpuTexture& t = it->second.tex;

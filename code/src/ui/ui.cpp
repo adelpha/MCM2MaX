@@ -1244,13 +1244,28 @@ void PointAt(Rml::Element* e) {
   g.context->ProcessMouseMove(g.mouse_x, g.mouse_y, 0);
 }
 
-// Arrow keys / d-pad when RmlUi finds nothing that way (it skips controls
-// that overlap the current one by even a pixel, e.g. Replay and Quit on the
-// main menu): the nearest control whose middle lies that way.
-void NavFallback(Rml::Element* from, Rml::Input::KeyIdentifier k) {
+bool TakesArrows(Rml::Element* e) {
+  const Rml::String& t = e->GetTagName();
+  return t == "input" || t == "select" || t == "textarea";
+}
+
+// nav-up / nav-down / ... set to something other than auto on the control.
+bool NavSet(Rml::Element* e, Rml::Input::KeyIdentifier k) {
+  using namespace Rml::Input;
+  const Rml::PropertyId id = k == KI_UP ? Rml::PropertyId::NavUp : k == KI_DOWN ? Rml::PropertyId::NavDown
+                           : k == KI_LEFT ? Rml::PropertyId::NavLeft : Rml::PropertyId::NavRight;
+  const Rml::Property* p = e->GetProperty(id);
+  return p && p->unit != Rml::Unit::KEYWORD;
+}
+
+// Arrow keys / d-pad: the nearest control whose middle lies that way
+// (distance that way + twice the distance across). RmlUi's own pick skips
+// controls that overlap the current one by even a pixel (Replay and Quit on
+// the main menu) and can jump past near ones.
+bool NavMove(Rml::Element* from, Rml::Input::KeyIdentifier k) {
   using namespace Rml::Input;
   Rml::ElementDocument* doc = from->GetOwnerDocument();
-  if (!doc) return;
+  if (!doc) return false;
   auto middle = [](Rml::Element* e) {
     const Rml::Vector2f at = e->GetAbsoluteOffset(Rml::BoxArea::Border);
     const Rml::Vector2f size = e->GetBox().GetSize(Rml::BoxArea::Border);
@@ -1270,7 +1285,7 @@ void NavFallback(Rml::Element* from, Rml::Input::KeyIdentifier k) {
       case KI_UP: along = m0.y - m.y; across = m.x - m0.x; break;
       case KI_RIGHT: along = m.x - m0.x; across = m.y - m0.y; break;
       case KI_LEFT: along = m0.x - m.x; across = m.y - m0.y; break;
-      default: return;
+      default: return false;
     }
     if (along <= 1.0f) continue;
     const float score = along + 2.0f * std::fabs(across);
@@ -1279,9 +1294,10 @@ void NavFallback(Rml::Element* from, Rml::Input::KeyIdentifier k) {
       best_score = score;
     }
   }
-  if (!best || !best->Focus(true)) return;
-  patch::Log("MenuMaX: key %d: nothing that way for RmlUi, %s#%s picked (nearest middle)", static_cast<int>(k),
-             best->GetTagName().c_str(), best->GetId().c_str());
+  if (!best || !best->Focus(true)) return false;
+  patch::Log("MenuMaX: key %d: %s#%s -> %s#%s", static_cast<int>(k), from->GetTagName().c_str(), from->GetId().c_str(),
+               best->GetTagName().c_str(), best->GetId().c_str());
+  return true;
 }
 
 // After any input: remember the focused control, or give focus back to the
@@ -1376,10 +1392,19 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
   }
   const int mods = g.shift ? KM_SHIFT : 0;
   Rml::Element* before = g.context->GetFocusElement();
-  g.context->ProcessKeyDown(k, mods);
-  g.context->ProcessKeyUp(k, mods);
-  if (g.doc && Repeats(k) && k != Rml::Input::KI_TAB && g.context->GetFocusElement() == before && IsControl(before))
-    NavFallback(before, k);
+  // Arrow keys / d-pad between controls: MenuMaX's own pick (RmlUi's
+  // skips controls that overlap a little, or picks far ones), unless the
+  // control takes them itself (sliders, lists, text) or sets nav-up etc.
+  bool moved = false;
+  if (g.doc && Repeats(k) && k != Rml::Input::KI_TAB && IsControl(before) && !TakesArrows(before) &&
+      !NavSet(before, k))
+    moved = NavMove(before, k);
+  if (!moved) {
+    g.context->ProcessKeyDown(k, mods);
+    g.context->ProcessKeyUp(k, mods);
+    if (g.doc && Repeats(k) && k != Rml::Input::KI_TAB && g.context->GetFocusElement() == before && IsControl(before))
+      NavMove(before, k);
+  }
   if (g.doc) KeepFocus("key");
   if (g.doc && Repeats(k) && g.context->GetFocusElement() != before && IsControl(g.context->GetFocusElement()))
     PointAt(g.context->GetFocusElement());
@@ -1738,8 +1763,13 @@ void Tooltip(float dp) {
     if (tip->GetInnerRML() != rml) tip->SetInnerRML(rml);
     const Rml::Vector2f at = d->GetAbsoluteOffset(Rml::BoxArea::Border);
     const float width = static_cast<float>(g.context->GetDimensions().x);
+    // Kept inside the window (its size from the last layout).
+    const Rml::Vector2f size = tip->GetBox().GetSize(Rml::BoxArea::Border);
+    const float height = static_cast<float>(g.context->GetDimensions().y);
     float x = g.mouse_x - at.x + 4.0f * dp, y = g.mouse_y - at.y + 22.0f * dp;
-    if (g.mouse_x + 264.0f * dp > width) x = g.mouse_x - at.x - 264.0f * dp;
+    if (x + at.x + size.x > width - 2.0f * dp) x = width - 2.0f * dp - size.x - at.x;
+    if (x + at.x < 0) x = -at.x;
+    if (y + at.y + size.y > height) y = g.mouse_y - at.y - 4.0f * dp - size.y;
     tip->SetProperty("left", Rml::ToString(x) + "px");
     tip->SetProperty("top", Rml::ToString(y) + "px");
     tip->SetProperty("display", "block");
