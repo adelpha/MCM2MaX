@@ -1105,7 +1105,9 @@ void Present(const GpuTexture& src_tex, UINT src_w, UINT src_h, UINT interval) {
   // be switched in Options while the swap chain has the flag).
   BOOL fs_now = FALSE;
   if (g_tearing && GetConfig().exclusive) b.swapchain->GetFullscreenState(&fs_now, nullptr);
-  HRESULT hr = b.swapchain->Present(interval, interval == 0 && g_tearing && !fs_now ? DXGI_PRESENT_ALLOW_TEARING : 0);
+  // MaXMenus: a game dialog just made is not shown until its copy is (the
+  // last frame stays on screen).
+  HRESULT hr = ui::HoldPresent() ? S_OK : b.swapchain->Present(interval, interval == 0 && g_tearing && !fs_now ? DXGI_PRESENT_ALLOW_TEARING : 0);
   if (FAILED(hr)) LogOnce("Present failed %08lx", hr);
   zone.Switch(prof::kCompose);
   GpuTimerFrame11();

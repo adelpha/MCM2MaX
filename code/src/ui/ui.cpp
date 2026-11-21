@@ -38,6 +38,26 @@ asm(".text\n"
     "  pushl $0x486A08\n"
     "  ret\n");
 
+// The game's dialog constructor (0x46ace0, this = ecx, (1, "name.dtm")): the
+// game can draw and present a new dialog before it shows it (0x486a00), so
+// presents are held from here until the copy is up (see HoldPresent).
+extern "C" {
+void __cdecl MaxDialogNew(const char* name);
+void MaxDialogNewHook();
+}
+asm(".text\n"
+    ".globl _MaxDialogNewHook\n"
+    "_MaxDialogNewHook:\n"
+    "  pushal\n"
+    "  pushl 0x28(%esp)\n"  // name: [esp+8] at entry, + 32 (pushal)
+    "  call _MaxDialogNew\n"
+    "  addl $4, %esp\n"
+    "  popal\n"
+    "  pushl $-1\n"
+    "  pushl $0x550526\n"
+    "  pushl $0x46ACE7\n"
+    "  ret\n");
+
 // menus.cpp: the Enhancements box brought up to date after a screen.
 void MenusRefreshFromIni();
 
@@ -242,6 +262,12 @@ struct State {
   bool mirror = false;       // g.doc is the top of `layers` (not a screen opened by name)
   DWORD race_mirror_at = 0;  // the game's dialogs last looked at in a race
   long dialog_shows_seen = 0;  // g_max_dialog_shows when last looked
+  // A copied game dialog just made (0x46ace0): presents held until its copy
+  // is up (at most 250 ms), so the game's own never reaches the screen.
+  std::string hold_dtm;
+  DWORD hold_since = 0;
+  int held_frames = 0;
+  long holds = 0;
   std::vector<Layer> layers;  // bottom first
   std::map<std::string, std::string> index;  // game dialog -> screen file
   std::map<std::string, std::pair<bool, std::vector<std::string>>> index_info;  // file -> opaque, dialogs
@@ -1891,6 +1917,14 @@ void Install() {
     } else {
       patch::Log("MenuMaX: the game's dialog show (486a00) NOT hooked (bytes differ); dialogs in races are looked for 20 times a second");
     }
+    // push -1; push 550526h (the constructor's own start)
+    static const uint8_t ctor[] = {0x6A, 0xFF, 0x68, 0x26, 0x05, 0x55, 0x00};
+    if (patch::Matches(0x46ACE0, ctor, sizeof ctor)) {
+      patch::Jump(0x46ACE0, reinterpret_cast<uintptr_t>(&MaxDialogNewHook), sizeof ctor);
+      patch::Log("MenuMaX: the game's dialog constructor (46ace0) hooked");
+    } else {
+      patch::Log("MenuMaX: the game's dialog constructor (46ace0) NOT hooked (bytes differ)");
+    }
   }
   const DWORD attr = GetFileAttributesW((UiDir() + L"settings.rml").c_str());
   patch::Log("MenuMaX: on; screens in %ls (settings.rml %s); RmlUi starts when a screen first opens", UiDir().c_str(),
@@ -2081,6 +2115,44 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
 
 }  // namespace
 
+void DialogMade(const char* name) {
+  if (!g.installed || g.failed || !GetConfig().max_menus || !name) return;
+  char buf[64];
+  size_t n = 0;
+  if (IsBadStringPtrA(name, sizeof buf)) return;
+  for (; n + 1 < sizeof buf && name[n]; ++n) buf[n] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[n])));
+  buf[n] = 0;
+  std::string dtm(buf);
+  const size_t slash = dtm.find_last_of("\\/");
+  if (slash != std::string::npos) dtm.erase(0, slash + 1);
+  if (dtm.size() > 4 && dtm.compare(dtm.size() - 4, 4, ".dtm") == 0) dtm.resize(dtm.size() - 4);
+  if (!g.index_read) ReadIndex();
+  if (!g.index.count(dtm)) return;
+  for (const Layer& l : g.layers)
+    if (std::find(l.dialogs.begin(), l.dialogs.end(), dtm) != l.dialogs.end()) return;  // its copy is up already
+  g.hold_dtm = dtm;
+  g.hold_since = GetTickCount();
+  g.held_frames = 0;
+  if (++g.holds <= 40 || GetConfig().menu_log) patch::Log("MenuMaX: game dialog %s made: the screen is held until its copy is up", dtm.c_str());
+}
+
+bool HoldPresent() {
+  if (g.hold_dtm.empty()) return false;
+  const DWORD waited = GetTickCount() - g.hold_since;
+  bool up = false;
+  for (const Layer& l : g.layers)
+    if (l.doc && std::find(l.dialogs.begin(), l.dialogs.end(), g.hold_dtm) != l.dialogs.end()) up = true;
+  if (up || waited > 250) {
+    if (g.holds <= 40 || GetConfig().menu_log)
+      patch::Log("MenuMaX: game dialog %s: %s after %lu ms, %d frame(s) held", g.hold_dtm.c_str(),
+                 up ? "copy up" : "copy not up (gave up)", static_cast<unsigned long>(waited), g.held_frames);
+    g.hold_dtm.clear();
+    return false;
+  }
+  ++g.held_frames;
+  return true;
+}
+
 void Present11(ID3D11RenderTargetView* rtv, UINT w, UINT h, const RECT& game_rect, const dd::BlitParams* frame) {
   if (!g.installed || g.failed || dd::IsD3D9()) return;
   Target t;
@@ -2158,3 +2230,5 @@ void JoyState(DWORD pov, DWORD buttons) {
 }
 
 }  // namespace ui
+
+extern "C" void __cdecl MaxDialogNew(const char* name) { ui::DialogMade(name); }

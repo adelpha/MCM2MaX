@@ -16,6 +16,8 @@ bool IsOpen(const char*) { return false; }
 void Present11(ID3D11RenderTargetView*, UINT, UINT, const RECT&, const dd::BlitParams*) {}
 void Present9(IDirect3DSurface9*, UINT, UINT, const RECT&, const dd::BlitParams*) {}
 void DeviceGone9() {}
+void DialogMade(const char*) {}
+bool HoldPresent() { return false; }
 void KeyEvent(unsigned, bool) {}
 void MouseButton(int, bool) {}
 void MouseMove(int, int) {}

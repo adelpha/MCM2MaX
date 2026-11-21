@@ -1520,7 +1520,7 @@ void Present9(const GpuTexture& src, UINT src_w, UINT src_h, UINT interval) {
   PerfBeforePresent();
   zone.Switch(prof::kSwapPresent);
   if (own_wait) WaitForBlank(g_sc.vsync);
-  HRESULT hr = sc->Present(nullptr, nullptr, nullptr, nullptr, 0);
+  HRESULT hr = ui::HoldPresent() ? S_OK : sc->Present(nullptr, nullptr, nullptr, nullptr, 0);  // MaXMenus: see backend.cpp
   if (interval) LogVsync();
   zone.Switch(prof::kCompose);
   if (!g_lost && hr != D3DERR_DEVICELOST) GpuTimerFrame9();

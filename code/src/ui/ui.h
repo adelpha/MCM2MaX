@@ -56,6 +56,11 @@ void Present9(IDirect3DSurface9* back, UINT w, UINT h, const RECT& game_rect, co
 // The Direct3D 9 device is about to be released (a new one follows).
 void DeviceGone9();
 
+// A game dialog (0x46ace0) was just made; presents are held (HoldPresent
+// true) until MaXMenus has its copy up, at most 250 ms.
+void DialogMade(const char* name);
+bool HoldPresent();
+
 // Input taken from the game while a screen is open (any thread).
 // DirectInput key codes (DIK_*), mouse buttons 0-7, wheel in DirectInput
 // units (120 per notch), joystick POV (hundredths of degrees, 0xFFFFFFFF =
