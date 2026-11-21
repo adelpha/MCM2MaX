@@ -24,7 +24,7 @@ Here's just a few of Motocross Madness 2 MaXimuM's core features:
 | Graphical enhancements | Widescreen, AA, AF, FoV, Alpha-to-coverage, support for high-resolution replacement textures, environment mapped reflections on bikes and riders, soft shadows for all riders, sharp antialiased text in the menus and HUD and more! |
 | Audio | Drop in [DSOAL](https://github.com/kcat/dsoal) and the EAX effects will just work. You can change the EAX 1.0 presets per-event type in the ini file! |
 | Music | Optional music tracks, either per-event or per-track (provide your own). |
-| Input | Native XInput support with analog and force-feedback-to-rumble translation. |
+| Input | Native XInput support with analog and force-feedback-to-rumble translation. SDL3 for wide controller support. |
 
 See the [Features](#features) section for more details.
 
@@ -242,6 +242,9 @@ Windows 10 and 11.
 - **Xbox controllers**: XInput controllers show up under their own names,
   with analog sticks, separate trigger axes and rumble
   (`XInput`).
+- **Rebuilt UI**: Original UI art and functionality cloned and made moddable
+  using [RmlUi](https://github.com/mikke89/RmlUi) for easy UI modification
+  and expansion.
 - **Easier Easy**: on Easy, computer riders accelerate less hard and have a
   slightly lower top speed than in the original, where Easy was barely easier
   than Normal. Tunable per difficulty (`AiAccel*`, `AiTopSpeed*`).
