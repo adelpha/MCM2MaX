@@ -169,6 +169,11 @@ struct GameBind {
   // again over the screen at the control's place), e.g. the track preview.
   bool window = false;
   bool window_logged = false;
+  // Frames / time it has been shown for: the game draws the picture a frame
+  // or more after the control shows (before that the game's frame there
+  // still holds the last screen, e.g. the main menu's green flag key).
+  int window_frames = 0;
+  DWORD window_since = 0;
 };
 
 // <div game-dialog="optgame">: the part of a screen that copies one game
@@ -1685,8 +1690,11 @@ void DrawGameWindows(const Target& t) {
     const RECT r = b.last.rect;  // left, top, right, bottom in menu pixels
     if (!show || r.right <= r.left || r.bottom <= r.top) {
       b.window_logged = false;
+      b.window_frames = 0;
       continue;
     }
+    if (b.window_frames++ == 0) b.window_since = GetTickCount();
+    if (b.window_frames < 4 || GetTickCount() - b.window_since < 120) continue;  // the game has not drawn it yet
     dd::BlitParams p = f;
     p.src_rect = {f.src_rect.left + r.left, f.src_rect.top + r.top, f.src_rect.left + r.right, f.src_rect.top + r.bottom};
     p.dst_rect = {f.dst_rect.left + static_cast<LONG>(r.left * sx + 0.5), f.dst_rect.top + static_cast<LONG>(r.top * sy + 0.5),
