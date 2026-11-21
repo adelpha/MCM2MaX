@@ -1401,6 +1401,27 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
     select->CancelSelectBox();  // Esc / B closes an open list first
     return;
   }
+  if (select && select->IsSelectBoxVisible() && (k == KI_UP || k == KI_DOWN)) {
+    // An open list: Up / Down move through its rows (Enter / A picks), and
+    // never on to another control.
+    g.context->ProcessKeyDown(k, g.shift ? KM_SHIFT : 0);
+    g.context->ProcessKeyUp(k, g.shift ? KM_SHIFT : 0);
+    if (GetConfig().menu_log) patch::Log("MenuMaX: key %d (%s) in the open list #%s", static_cast<int>(k), from, select->GetId().c_str());
+    return;
+  }
+  if (select && !select->IsSelectBoxVisible() && (k == KI_UP || k == KI_DOWN)) {
+    // A closed list: Up / Down go to the next control only (RmlUi would also
+    // change the list's choice).
+    if (!NavSet(select, k)) NavMove(select, k);
+    else {
+      g.context->ProcessKeyDown(k, g.shift ? KM_SHIFT : 0);
+      g.context->ProcessKeyUp(k, g.shift ? KM_SHIFT : 0);
+    }
+    if (g.doc) KeepFocus("key");
+    if (g.doc && g.context->GetFocusElement() != select && IsControl(g.context->GetFocusElement()))
+      PointAt(g.context->GetFocusElement());
+    return;
+  }
   if (select && !select->IsSelectBoxVisible() && (k == KI_LEFT || k == KI_RIGHT)) {
     // Left / Right step through a closed list's choices, like a slider.
     const int n = select->GetNumOptions(), i = select->GetSelection() + (k == KI_RIGHT ? 1 : -1);
