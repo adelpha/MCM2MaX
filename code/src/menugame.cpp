@@ -531,55 +531,135 @@ void Frame() {
   if (GetTickCount() - g.tick_at > 500) RunQueue("from the menu cursor update (no tick seen)");
 }
 
-// ---- Diagnostics: every control the game adds to a dialog (0x46b7d0) -------
+// ---- Diagnostics: who links / unlinks Pro Circuit and its neighbours ------
+// The game's tree edits: 0x46a070 add child, 0x46a0d0 unlink, 0x46a140 insert
+// after, 0x46a190 insert before. Each is logged (with the calling code) when
+// it touches ButProCircuit, ButSupercross, ScreenOverCtl or the main menu's
+// screen object (vtable 0x558c18).
 
 namespace {
-uint8_t* g_add_tramp = nullptr;
-int g_add_logs = 0;
+int g_tree_logs = 0;
+uint8_t* g_tr_add = nullptr;
+uint8_t* g_tr_unlink = nullptr;
+uint8_t* g_tr_after = nullptr;
+uint8_t* g_tr_before = nullptr;
 
-// Returns what the game's function returns (the control): callers use it.
-uintptr_t __fastcall AddControlHook(uintptr_t dialog, void* edx, uintptr_t ctrl, int a, int b) {
-  const int walks_before = *reinterpret_cast<const int*>(0x661690);
-  using Fn = uintptr_t(__fastcall*)(uintptr_t, void*, uintptr_t, int, int);
-  const uintptr_t result = reinterpret_cast<Fn>(g_add_tramp)(dialog, edx, ctrl, a, b);
-  if (!ctrl || !Readable(ctrl, 0x240) || g_add_logs >= 400) return result;
-  const std::string name = Str(ctrl + 0xF4, 64);
-  const uintptr_t parent = Ptr(ctrl + 0x14);
-  const bool interesting = parent == 0 || name == "ButProCircuit" || name == "ButSupercross" || name == "ScreenOverCtl";
-  if (!interesting) return result;
-  ++g_add_logs;
-  // Return addresses on the stack (the game's code only).
-  char chain[160] = {};
+std::string NodeName(uintptr_t n) {
+  if (!n) return "null";
+  if (!Readable(n, 0x200)) return "unreadable";
+  if (Ptr(n) == 0x558C18) return "screen-object";
+  const std::string s = Str(n + 0xF4, 64);
+  return s.empty() ? "unnamed" : s;
+}
+
+bool Watched(uintptr_t n) {
+  if (!n || !Readable(n, 0x200)) return false;
+  if (Ptr(n) == 0x558C18) return true;
+  const std::string s = Str(n + 0xF4, 64);
+  return s == "ButProCircuit" || s == "ButSupercross" || s == "ScreenOverCtl";
+}
+
+std::string Links(uintptr_t n) {
+  if (!n || !Readable(n, 0x200)) return "?";
+  char buf[200];
+  std::snprintf(buf, sizeof buf, "prev %s, next %s, parent %s, child %s", NodeName(Ptr(n + 8)).c_str(),
+                NodeName(Ptr(n + 0xC)).c_str(), NodeName(Ptr(n + 0x14)).c_str(), NodeName(Ptr(n + 0x10)).c_str());
+  return buf;
+}
+
+std::string Stack(const void* from) {
+  char chain[120] = {};
   size_t used = 0;
-  const uintptr_t* sp = reinterpret_cast<const uintptr_t*>(&ctrl);
-  for (int k = 0, found = 0; k < 64 && found < 6; ++k) {
+  const uintptr_t* sp = static_cast<const uintptr_t*>(from);
+  for (int k = 0, found = 0; k < 48 && found < 5; ++k) {
     const uintptr_t v = sp[k];
     if (v > 0x401000 && v < 0x550000) {
       used += std::snprintf(chain + used, sizeof chain - used, " %06X", static_cast<unsigned>(v));
       ++found;
     }
   }
-  patch::Log("MenuMaX: the game adds control %s (%08X) to dialog %08X %s: %s (open walks %d); stack%s", name.c_str(),
-             static_cast<unsigned>(ctrl), static_cast<unsigned>(dialog), DtmOf(dialog).c_str(),
-             parent ? "linked" : "NOT LINKED", walks_before, chain);
-  return result;
+  return chain;
+}
+
+void TreeLog(const char* what, uintptr_t node, uintptr_t other, uintptr_t ret, int result, const void* sp) {
+  if (g_tree_logs >= 300) return;
+  ++g_tree_logs;
+  patch::Log("MenuMaX: tree: %s %s (%08X)%s%s from %06X -> %d; now %s; walks %d; stack%s", what, NodeName(node).c_str(),
+             static_cast<unsigned>(node), other ? " / " : "", other ? NodeName(other).c_str() : "",
+             static_cast<unsigned>(ret), result, Links(node).c_str(), *reinterpret_cast<const int*>(0x661690),
+             Stack(sp).c_str());
+}
+
+int __fastcall TreeAddHook(uintptr_t list, void* edx, uintptr_t ctrl, int a) {
+  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  using Fn = int(__fastcall*)(uintptr_t, void*, uintptr_t, int);
+  const int r = reinterpret_cast<Fn>(g_tr_add)(list, edx, ctrl, a);
+  if (Watched(ctrl)) TreeLog("add child of", ctrl, list, ret, r, &ctrl);
+  return r;
+}
+
+int __fastcall TreeUnlinkHook(uintptr_t ctrl, void* edx) {
+  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  const bool w = Watched(ctrl);
+  const std::string before = w ? Links(ctrl) : std::string();
+  using Fn = int(__fastcall*)(uintptr_t, void*);
+  const int r = reinterpret_cast<Fn>(g_tr_unlink)(ctrl, edx);
+  if (w) {
+    if (g_tree_logs < 300) patch::Log("MenuMaX: tree: before unlink %s: %s", NodeName(ctrl).c_str(), before.c_str());
+    TreeLog("unlink", ctrl, 0, ret, r, &ctrl);
+  }
+  return r;
+}
+
+int __fastcall TreeAfterHook(uintptr_t ctrl, void* edx, uintptr_t target, int a) {
+  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  using Fn = int(__fastcall*)(uintptr_t, void*, uintptr_t, int);
+  const int r = reinterpret_cast<Fn>(g_tr_after)(ctrl, edx, target, a);
+  if (Watched(ctrl) || Watched(target)) TreeLog("insert after", ctrl, target, ret, r, &ctrl);
+  return r;
+}
+
+int __fastcall TreeBeforeHook(uintptr_t ctrl, void* edx, uintptr_t target, int a) {
+  const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  using Fn = int(__fastcall*)(uintptr_t, void*, uintptr_t, int);
+  const int r = reinterpret_cast<Fn>(g_tr_before)(ctrl, edx, target, a);
+  if (Watched(ctrl) || Watched(target)) {
+    TreeLog("insert before", ctrl, target, ret, r, &ctrl);
+    if (Readable(target, 0x200) && g_tree_logs < 300)
+      patch::Log("MenuMaX: tree:   target %s now %s", NodeName(target).c_str(), Links(target).c_str());
+  }
+  return r;
+}
+
+// Copies the first `n` bytes of the game's function (position independent:
+// they only read absolute addresses) and jumps back after them.
+uint8_t* Hook(uintptr_t at, const uint8_t* orig, size_t n, void* hook, const char* what) {
+  if (!patch::Matches(at, orig, n)) {
+    patch::Log("MenuMaX: tree diagnostics: %s not hooked (unexpected code at %06X)", what, static_cast<unsigned>(at));
+    return nullptr;
+  }
+  uint8_t* t = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+  if (!t) return nullptr;
+  std::memcpy(t, orig, n);
+  t[n] = 0xE9;
+  const int32_t rel = static_cast<int32_t>(at + n - (reinterpret_cast<uintptr_t>(t) + n + 5));
+  std::memcpy(t + n + 1, &rel, 4);
+  FlushInstructionCache(GetCurrentProcess(), t, 32);
+  patch::Jump(at, reinterpret_cast<uintptr_t>(hook), n);
+  return t;
 }
 }  // namespace
 
 void InstallDiagnostics() {
-  static const uint8_t kOrig[] = {0x56, 0x8B, 0x74, 0x24, 0x08, 0x57};  // push esi; mov esi,[esp+8]; push edi
-  if (!patch::Matches(0x46B7D0, kOrig, sizeof kOrig)) {
-    patch::Log("MenuMaX: add-control diagnostics not installed (unexpected code at 0x46b7d0)");
-    return;
-  }
-  g_add_tramp = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-  if (!g_add_tramp) return;
-  std::memcpy(g_add_tramp, kOrig, sizeof kOrig);
-  g_add_tramp[6] = 0xE9;
-  const int32_t rel = static_cast<int32_t>(0x46B7D6 - (reinterpret_cast<uintptr_t>(g_add_tramp) + 11));
-  std::memcpy(g_add_tramp + 7, &rel, 4);
-  patch::Jump(0x46B7D0, reinterpret_cast<uintptr_t>(&AddControlHook), 6);
-  patch::Log("MenuMaX: logging controls the game adds to dialogs (unlinked ones, Pro Circuit and its neighbours)");
+  // mov eax,[0x661690]; test eax,eax / mov eax,[0x661690]; push esi
+  static const uint8_t kAdd[] = {0xA1, 0x90, 0x16, 0x66, 0x00, 0x85, 0xC0};
+  static const uint8_t kUnlink[] = {0xA1, 0x90, 0x16, 0x66, 0x00, 0x56};
+  g_tr_add = Hook(0x46A070, kAdd, sizeof kAdd, reinterpret_cast<void*>(&TreeAddHook), "add child");
+  g_tr_unlink = Hook(0x46A0D0, kUnlink, sizeof kUnlink, reinterpret_cast<void*>(&TreeUnlinkHook), "unlink");
+  g_tr_after = Hook(0x46A140, kUnlink, sizeof kUnlink, reinterpret_cast<void*>(&TreeAfterHook), "insert after");
+  g_tr_before = Hook(0x46A190, kUnlink, sizeof kUnlink, reinterpret_cast<void*>(&TreeBeforeHook), "insert before");
+  patch::Log("MenuMaX: tree diagnostics: logging links and unlinks of Pro Circuit, Supercross, ScreenOverCtl and the screen object (%d of 4 hooked)",
+             (g_tr_add != nullptr) + (g_tr_unlink != nullptr) + (g_tr_after != nullptr) + (g_tr_before != nullptr));
 }
 
 }  // namespace mg
