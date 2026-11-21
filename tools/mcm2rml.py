@@ -445,9 +445,9 @@ SCREENS = [
     ('messbox1', ['MESSBOX1']),
     ('messbox2', ['MESSBOX2']),
     ('messbox3', ['MESSBOX3']),
-    # No main menu copy: the game's own main menu stays (its pointer, tooltips
-    # and pop-out panels), driven by MenuNav. Add ('mainmenu', ['MAINMENU'])
-    # to make one (no background of its own: the MenuFlag picture shows).
+    # The main menu: no background of its own (MCM2MaX's flag and picture,
+    # MenuFlag, show through).
+    ('mainmenu', ['MAINMENU']),
     ('single', ['SPBASE', 'SPEVENT', 'SPRINFO', 'SPBIKER']),
     ('multi', ['MPBASE', 'MPEVENT', 'MPRINFO', 'MPBIKER', 'MPOPT']),
     ('hostjoin', ['HOSTJOIN']),

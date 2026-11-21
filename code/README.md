@@ -425,7 +425,7 @@ MenuMaX=1
 ; UI\MaX\menus\ (copies of the game's own, made from its layouts) wherever
 ; one copies every dialog the game shows; they work through the game's menus
 ; underneath (which do all the saving), at the window's resolution, with the
-; game's own art read from its UI\*.DAT files. Copies so far:
+; game's own art read from its UI\*.DAT files. Copies so far: main menu,
 ; Options, single player, multiplayer, career, high scores, replays and the
 ; popups; others show the game's own. Needs MenuMaX=1. 0 = the game's own
 ; menus. Default 1.
