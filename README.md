@@ -284,18 +284,17 @@ are welcome.
 
 ## Future work
 
-- **Extend menu system**: More flexibility, more controls while retaining the original aestheic.
+- [IN PROGRESS] **Extend menu system**: More flexibility, more controls while retaining the original design aesthetic.
 - **More performance**: Squeeze every last drop. Move all objects to GPU where possible.
 - **Audio improvements**: Unified, low-latency audio subsystem, replacing DS7 and our current hacks.
-- **More menu options and enhancements**: Less digging in the ini file.
 - **Steamdeck optimisations**: Ensure it's playable and performant on Valve's handheld.
 - **Updated network multiplayer support**: Not sure what form this will take right now.
 
 ## Hypothetical future work
 
-- **Built-in track editor**: pretty much the holy grail.
+- **Built-in track editor**: Pretty much the holy grail.
 - **Split-screen multiplayer**: Needs checked for feasibility.
-- **3D skyboxes**: moving clouds, weather effects. Save this one for if I get really bored.
+- **3D skyboxes**: Moving clouds, weather effects, etc. Save this one for if I get really bored.
 
 ## Installing
 
