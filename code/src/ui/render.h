@@ -22,6 +22,8 @@ class Renderer : public Rml::RenderInterface {
   virtual void End() = 0;
   virtual const char* Name() const = 0;
   Stats& GetStats() { return stats_; }
+  // Clipping rectangles still to log (diagnostics).
+  int log_scissors = 0;
   // Folder that relative picture paths are read from (with trailing slash).
   void SetBaseDir(const std::wstring& dir) { base_dir_ = dir; }
 

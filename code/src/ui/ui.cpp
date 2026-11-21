@@ -276,6 +276,7 @@ struct State {
   // Statistics (logged every few seconds while open).
   unsigned frames = 0, key_events = 0, clicks = 0, saves = 0, reloads = 0;
   DWORD last_report = 0, opened_at = 0;
+  DWORD dump_at = 0;  // when to log the open screens' elements (0: not)
 };
 State g;
 
@@ -1128,6 +1129,7 @@ void Mirror() {
       l.opaque = g.index_info[w].first;
       l.dialogs = g.index_info[w].second;
       patch::Log("MenuMaX: menus\\%s.rml loaded in %lu ms", w.c_str(), static_cast<unsigned long>(GetTickCount() - t0));
+      g.dump_at = GetTickCount() + 1500;
     }
     next.push_back(l);
   }
@@ -1695,6 +1697,36 @@ void DrawPointer(const Target& t, float dp) {
   g.render->ReleaseGeometry(geo);
 }
 
+// Once, 1.5 s after a screen loads: where every element with an id is and
+// whether it is drawn (finding screens that show up blank).
+void DumpElement(Rml::Element* e, int depth, int& lines) {
+  if (lines >= 400) return;
+  if (!e->GetId().empty()) {
+    ++lines;
+    const Rml::Vector2f at = e->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const Rml::Vector2f size = e->GetBox().GetSize(Rml::BoxArea::Border);
+    const Rml::Property* dec = e->GetLocalProperty("decorator");
+    patch::Log("MenuMaX: element %*s%s: %.0f,%.0f %.0fx%.0f px, %s%s, opacity %.2f, display %d, visibility %d, z %.0f%s%s",
+               depth * 2, "", e->GetId().c_str(), at.x, at.y, size.x, size.y, e->IsVisible(true) ? "visible" : "NOT visible",
+               e->IsClassSet("game-hidden") ? " (game-hidden)" : "", e->GetComputedValues().opacity(),
+               static_cast<int>(e->GetComputedValues().display()), static_cast<int>(e->GetComputedValues().visibility()),
+               e->GetZIndex(), dec ? ", decorator " : "", dec ? dec->ToString().c_str() : "");
+  }
+  for (int i = 0; i < e->GetNumChildren(); ++i) DumpElement(e->GetChild(i), depth + (e->GetId().empty() ? 0 : 1), lines);
+}
+
+void DumpScreens() {
+  int lines = 0;
+  patch::Log("MenuMaX: elements of the open screens (%u layers), %u scissor rectangles last frame:",
+             static_cast<unsigned>(g.layers.size()), g.render->GetStats().scissors);
+  for (Layer& l : g.layers)
+    if (l.doc) {
+      patch::Log("MenuMaX: screen %s%s, %d children", l.file.c_str(), l.doc->IsVisible() ? "" : " (NOT visible)", l.doc->GetNumChildren());
+      DumpElement(l.doc, 0, lines);
+    }
+  g.render->log_scissors = 40;  // and the next frame's clipping
+}
+
 void Report(bool force) {
   const DWORD now = GetTickCount();
   if (!force && now - g.last_report < 5000) return;
@@ -1888,6 +1920,10 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
   EndDraw();
   DrawPointer(t, dp);
   ++g.frames;
+  if (g.dump_at && static_cast<int>(GetTickCount() - g.dump_at) >= 0) {
+    g.dump_at = 0;
+    DumpScreens();
+  }
   Report(false);
 }
 

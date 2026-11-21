@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "../dd/backend.h"
+#include "../patch.h"
 
 namespace ui {
 
@@ -285,6 +286,7 @@ void RenderD3D11::ReleaseTexture(Rml::TextureHandle texture) {
 }
 
 void RenderD3D11::EnableScissorRegion(bool enable) {
+  if (log_scissors > 0 && enable != scissor_) patch::Log("MenuMaX: clipping %s", enable ? "on" : "off");
   scissor_ = enable;
   if (ctx_) ctx_->RSSetState(enable ? raster_scissor_ : raster_);
 }
@@ -294,6 +296,10 @@ void RenderD3D11::SetScissorRegion(Rml::Rectanglei region) {
   D3D11_RECT r{region.Left(), region.Top(), region.Right(), region.Bottom()};
   ctx_->RSSetScissorRects(1, &r);
   ++stats_.scissors;
+  if (log_scissors > 0) {
+    --log_scissors;
+    patch::Log("MenuMaX: clipping to %ld,%ld - %ld,%ld (target %ux%u)", r.left, r.top, r.right, r.bottom, width_, height_);
+  }
 }
 
 void RenderD3D11::SetTransform(const Rml::Matrix4f* transform) {
