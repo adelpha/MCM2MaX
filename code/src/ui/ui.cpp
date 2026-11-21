@@ -1683,6 +1683,12 @@ void DrawGameWindows(const Target& t) {
   if (sw <= 0 || sh <= 0) return;
   const double sx = static_cast<double>(f.dst_rect.right - f.dst_rect.left) / sw;
   const double sy = static_cast<double>(f.dst_rect.bottom - f.dst_rect.top) / sh;
+  // An open drop-down list is drawn by the screen and can lie over the
+  // window (the track list opens upwards over the preview): no window then.
+  for (GameBind& b : g.game) {
+    auto* sel = b.ui == GameBind::kSelect ? dynamic_cast<Rml::ElementFormControlSelect*>(b.el) : nullptr;
+    if (sel && sel->IsSelectBoxVisible()) return;
+  }
   for (GameBind& b : g.game) {
     if (!b.window) continue;
     const bool show = b.seen && b.last.shown && b.el->IsVisible(true) && b.el->GetOwnerDocument() &&
