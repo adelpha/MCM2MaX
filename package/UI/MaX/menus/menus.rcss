@@ -75,6 +75,13 @@ body {
 #max-tooltip { position: absolute; z-index: 100; padding: 2dp 5dp; background-color: #fff8d0;
   border: 1dp #000000; color: #000000; font-size: 12dp; font-effect: none; white-space: nowrap; pointer-events: none; }
 
+/* A screen's tooltip area (an element with id="max-tooltip-area"): the
+   tooltip of the control pointed at or picked is written here at once, and
+   no floating tooltip is shown. Main menu: the empty strip under the screen. */
+#max-tooltip-area { left: 201dp; top: 388dp; width: 270dp; height: 48dp; display: flex; align-items: center;
+  justify-content: center; text-align: center; color: #ffffff; font-size: 14dp; white-space: normal;
+  font-effect: shadow(1.5dp 1.5dp #000000); pointer-events: none; }
+
 /* Edit boxes. */
 .edit { padding-top: 3dp; }
 

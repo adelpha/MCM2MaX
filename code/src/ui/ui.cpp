@@ -1978,16 +1978,40 @@ namespace {
 
 // The tooltip (title=) of the control under the pointer, after it rests
 // there for half a second, in #max-tooltip of that control's screen.
+// The element (or one around it) with a title=, from e up.
+const Rml::Element* Titled(Rml::Element* e, std::string* text) {
+  for (; e; e = e->GetParentNode())
+    if (e->HasAttribute("title")) {
+      *text = e->GetAttribute<Rml::String>("title", "");
+      return e;
+    }
+  return nullptr;
+}
+
 void Tooltip(float dp) {
   const Rml::Element* owner = nullptr;
   std::string text;
-  if (!g.capture && g.pointer_set)
-    for (Rml::Element* e = g.context->GetHoverElement(); e; e = e->GetParentNode())
-      if (e->HasAttribute("title")) {
-        owner = e;
-        text = e->GetAttribute<Rml::String>("title", "");
-        break;
+  if (!g.capture && g.pointer_set) owner = Titled(g.context->GetHoverElement(), &text);
+  // A screen with a tooltip area (id="max-tooltip-area", e.g. the main menu):
+  // the text of the control pointed at, else the one picked with the keys or
+  // a pad, goes there at once; no floating tooltip.
+  {
+    Rml::ElementDocument* in = owner ? const_cast<Rml::Element*>(owner)->GetOwnerDocument() : g.doc;
+    Rml::Element* area = in ? in->GetElementById("max-tooltip-area") : nullptr;
+    if (area) {
+      std::string t = text;
+      if (!owner && !g.capture) Titled(g.context->GetFocusElement(), &t);
+      const Rml::String rml = Rml::StringUtilities::EncodeRml(t);
+      if (area->GetInnerRML() != rml) {
+        area->SetInnerRML(rml);
+        if (GetConfig().menu_log) patch::Log("MenuMaX: tooltip area \"%s\"", t.c_str());
       }
+      for (Rml::ElementDocument* d : Docs())
+        if (Rml::Element* tip = d->GetElementById("max-tooltip")) tip->SetProperty("display", "none");
+      g.tip_owner = nullptr;
+      return;
+    }
+  }
   const DWORD now = GetTickCount();
   if (owner != g.tip_owner) {
     g.tip_owner = owner;
