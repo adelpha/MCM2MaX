@@ -2001,10 +2001,17 @@ void Tooltip(float dp) {
     if (area) {
       std::string t = text;
       if (!owner && !g.capture) Titled(g.context->GetFocusElement(), &t);
-      const Rml::String rml = Rml::StringUtilities::EncodeRml(t);
-      if (area->GetInnerRML() != rml) {
-        area->SetInnerRML(rml);
-        if (GetConfig().menu_log) patch::Log("MenuMaX: tooltip area \"%s\"", t.c_str());
+      if (area->GetAttribute<Rml::String>("tip", "") != t) {
+        area->SetAttribute("tip", t);
+        area->SetInnerRML(t.empty() ? Rml::String() : "<p>" + Rml::StringUtilities::EncodeRml(t) + "</p>");
+        // Text that wraps gets class two-lines (centred by the screen's style).
+        area->SetClass("two-lines", false);
+        if (!t.empty()) {
+          area->GetOwnerDocument()->UpdateDocument();
+          if (Rml::Element* line = area->GetFirstChild())
+            area->SetClass("two-lines", line->GetBox().GetSize(Rml::BoxArea::Content).y > 20.0f * dp);
+        }
+        if (GetConfig().menu_log) patch::Log("MenuMaX: tooltip area \"%s\"%s", t.c_str(), area->IsClassSet("two-lines") ? " (2 lines)" : "");
       }
       for (Rml::ElementDocument* d : Docs())
         if (Rml::Element* tip = d->GetElementById("max-tooltip")) tip->SetProperty("display", "none");
