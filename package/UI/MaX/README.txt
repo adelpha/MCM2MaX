@@ -88,6 +88,13 @@ Each element is tied to the game's control of the same name, on its dialog:
   game-if="Name"  shown only while the game shows that control
   game-window     (with game="Name") the game's own picture of that control
                   shows through here, e.g. the track preview the game draws
+  game-focus="sel" (on a pop-out panel with game="Name") when the panel opens,
+                  the element inside it matching the selector sel is picked
+                  and pointed at, e.g. game-focus="#mainmenu-ButBaja"
+  game-close="C"  (on a pop-out panel) while it is open, Esc / B clicks the
+                  game's control C (e.g. the icon that opened it)
+  id="max-tooltip-area"  the screen's tooltips are written into this element
+                  at once (no floating tooltip), e.g. the main menu's strip
 
 Pictures can be the game's own, read from its UI\<ARCHIVE>.DAT files:
   decorator: image(/dat/OPTBASE/Options/OptTab01.tga);

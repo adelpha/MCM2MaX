@@ -196,6 +196,7 @@ struct GameBind {
   // frames it has waited for its animation. -1: not waiting.
   int anim_wait = -1;
   bool was_live = false;
+  bool vis_prev = false;  // shown last frame (game-focus: the first frame shown)
   // The show animation's frame when it began: the game can leave its frame
   // counter on the last frame until the first tick (Multiplayer, before its
   // network check stalls the game for seconds). Hidden until it moves on.
@@ -262,6 +263,10 @@ struct State {
   bool mirror = false;       // g.doc is the top of `layers` (not a screen opened by name)
   DWORD race_mirror_at = 0;  // the game's dialogs last looked at in a race
   long dialog_shows_seen = 0;  // g_max_dialog_shows when last looked
+  // game-focus: a panel just opened, its control to pick.
+  Rml::Element* focus_root = nullptr;
+  std::string focus_sel;
+  DWORD focus_since = 0;
   // A copied game dialog just made (0x46ace0): presents held until its copy
   // is up (at most 250 ms), so the game's own never reaches the screen.
   std::string hold_dtm;
@@ -569,6 +574,16 @@ void SyncOne(GameBind& b, DWORD now) {
     b.was_live = live;
   }
   b.el->SetClass("game-hidden", !visible);
+  // game-focus="selector" on a pop-out panel: when it opens, the control
+  // matching selector inside it is picked and pointed at (once it shows).
+  if (visible && !b.vis_prev && b.el->HasAttribute("game-focus")) {
+    g.focus_root = b.el;
+    g.focus_sel = b.el->GetAttribute<Rml::String>("game-focus", "");
+    g.focus_since = now;
+    patch::Log("MenuMaX: game control %s opened: %s to be picked", b.name.c_str(), g.focus_sel.c_str());
+  }
+  if (!visible && g.focus_root == b.el) g.focus_root = nullptr;
+  b.vis_prev = visible;
   if (found && animated) SyncAnim(b, i);
   if (!found) {
     if (b.seen) patch::Log("MenuMaX: game control %s gone", b.name.c_str());
@@ -997,6 +1012,7 @@ bool InitRml() {
 void CloseMirror(const char* why);
 
 void CloseDoc() {
+  g.focus_root = nullptr;
   if (g.mirror) {
     CloseMirror("another screen opens");
     return;
@@ -1065,6 +1081,7 @@ void ReadIndex() {
 }
 
 void CloseMirror(const char* why) {
+  g.focus_root = nullptr;
   if (!g.mirror) return;
   patch::Log("MenuMaX: game menu copies closed (%s)", why);
   for (Layer& l : g.layers) {
@@ -1473,6 +1490,15 @@ void Press(Rml::Input::KeyIdentifier k, const char* from) {
     return;
   }
   if (k == KI_ESCAPE) {
+    // game-close="Control" on a pop-out panel: while it is open, Esc / B
+    // clicks that control (the main menu's panels: their own icon, Close).
+    for (const GameBind& b : g.game) {
+      if (!b.el->HasAttribute("game-close") || b.el->IsClassSet("game-hidden") || !b.el->IsVisible(true)) continue;
+      const std::string c = b.el->GetAttribute<Rml::String>("game-close", "");
+      patch::Log("MenuMaX: back (%s): panel %s open, the game's %s clicked", from, b.name.c_str(), c.c_str());
+      mg::Click(c.c_str(), b.scope);
+      return;
+    }
     if (!g.back_control.empty()) {
       patch::Log("MenuMaX: back (%s): the game's %s%s%s", from, g.back_control.c_str(), g.back_dtm.empty() ? "" : " on ",
                  g.back_dtm.c_str());
@@ -2131,6 +2157,21 @@ void PresentFrame(const Target& t, const RECT& game_rect) {
   if (!g.pending.empty() && GetTickCount() - g.last_change > 300) FlushPending("settled");
   Tooltip(dp);
   g.context->Update();
+  if (g.focus_root) {
+    Rml::Element* e = g.focus_root->QuerySelector(g.focus_sel);
+    if (e && e->IsVisible(true) && !e->IsClassSet("game-hidden") && e->GetBox().GetSize().x > 0) {
+      e->Focus(true);
+      g.last_focus = e;
+      PointAt(e);
+      g.context->Update();
+      patch::Log("MenuMaX: %s#%s picked (game-focus), %lu ms after its panel opened", e->GetTagName().c_str(),
+                 e->GetId().c_str(), static_cast<unsigned long>(GetTickCount() - g.focus_since));
+      g.focus_root = nullptr;
+    } else if (GetTickCount() - g.focus_since > 3000) {
+      patch::Log("MenuMaX: game-focus %s: nothing shown to pick after 3 s", g.focus_sel.c_str());
+      g.focus_root = nullptr;
+    }
+  }
   BeginDraw(t);
   g.context->Render();
   EndDraw();
